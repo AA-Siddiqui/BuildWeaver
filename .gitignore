@@ -1,0 +1,12 @@
+node_modules/
+dist/
+build/
+coverage/
+.env
+.env.*
+.pnpm-store/
+.DS_Store
+logs/*.log
+*.tsbuildinfo
+pnpm-debug.log
+.husky/_

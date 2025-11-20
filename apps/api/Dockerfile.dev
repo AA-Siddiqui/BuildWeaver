@@ -1,0 +1,8 @@
+FROM node:18-bullseye-slim
+WORKDIR /workspace
+RUN corepack enable
+COPY package.json pnpm-workspace.yaml tsconfig.base.json tsconfig.json ./
+COPY apps ./apps
+COPY packages ./packages
+RUN pnpm install --ignore-scripts
+CMD ["pnpm", "--filter", "@buildweaver/api", "start:dev"]

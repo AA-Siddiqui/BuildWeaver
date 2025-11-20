@@ -276,6 +276,14 @@ export const NodeInspector: FC<{ nodeId: string }> = ({ nodeId }) => {
 };
 ```
 
+**Color Theme (Tailwind):**
+
+Use the following color palette for UI components, use variables colors can be changed easily:
+#D34E4E
+#F9E7B2
+#DDC57A
+#CE7E5A
+
 **Codegen Adapter:**
 
 ```ts
