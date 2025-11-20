@@ -1,0 +1,564 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://buildweaver.dev/schema/ir.schema.json",
+  "title": "BuildWeaver Project IR",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "metadata",
+    "assets",
+    "dataSources",
+    "dataModels",
+    "pages",
+    "logic"
+  ],
+  "properties": {
+    "version": {
+      "type": "string",
+      "description": "Semantic version of the IR contract."
+    },
+    "metadata": {
+      "$ref": "#/definitions/ProjectMetadata"
+    },
+    "assets": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/Asset"
+      }
+    },
+    "dataSources": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/DataSource"
+      }
+    },
+    "dataModels": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/DataModel"
+      }
+    },
+    "pages": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/Page"
+      }
+    },
+    "logic": {
+      "$ref": "#/definitions/LogicGraph"
+    },
+    "theme": {
+      "$ref": "#/definitions/ThemeTokens"
+    }
+  },
+  "definitions": {
+    "ScalarValue": {
+      "description": "Primitive literal used within props and config.",
+      "anyOf": [
+        { "type": "string" },
+        { "type": "number" },
+        { "type": "boolean" },
+        { "type": "null" }
+      ]
+    },
+    "StringArray": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "MetadataRecord": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/definitions/ScalarValue"
+      }
+    },
+    "ProjectMetadata": {
+      "type": "object",
+      "required": [
+        "id",
+        "name",
+        "createdAt",
+        "updatedAt",
+        "generator",
+        "targetFrameworks",
+        "defaultLocale",
+        "locales"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "slug": { "type": "string" },
+        "description": { "type": "string" },
+        "tags": { "$ref": "#/definitions/StringArray" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" },
+        "generator": {
+          "type": "object",
+          "required": ["name", "version"],
+          "additionalProperties": false,
+          "properties": {
+            "name": { "type": "string" },
+            "version": { "type": "string" }
+          }
+        },
+        "targetFrameworks": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "react-web",
+              "flutter",
+              "express-api"
+            ]
+          },
+          "minItems": 1
+        },
+        "defaultLocale": { "type": "string" },
+        "locales": {
+          "type": "array",
+          "items": { "type": "string" },
+          "minItems": 1
+        }
+      }
+    },
+    "Asset": {
+      "type": "object",
+      "required": ["id", "type", "name", "source"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "type": {
+          "type": "string",
+          "enum": ["image", "icon", "font", "file"]
+        },
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "source": {
+          "type": "object",
+          "required": ["kind"],
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": ["remote", "inline", "asset-store"]
+            },
+            "uri": { "type": "string" },
+            "data": { "type": "string" },
+            "contentType": { "type": "string" }
+          }
+        },
+        "metadata": { "$ref": "#/definitions/MetadataRecord" }
+      }
+    },
+    "DataSource": {
+      "type": "object",
+      "required": ["id", "name", "driver", "config"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "provides": { "$ref": "#/definitions/StringArray" },
+        "driver": {
+          "type": "string",
+          "enum": ["rest", "graphql", "static"]
+        },
+        "config": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      }
+    },
+    "DataModel": {
+      "type": "object",
+      "required": ["id", "name", "fields"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "sourceId": { "type": "string" },
+        "fields": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/DataModelField" }
+        }
+      }
+    },
+    "DataModelField": {
+      "type": "object",
+      "required": ["id", "name", "type", "required"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "required": { "type": "boolean" },
+        "type": { "$ref": "#/definitions/DataFieldType" }
+      }
+    },
+    "DataFieldType": {
+      "type": "object",
+      "required": ["kind"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": ["scalar", "reference", "array"]
+        },
+        "scalar": {
+          "type": "string",
+          "enum": [
+            "string",
+            "number",
+            "boolean",
+            "date",
+            "datetime",
+            "image",
+            "json"
+          ]
+        },
+        "modelId": { "type": "string" },
+        "relation": {
+          "type": "string",
+          "enum": ["one", "many"]
+        },
+        "of": { "$ref": "#/definitions/DataFieldType" }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "kind": { "const": "scalar" } }
+          },
+          "then": {
+            "required": ["scalar"]
+          }
+        },
+        {
+          "if": {
+            "properties": { "kind": { "const": "reference" } }
+          },
+          "then": {
+            "required": ["modelId", "relation"]
+          }
+        },
+        {
+          "if": {
+            "properties": { "kind": { "const": "array" } }
+          },
+          "then": {
+            "required": ["of"]
+          }
+        }
+      ]
+    },
+    "BindingReference": {
+      "type": "object",
+      "required": ["kind", "nodeId"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": ["data", "logic", "ui", "asset"]
+        },
+        "nodeId": { "type": "string" },
+        "portId": { "type": "string" },
+        "path": { "type": "string" },
+        "fallback": { "$ref": "#/definitions/ScalarValue" }
+      }
+    },
+    "EventArgument": {
+      "type": "object",
+      "required": ["name", "source"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string" },
+        "source": { "$ref": "#/definitions/BindingReference" }
+      }
+    },
+    "EventMapping": {
+      "type": "object",
+      "required": ["event", "targetNodeId", "targetPortId"],
+      "additionalProperties": false,
+      "properties": {
+        "event": { "type": "string" },
+        "description": { "type": "string" },
+        "targetNodeId": { "type": "string" },
+        "targetPortId": { "type": "string" },
+        "arguments": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/EventArgument" }
+        }
+      }
+    },
+    "StyleDeclaration": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "classes": { "$ref": "#/definitions/StringArray" },
+        "tokens": { "$ref": "#/definitions/StringArray" },
+        "inline": {
+          "type": "object",
+          "additionalProperties": {
+            "anyOf": [
+              { "type": "string" },
+              { "type": "number" }
+            ]
+          }
+        }
+      }
+    },
+    "UITreeNode": {
+      "type": "object",
+      "required": [
+        "id",
+        "key",
+        "component",
+        "label",
+        "props",
+        "bindings",
+        "events",
+        "children"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "key": { "type": "string" },
+        "component": { "type": "string" },
+        "label": { "type": "string" },
+        "variant": { "type": "string" },
+        "description": { "type": "string" },
+        "slot": { "type": "string" },
+        "props": {
+          "type": "object",
+          "additionalProperties": {
+            "anyOf": [
+              { "$ref": "#/definitions/ScalarValue" },
+              {
+                "type": "array",
+                "items": { "$ref": "#/definitions/ScalarValue" }
+              },
+              {
+                "type": "object",
+                "additionalProperties": {
+                  "$ref": "#/definitions/ScalarValue"
+                }
+              }
+            ]
+          }
+        },
+        "bindings": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/definitions/BindingReference" }
+        },
+        "events": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/EventMapping" }
+        },
+        "style": { "$ref": "#/definitions/StyleDeclaration" },
+        "children": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/UITreeNode" }
+        }
+      }
+    },
+    "AuthProvider": {
+      "type": "object",
+      "required": ["type"],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["email", "google", "github", "custom"]
+        },
+        "issuer": { "type": "string" },
+        "clientId": { "type": "string" },
+        "scopes": { "$ref": "#/definitions/StringArray" }
+      }
+    },
+    "AuthRequirement": {
+      "type": "object",
+      "required": ["strategy", "providers"],
+      "additionalProperties": false,
+      "properties": {
+        "strategy": {
+          "type": "string",
+          "enum": ["public", "jwt", "session"]
+        },
+        "providers": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/AuthProvider" }
+        },
+        "redirectTo": { "type": "string" },
+        "allowGuests": { "type": "boolean" },
+        "metadata": { "$ref": "#/definitions/MetadataRecord" }
+      }
+    },
+    "PaymentRequirement": {
+      "type": "object",
+      "required": ["provider", "planId"],
+      "additionalProperties": false,
+      "properties": {
+        "provider": {
+          "type": "string",
+          "enum": ["xpay", "custom"]
+        },
+        "planId": { "type": "string" },
+        "successPath": { "type": "string" },
+        "cancelPath": { "type": "string" },
+        "metadata": { "$ref": "#/definitions/MetadataRecord" }
+      }
+    },
+    "BlockConfig": {
+      "type": "object",
+      "required": ["type"],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["auth-guard", "paywall", "layout", "custom"]
+        },
+        "entryNodeId": { "type": "string" },
+        "exits": { "$ref": "#/definitions/StringArray" },
+        "auth": { "$ref": "#/definitions/AuthRequirement" },
+        "payment": { "$ref": "#/definitions/PaymentRequirement" },
+        "metadata": { "$ref": "#/definitions/MetadataRecord" }
+      }
+    },
+    "LogicPort": {
+      "type": "object",
+      "required": ["id", "name", "type"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "type": { "type": "string" },
+        "required": { "type": "boolean" },
+        "acceptsMultiple": { "type": "boolean" },
+        "defaultValue": { "$ref": "#/definitions/ScalarValue" }
+      }
+    },
+    "LogicNode": {
+      "type": "object",
+      "required": ["id", "kind", "label", "handler", "inputs", "outputs"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "kind": {
+          "type": "string",
+          "enum": ["data", "ui", "action", "block", "system"]
+        },
+        "label": { "type": "string" },
+        "codeName": { "type": "string" },
+        "handler": { "type": "string" },
+        "description": { "type": "string" },
+        "category": { "type": "string" },
+        "inputs": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/LogicPort" }
+        },
+        "outputs": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/LogicPort" }
+        },
+        "config": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "block": { "$ref": "#/definitions/BlockConfig" }
+      }
+    },
+    "PortReference": {
+      "type": "object",
+      "required": ["nodeId", "portId"],
+      "additionalProperties": false,
+      "properties": {
+        "nodeId": { "type": "string" },
+        "portId": { "type": "string" }
+      }
+    },
+    "LogicEdge": {
+      "type": "object",
+      "required": ["id", "source", "target"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "description": { "type": "string" },
+        "source": { "$ref": "#/definitions/PortReference" },
+        "target": { "$ref": "#/definitions/PortReference" }
+      }
+    },
+    "LogicGraph": {
+      "type": "object",
+      "required": ["nodes", "edges"],
+      "additionalProperties": false,
+      "properties": {
+        "nodes": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/LogicNode" }
+        },
+        "edges": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/LogicEdge" }
+        }
+      }
+    },
+    "BlockInstance": {
+      "type": "object",
+      "required": ["nodeId", "slot", "order"],
+      "additionalProperties": false,
+      "properties": {
+        "nodeId": { "type": "string" },
+        "slot": {
+          "type": "string",
+          "enum": ["page", "layout", "custom"]
+        },
+        "order": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "Page": {
+      "type": "object",
+      "required": ["id", "name", "route", "entry"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "route": { "type": "string" },
+        "description": { "type": "string" },
+        "seo": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        },
+        "entry": { "$ref": "#/definitions/UITreeNode" },
+        "auth": { "$ref": "#/definitions/AuthRequirement" },
+        "payment": { "$ref": "#/definitions/PaymentRequirement" },
+        "blocks": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/BlockInstance" }
+        }
+      }
+    },
+    "ThemeTokens": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "colors": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        },
+        "spacingScale": {
+          "type": "array",
+          "items": { "type": "number" }
+        },
+        "typography": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "fontFamilies": { "$ref": "#/definitions/StringArray" },
+            "baseSize": { "type": "number" }
+          }
+        }
+      }
+    }
+  }
+}
