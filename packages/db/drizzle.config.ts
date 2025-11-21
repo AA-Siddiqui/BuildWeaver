@@ -1,14 +1,18 @@
 import { defineConfig } from 'drizzle-kit';
+import dotenv from 'dotenv';
+import path from 'path';
+
+// Load the repository root .env so CLI tools like drizzle-kit pick up DB credentials
+dotenv.config({ path: path.resolve(__dirname, '../../.env') });
+
+const connectionString =
+  process.env.DB_URL ?? process.env.DATABASE_URL ?? 'postgres://postgres:postgres@localhost:5432/buildweaver';
 
 export default defineConfig({
-  out: './packages/db/migrations',
-  schema: './packages/db/src/schema.ts',
-  driver: 'pg',
+  out: './migrations',
+  schema: './src/schema.ts',
+  dialect: 'postgresql',
   dbCredentials: {
-    host: process.env.DB_HOST ?? 'localhost',
-    port: Number(process.env.DB_PORT ?? '5432'),
-    user: process.env.DB_USER ?? 'postgres',
-    password: process.env.DB_PASSWORD ?? 'postgres',
-    database: process.env.DB_NAME ?? 'buildweaver'
+    url: connectionString
   }
 });

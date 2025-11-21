@@ -2,7 +2,10 @@
   "moduleFileExtensions": ["js", "json", "ts"],
   "rootDir": "../",
   "testEnvironment": "node",
-  "testRegex": ".*\.e2e-spec\\.ts$",
+  "testRegex": ".*\\.e2e-spec\\.ts$",
+  "moduleNameMapper": {
+    "^@buildweaver/(.*)$": "<rootDir>/../../packages/$1/src"
+  },
   "transform": {
     "^.+\\.(t|j)s$": ["ts-jest", {"tsconfig": "./tsconfig.json"}]
   }
