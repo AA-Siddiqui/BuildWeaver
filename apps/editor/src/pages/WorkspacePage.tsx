@@ -1,4 +1,5 @@
 import { FormEvent, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { projectsApi } from '../lib/api-client';
 import { useAuthStore } from '../stores/auth-store';
@@ -7,6 +8,7 @@ import { Project } from '../types/api';
 const formDefaults = { name: '', description: '' };
 
 export const WorkspacePage = () => {
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const user = useAuthStore((state) => state.user);
   const [form, setForm] = useState(() => ({ ...formDefaults }));
@@ -110,6 +112,13 @@ export const WorkspacePage = () => {
                       <p className="text-sm text-bw-platinum/70">{project.description || 'No description yet'}</p>
                     </div>
                     <div className="flex gap-2 text-sm">
+                      <button
+                        type="button"
+                        className="rounded-full border border-bw-sand/60 px-3 py-1 text-bw-sand transition hover:bg-bw-sand hover:text-bw-ink"
+                        onClick={() => navigate(`/app/${project.id}`)}
+                      >
+                        Open
+                      </button>
                       <button
                         type="button"
                         className="rounded-full border border-white/20 px-3 py-1 text-white transition hover:bg-white/10"

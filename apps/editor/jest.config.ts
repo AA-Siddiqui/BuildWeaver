@@ -7,6 +7,7 @@ const config: Config = {
   moduleNameMapper: {
     '\\.(css|less|scss|sass)$': 'identity-obj-proxy'
   },
+  transformIgnorePatterns: ['/node_modules/(?!(@measured/puck|@dnd-kit|@preact)/)'],
   setupFilesAfterEnv: ['<rootDir>/src/test/setupTests.ts']
 };
 

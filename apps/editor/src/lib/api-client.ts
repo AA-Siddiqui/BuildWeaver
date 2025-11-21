@@ -1,5 +1,6 @@
 import { useAuthStore } from '../stores/auth-store';
 import { AuthUser, Project } from '../types/api';
+import type { PageBuilderState, PageDocument, PageDynamicInput, ProjectGraphSnapshot } from '../types/api';
 
 interface ApiSuccess<T> {
   success: true;
@@ -91,4 +92,32 @@ export const projectsApi = {
   update: (projectId: string, body: { name?: string; description?: string }) =>
     apiFetch<{ project: Project }>(`/projects/${projectId}`, { method: 'PATCH', body: serialize(body) }),
   remove: (projectId: string) => apiFetch(`/projects/${projectId}`, { method: 'DELETE' })
+};
+
+export const projectGraphApi = {
+  get: (projectId: string) => apiFetch<{ graph: ProjectGraphSnapshot }>(`/projects/${projectId}/graph`),
+  save: (projectId: string, graph: ProjectGraphSnapshot) =>
+    apiFetch<{ graph: ProjectGraphSnapshot }>(`/projects/${projectId}/graph`, {
+      method: 'PUT',
+      body: serialize(graph)
+    })
+};
+
+type UpdatePagePayload = {
+  name?: string;
+  builderState?: PageBuilderState;
+  dynamicInputs?: PageDynamicInput[];
+};
+
+export const projectPagesApi = {
+  list: (projectId: string) => apiFetch<{ pages: PageDocument[] }>(`/projects/${projectId}/pages`),
+  create: (projectId: string, body: { name: string }) =>
+    apiFetch<{ page: PageDocument }>(`/projects/${projectId}/pages`, { method: 'POST', body: serialize(body) }),
+  get: (projectId: string, pageId: string) =>
+    apiFetch<{ page: PageDocument }>(`/projects/${projectId}/pages/${pageId}`),
+  update: (projectId: string, pageId: string, body: UpdatePagePayload) =>
+    apiFetch<{ page: PageDocument }>(`/projects/${projectId}/pages/${pageId}`, {
+      method: 'PUT',
+      body: serialize(body)
+    })
 };

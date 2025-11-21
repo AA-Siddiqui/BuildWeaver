@@ -3,6 +3,10 @@ import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { App } from './App';
 
+jest.mock('@measured/puck', () => ({
+  Puck: () => null
+}));
+
 describe('App', () => {
   it('renders hero headline and CTA', () => {
     const queryClient = new QueryClient();
