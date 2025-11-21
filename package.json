@@ -8,7 +8,7 @@
     "node": ">=18.18.0"
   },
   "scripts": {
-    "dev": "concurrently \"pnpm --filter @buildweaver/editor dev\" \"pnpm --filter @buildweaver/api start:dev\"",
+    "dev": "concurrently --names frontend,backend --prefix-colors blue,green \"pnpm --filter @buildweaver/editor dev\" \"pnpm --filter @buildweaver/api start:dev\"",
     "prepare": "husky install",
     "lint": "pnpm -r lint",
     "test": "pnpm -r test",

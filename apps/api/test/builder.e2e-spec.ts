@@ -81,6 +81,18 @@ describe('Builder surfaces (e2e)', () => {
       .send(graphPayload);
     expect(saveGraphRes.status).toBe(200);
     expect(saveGraphRes.body.data.graph.nodes).toHaveLength(2);
+    expect(saveGraphRes.body.data.graph.nodes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: graphPayload.nodes[0].id,
+          position: graphPayload.nodes[0].position
+        }),
+        expect.objectContaining({
+          id: graphPayload.nodes[1].id,
+          data: expect.objectContaining({ pageId: landingPageId })
+        })
+      ])
+    );
 
     const dynamicInputs = [{ id: randomUUID(), label: 'Hero Title', dataType: 'string' }];
     const updatePageRes = await request(app.getHttpServer())
@@ -97,6 +109,7 @@ describe('Builder surfaces (e2e)', () => {
     const refreshedPageNode = refreshedGraph.body.data.graph.nodes.find(
       (node: { data: { pageId: string } }) => node.data.pageId === landingPageId
     );
+    expect(refreshedPageNode.position).toEqual(graphPayload.nodes[1].position);
     expect(refreshedPageNode.data.inputs).toHaveLength(1);
     expect(refreshedPageNode.data.inputs[0].label).toBe('Hero Title');
   });

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Puck } from '@measured/puck';
-import type { Config, Data } from '@measured/puck';
+import type { ComponentData, Config, Content, Data } from '@measured/puck';
 import '@measured/puck/puck.css';
 import type { PageBuilderState, PageDocument, PageDynamicInput } from '../types/api';
 import { projectPagesApi } from '../lib/api-client';
@@ -18,6 +18,48 @@ const createEmptyBuilderState = (): Data =>
   } as Data);
 
 const toPuckValue = (state?: PageBuilderState): Data => (state as Data) ?? createEmptyBuilderState();
+
+const cloneComponent = (component: ComponentData): ComponentData => ({
+  ...component,
+  props: { ...(component.props ?? {}) }
+});
+
+const cloneContent = (items: ComponentData[] = []): ComponentData[] => items.map((item) => cloneComponent(item));
+
+const cloneZoneEntries = (zones?: Record<string, Content> | Map<string, Content>): Record<string, ComponentData[]> | undefined => {
+  if (!zones) {
+    return undefined;
+  }
+
+  const normalized: Record<string, ComponentData[]> = {};
+  if (zones instanceof Map) {
+    zones.forEach((zoneContent, key) => {
+      normalized[key] = cloneContent(Array.isArray(zoneContent) ? (zoneContent as ComponentData[]) : Array.from(zoneContent ?? []));
+    });
+    return normalized;
+  }
+
+  Object.entries(zones).forEach(([key, zoneContent]) => {
+    normalized[key] = cloneContent(zoneContent as ComponentData[]);
+  });
+  return normalized;
+};
+
+export const normalizeBuilderStateForSave = (state: Data): PageBuilderState => {
+  const zones = cloneZoneEntries(state.zones as Record<string, Content> | Map<string, Content> | undefined);
+  const result: PageBuilderState = {
+    root: {
+      ...(state.root ?? { id: 'root', props: {}, children: [] })
+    },
+    content: cloneContent(state.content)
+  };
+
+  if (zones && Object.keys(zones).length > 0) {
+    (result as Data).zones = zones;
+  }
+
+  return result;
+};
 
 const randomId = () => {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -144,7 +186,7 @@ export const PageBuilderPage = () => {
   const saveMutation = useMutation({
     mutationFn: () =>
       projectPagesApi.update(projectId!, pageId!, {
-        builderState: builderState as PageBuilderState,
+        builderState: normalizeBuilderStateForSave(builderState) as PageBuilderState,
         dynamicInputs
       }),
     onSuccess: ({ page }) => {

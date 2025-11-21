@@ -136,7 +136,9 @@ export class ProjectPagesService {
         id: 'root',
         props: {},
         children: []
-      }
+      },
+      content: [],
+      zones: {}
     };
   }
 }
