@@ -1,5 +1,5 @@
 import type { ComponentData, Content, Data } from '@measured/puck';
-import { normalizeBuilderStateForSave } from './PageBuilderPage';
+import { derivePuckSessionKey, normalizeBuilderStateForSave } from './PageBuilderPage';
 
 jest.mock('@measured/puck', () => ({
   Puck: () => null
@@ -53,5 +53,23 @@ describe('normalizeBuilderStateForSave', () => {
     expect(normalized).not.toBe(state);
     expect(normalizedData.content[0]).not.toBe(component);
     expect((normalizedData.zones?.root?.[0] as ComponentData)).not.toBe(component);
+  });
+});
+
+describe('derivePuckSessionKey', () => {
+  it('uses page id and updatedAt when provided', () => {
+    const key = derivePuckSessionKey({ id: 'page-1', updatedAt: '2025-11-21T12:52:54.675Z' });
+    expect(key).toBe('page-1:2025-11-21T12:52:54.675Z');
+  });
+
+  it('falls back to provided page id when updatedAt is missing', () => {
+    const key = derivePuckSessionKey(undefined, 'fallback-page');
+    expect(key).toBe('fallback-page:initial');
+  });
+
+  it('produces different keys for different timestamps', () => {
+    const first = derivePuckSessionKey({ id: 'page-2', updatedAt: '2025-01-01T00:00:00.000Z' });
+    const second = derivePuckSessionKey({ id: 'page-2', updatedAt: '2025-01-02T00:00:00.000Z' });
+    expect(first).not.toBe(second);
   });
 });

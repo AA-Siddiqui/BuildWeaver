@@ -19,6 +19,33 @@ const createEmptyBuilderState = (): Data =>
 
 const toPuckValue = (state?: PageBuilderState): Data => (state as Data) ?? createEmptyBuilderState();
 
+export const derivePuckSessionKey = (page?: Pick<PageDocument, 'id' | 'updatedAt'>, fallbackPageId?: string): string => {
+  const id = page?.id ?? fallbackPageId ?? 'unknown-page';
+  const updatedAt = page?.updatedAt ?? 'initial';
+  return `${id}:${updatedAt}`;
+};
+
+const getZoneCount = (zones?: Record<string, Content> | Map<string, Content>) => {
+  if (!zones) {
+    return 0;
+  }
+  if (zones instanceof Map) {
+    return zones.size;
+  }
+  return Object.keys(zones).length;
+};
+
+const summarizeBuilderData = (state?: Data) => ({
+  contentCount: Array.isArray(state?.content) ? state.content.length : 0,
+  zoneCount: getZoneCount(state?.zones as Record<string, Content> | Map<string, Content> | undefined)
+});
+
+const logPageBuilderEvent = (message: string, details?: Record<string, unknown>) => {
+  if (typeof console !== 'undefined') {
+    console.info(`[PageBuilder] ${message}`, details ?? '');
+  }
+};
+
 const cloneComponent = (component: ComponentData): ComponentData => ({
   ...component,
   props: { ...(component.props ?? {}) }
@@ -73,6 +100,7 @@ export const PageBuilderPage = () => {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [builderState, setBuilderState] = useState<Data>(createEmptyBuilderState());
+  const [puckSessionKey, setPuckSessionKey] = useState(() => derivePuckSessionKey(undefined, pageId));
   const [dynamicInputs, setDynamicInputs] = useState<PageDynamicInput[]>([]);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [feedback, setFeedback] = useState('');
@@ -83,13 +111,36 @@ export const PageBuilderPage = () => {
     enabled: Boolean(projectId && pageId)
   });
 
+  const hydrateFromPage = useCallback(
+    (incomingPage: PageDocument) => {
+      const hydratedState = toPuckValue(incomingPage.builderState);
+      logPageBuilderEvent('Hydrating builder state from API payload', {
+        pageId: incomingPage.id,
+        summary: summarizeBuilderData(hydratedState)
+      });
+      setBuilderState(hydratedState);
+      setDynamicInputs(incomingPage.dynamicInputs);
+      setHasUnsavedChanges(false);
+      setPuckSessionKey(derivePuckSessionKey(incomingPage, pageId));
+    },
+    [pageId]
+  );
+
   useEffect(() => {
     if (pageQuery.data?.page) {
-      setBuilderState(toPuckValue(pageQuery.data.page.builderState));
-      setDynamicInputs(pageQuery.data.page.dynamicInputs);
-      setHasUnsavedChanges(false);
+      hydrateFromPage(pageQuery.data.page as PageDocument);
     }
-  }, [pageQuery.data?.page]);
+  }, [pageQuery.data?.page, hydrateFromPage]);
+
+  useEffect(() => {
+    if (pageQuery.isError) {
+      logPageBuilderEvent('Failed to load page builder data', {
+        pageId,
+        projectId,
+        error: (pageQuery.error as Error)?.message ?? 'Unknown error'
+      });
+    }
+  }, [pageQuery.error, pageQuery.isError, pageId, projectId]);
 
   const dynamicLabelMap = useMemo(() => {
     const map = new Map<string, string>();
@@ -184,20 +235,33 @@ export const PageBuilderPage = () => {
   }, [bindingOptions, dynamicLabelMap]);
 
   const saveMutation = useMutation({
-    mutationFn: () =>
-      projectPagesApi.update(projectId!, pageId!, {
+    mutationFn: () => {
+      logPageBuilderEvent('Saving page builder changes', {
+        pageId,
+        projectId,
+        summary: summarizeBuilderData(builderState)
+      });
+      return projectPagesApi.update(projectId!, pageId!, {
         builderState: normalizeBuilderStateForSave(builderState) as PageBuilderState,
         dynamicInputs
-      }),
+      });
+    },
     onSuccess: ({ page }) => {
-      setBuilderState(toPuckValue(page.builderState));
-      setDynamicInputs(page.dynamicInputs);
-      setHasUnsavedChanges(false);
+      logPageBuilderEvent('Save succeeded', {
+        pageId: page.id,
+        summary: summarizeBuilderData(page.builderState as Data)
+      });
+      hydrateFromPage(page);
       setFeedback('Saved');
       queryClient.invalidateQueries({ queryKey: ['project-graph', projectId] });
       setTimeout(() => setFeedback(''), 2000);
     },
     onError: (error: unknown) => {
+      logPageBuilderEvent('Save failed', {
+        pageId,
+        projectId,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      });
       setFeedback(error instanceof Error ? error.message : 'Unable to save page');
     }
   });
@@ -205,7 +269,11 @@ export const PageBuilderPage = () => {
   const handleBuilderChange = useCallback((value: Data) => {
     setHasUnsavedChanges(true);
     setBuilderState(value);
-  }, []);
+    logPageBuilderEvent('Builder data changed', {
+      pageId,
+      summary: summarizeBuilderData(value)
+    });
+  }, [pageId]);
 
   const handleDynamicInputChange = useCallback(
     (inputId: string, updates: Partial<PageDynamicInput>) => {
@@ -213,6 +281,7 @@ export const PageBuilderPage = () => {
         current.map((input) => (input.id === inputId ? { ...input, ...updates, label: updates.label ?? input.label } : input))
       );
       setHasUnsavedChanges(true);
+      logPageBuilderEvent('Dynamic input updated', { inputId, updates: Object.keys(updates) });
     },
     []
   );
@@ -220,6 +289,7 @@ export const PageBuilderPage = () => {
   const handleRemoveInput = useCallback((inputId: string) => {
     setDynamicInputs((current) => current.filter((input) => input.id !== inputId));
     setHasUnsavedChanges(true);
+    logPageBuilderEvent('Dynamic input removed', { inputId });
   }, []);
 
   const handleAddDynamicInput = useCallback(() => {
@@ -229,11 +299,13 @@ export const PageBuilderPage = () => {
     }
     setDynamicInputs((current) => current.concat({ id: randomId(), label, dataType: 'string' }));
     setHasUnsavedChanges(true);
+    logPageBuilderEvent('Dynamic input added', { label });
   }, []);
 
   const handleSave = useCallback(() => {
+    logPageBuilderEvent('Save triggered', { pageId, projectId, hasUnsavedChanges });
     saveMutation.mutate();
-  }, [saveMutation]);
+  }, [hasUnsavedChanges, pageId, projectId, saveMutation]);
 
   if (!projectId || !pageId) {
     return (
@@ -334,7 +406,8 @@ export const PageBuilderPage = () => {
             <p className="text-sm text-red-500">{(pageQuery.error as Error)?.message ?? 'Unable to load page'}</p>
           ) : (
             <div className="mx-auto max-w-4xl rounded-3xl border border-gray-200 bg-white p-6 shadow-lg">
-              <Puck config={builderConfig} data={builderState} onChange={handleBuilderChange} />
+              {/* Puck only reads the initial data prop, so key forces a remount when server data changes. */}
+              <Puck key={puckSessionKey} config={builderConfig} data={builderState} onChange={handleBuilderChange} />
             </div>
           )}
         </div>

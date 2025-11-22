@@ -9,6 +9,7 @@ describe('Builder surfaces (e2e)', () => {
   let token: string;
   let projectId: string;
   let defaultPageId: string;
+  let landingPageId: string;
 
   beforeAll(async () => {
     app = await createTestApp();
@@ -50,7 +51,7 @@ describe('Builder surfaces (e2e)', () => {
       .set('Authorization', `Bearer ${token}`)
       .send({ name: 'Landing' });
     expect(createPageRes.status).toBe(201);
-    const landingPageId = createPageRes.body.data.page.id;
+    landingPageId = createPageRes.body.data.page.id;
 
     const graphPayload: ProjectGraphSnapshot = {
       nodes: [
@@ -112,5 +113,49 @@ describe('Builder surfaces (e2e)', () => {
     expect(refreshedPageNode.position).toEqual(graphPayload.nodes[1].position);
     expect(refreshedPageNode.data.inputs).toHaveLength(1);
     expect(refreshedPageNode.data.inputs[0].label).toBe('Hero Title');
+  });
+
+  it('persists builder state and returns it via the API', async () => {
+    expect(landingPageId).toBeDefined();
+    const builderState = {
+      root: {
+        id: 'root',
+        props: {},
+        children: []
+      },
+      content: [
+        {
+          type: 'Heading',
+          props: {
+            id: 'Heading-1',
+            content: 'Persisted'
+          }
+        }
+      ]
+    };
+    const dynamicInputs = [
+      {
+        id: randomUUID(),
+        label: 'Persisted binding',
+        dataType: 'string'
+      }
+    ];
+
+    const saveRes = await request(app.getHttpServer())
+      .put(`/projects/${projectId}/pages/${landingPageId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ builderState, dynamicInputs });
+
+    expect(saveRes.status).toBe(200);
+    expect(saveRes.body.data.page.builderState.content).toHaveLength(1);
+    expect(saveRes.body.data.page.dynamicInputs).toHaveLength(1);
+
+    const getRes = await request(app.getHttpServer())
+      .get(`/projects/${projectId}/pages/${landingPageId}`)
+      .set('Authorization', `Bearer ${token}`);
+
+    expect(getRes.status).toBe(200);
+    expect(getRes.body.data.page.builderState.content[0]).toMatchObject(builderState.content[0]);
+    expect(getRes.body.data.page.dynamicInputs[0]).toMatchObject(dynamicInputs[0]);
   });
 });

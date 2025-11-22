@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { and, eq } from 'drizzle-orm';
 import { randomUUID } from 'crypto';
 import { DatabaseService } from '../../database/database.service';
@@ -10,6 +10,8 @@ import { PageBuilderState, PageDynamicInput } from '@buildweaver/libs';
 
 @Injectable()
 export class ProjectPagesService {
+  private readonly logger = new Logger(ProjectPagesService.name);
+
   constructor(private readonly database: DatabaseService) {}
 
   private get db() {
@@ -18,6 +20,7 @@ export class ProjectPagesService {
 
   async list(ownerId: string, projectId: string): Promise<ProjectPage[]> {
     await this.assertProjectOwner(ownerId, projectId);
+    this.logger.log(`Listing pages for project ${projectId}`);
     return this.db.select().from(projectPages).where(eq(projectPages.projectId, projectId));
   }
 
@@ -26,6 +29,9 @@ export class ProjectPagesService {
 
     const builderState = dto.builderState ?? this.createEmptyBuilderState();
     const dynamicInputs = this.normalizeInputs(dto.dynamicInputs ?? []);
+    this.logger.log(
+      `Creating page "${dto.name}" in project ${projectId} (content=${this.describeBuilderState(builderState)}, inputs=${dynamicInputs.length})`
+    );
 
     const [page] = await this.db
       .insert(projectPages)
@@ -43,6 +49,7 @@ export class ProjectPagesService {
 
   async findOne(ownerId: string, projectId: string, pageId: string): Promise<ProjectPage> {
     await this.assertProjectOwner(ownerId, projectId);
+    this.logger.log(`Fetching page ${pageId} in project ${projectId}`);
     const [page] = await this.db
       .select()
       .from(projectPages)
@@ -65,10 +72,17 @@ export class ProjectPagesService {
       updatePayload.slug = this.toSlug(dto.name);
     }
     if (typeof dto.builderState !== 'undefined') {
+      this.logger.log(
+        `Updating builder state for page ${pageId} (project ${projectId}) content=${this.describeBuilderState(dto.builderState)}`
+      );
       updatePayload.builderState = dto.builderState;
     }
     if (typeof dto.dynamicInputs !== 'undefined') {
-      updatePayload.dynamicInputs = this.normalizeInputs(dto.dynamicInputs);
+      const normalizedInputs = this.normalizeInputs(dto.dynamicInputs);
+      this.logger.log(
+        `Updating dynamic inputs for page ${pageId} (project ${projectId}) count=${normalizedInputs.length}`
+      );
+      updatePayload.dynamicInputs = normalizedInputs;
     }
 
     const [page] = await this.db
@@ -140,5 +154,16 @@ export class ProjectPagesService {
       content: [],
       zones: {}
     };
+  }
+
+  private describeBuilderState(state?: PageBuilderState): string {
+    if (!state || typeof state !== 'object') {
+      return 'content=0,zones=0';
+    }
+    const record = state as Record<string, unknown>;
+    const content = Array.isArray(record.content) ? record.content.length : 0;
+    const zonesValue = record.zones;
+    const zones = zonesValue instanceof Map ? zonesValue.size : zonesValue && typeof zonesValue === 'object' ? Object.keys(zonesValue as Record<string, unknown>).length : 0;
+    return `content=${content},zones=${zones}`;
   }
 }
