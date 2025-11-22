@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Puck } from '@measured/puck';
@@ -102,6 +102,9 @@ export const PageBuilderPage = () => {
   const [builderState, setBuilderState] = useState<Data>(createEmptyBuilderState());
   const [puckSessionKey, setPuckSessionKey] = useState(() => derivePuckSessionKey(undefined, pageId));
   const [dynamicInputs, setDynamicInputs] = useState<PageDynamicInput[]>([]);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const sheetCloseButtonRef = useRef<HTMLButtonElement | null>(null);
+  const sheetToggleButtonRef = useRef<HTMLButtonElement | null>(null);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [feedback, setFeedback] = useState('');
 
@@ -320,21 +323,70 @@ export const PageBuilderPage = () => {
 
   const page = pageQuery.data?.page as PageDocument | undefined;
 
+  useEffect(() => {
+    if (!isSidebarOpen) {
+      // restore focus to toggle when closing
+      sheetToggleButtonRef.current?.focus();
+      return;
+    }
+    // focus the close button when opening for accessibility
+    sheetCloseButtonRef.current?.focus();
+  }, [isSidebarOpen]);
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && isSidebarOpen) {
+        setIsSidebarOpen(false);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [isSidebarOpen]);
+
   return (
-    <div className="flex h-[calc(100vh-64px)] bg-bw-ink text-white">
-      <aside className="w-80 border-r border-white/10 bg-bw-ink/90 p-4">
+    <div className="flex h-screen bg-bw-ink text-white">
+      {/* Modal sheet + backdrop */}
+      <div
+        className={`fixed inset-0 z-[60] pointer-events-none transition-opacity duration-200 ${isSidebarOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0'}`}
+        aria-hidden={!isSidebarOpen}
+      >
+        <div
+          className={`absolute inset-0 bg-black/30 transition-opacity duration-200 ${isSidebarOpen ? 'opacity-100' : 'opacity-0'}`}
+          onClick={() => setIsSidebarOpen(false)}
+        />
+        <aside
+          id="page-builder-sidebar"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="page-builder-sheet-title"
+          className={`fixed left-0 top-0 h-full bg-bw-ink/90 p-4 shadow-xl transition-transform duration-200 ease-in-out transform ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}
+          style={{ width: '20rem' }}
+          onClick={(e) => e.stopPropagation()}
+        >
         <div className="flex items-center justify-between">
           <div>
-            <p className="text-xs uppercase tracking-[0.3em] text-bw-amber">Dynamic inputs</p>
+            <p id="page-builder-sheet-title" className="text-xs uppercase tracking-[0.3em] text-bw-amber">Dynamic inputs</p>
             <p className="text-sm text-bw-platinum/70">Add inputs to expose on the Page node.</p>
           </div>
-          <button
-            type="button"
-            onClick={handleAddDynamicInput}
-            className="rounded-lg bg-bw-sand px-3 py-1 text-sm font-semibold text-bw-ink"
-          >
-            Add
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              ref={sheetCloseButtonRef}
+              aria-label="Close sidebar"
+              title="Close"
+              onClick={() => setIsSidebarOpen(false)}
+              className="rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-white"
+            >
+              ×
+            </button>
+            <button
+              type="button"
+              onClick={handleAddDynamicInput}
+              className="rounded-lg bg-bw-sand px-3 py-1 text-sm font-semibold text-bw-ink"
+            >
+              Add
+            </button>
+          </div>
         </div>
         <div className="mt-4 space-y-3">
           {dynamicInputs.length === 0 ? (
@@ -373,12 +425,27 @@ export const PageBuilderPage = () => {
             ))
           )}
         </div>
-      </aside>
-      <div className="flex flex-1 flex-col bg-white">
+        </aside>
+      </div>
+      <div className="flex flex-1 flex-col bg-white" aria-hidden={isSidebarOpen ? 'true' : 'false'}>
         <header className="flex items-center justify-between border-b border-gray-200 bg-gray-50 px-6 py-4 text-gray-900">
-          <div>
-            <p className="text-xs uppercase tracking-[0.3em] text-bw-amber">UI builder</p>
-            <p className="text-lg font-semibold">{page?.name ?? 'Loading page…'}</p>
+          <div className="flex items-center">
+            <button
+              type="button"
+              ref={sheetToggleButtonRef}
+              aria-label="Toggle sidebar"
+              aria-controls="page-builder-sidebar"
+              aria-expanded={isSidebarOpen}
+              onClick={() => setIsSidebarOpen((s) => !s)}
+              title={isSidebarOpen ? 'Hide sidebar' : 'Show sidebar'}
+              className="rounded-lg border border-gray-300 bg-white/5 px-2 py-1 text-gray-700 mr-3 flex items-center justify-center"
+            >
+              <span className="text-sm">{isSidebarOpen ? '☰' : '☷'}</span>
+            </button>
+            <div>
+              <p className="text-xs uppercase tracking-[0.3em] text-bw-amber">UI builder</p>
+              <p className="text-lg font-semibold">{page?.name ?? 'Loading page…'}</p>
+            </div>
           </div>
           <div className="flex items-center gap-3 text-sm">
             <button
@@ -399,13 +466,13 @@ export const PageBuilderPage = () => {
             </button>
           </div>
         </header>
-        <div className="flex-1 overflow-y-auto bg-white p-6">
+        <div className="flex-1 overflow-y-auto bg-white">
           {pageQuery.isLoading ? (
             <p className="text-sm text-gray-500">Loading page…</p>
           ) : pageQuery.isError ? (
             <p className="text-sm text-red-500">{(pageQuery.error as Error)?.message ?? 'Unable to load page'}</p>
           ) : (
-            <div className="mx-auto max-w-4xl rounded-3xl border border-gray-200 bg-white p-6 shadow-lg">
+            <div className="border border-gray-200 bg-white p-6 shadow-lg">
               {/* Puck only reads the initial data prop, so key forces a remount when server data changes. */}
               <Puck key={puckSessionKey} config={builderConfig} data={builderState} onChange={handleBuilderChange} />
             </div>
