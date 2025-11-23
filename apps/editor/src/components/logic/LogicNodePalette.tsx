@@ -1,6 +1,6 @@
 import { DragEvent } from 'react';
 
-export type PaletteNodeType = 'page' | 'dummy';
+export type PaletteNodeType = 'page' | 'dummy' | 'arithmetic' | 'string' | 'list' | 'object';
 
 interface LogicNodePaletteProps {
   onAddNode: (type: PaletteNodeType) => void;
@@ -8,7 +8,11 @@ interface LogicNodePaletteProps {
 
 const paletteItems: Array<{ type: PaletteNodeType; label: string; description: string }> = [
   { type: 'page', label: 'Page', description: 'Render UI and dynamic data' },
-  { type: 'dummy', label: 'Dummy', description: 'Single output that emits 42' }
+  { type: 'dummy', label: 'Dummy', description: 'Static sample outputs' },
+  { type: 'arithmetic', label: 'Arithmetic', description: 'Math operators and aggregations' },
+  { type: 'string', label: 'String', description: 'Text transforms (concat, slice, etc.)' },
+  { type: 'list', label: 'List', description: 'List merge, slice, sort, count' },
+  { type: 'object', label: 'Object', description: 'Merge, pick, set, and query objects' }
 ];
 
 export const LogicNodePalette = ({ onAddNode }: LogicNodePaletteProps) => {

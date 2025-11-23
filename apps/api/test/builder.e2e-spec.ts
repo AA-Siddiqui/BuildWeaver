@@ -59,7 +59,7 @@ describe('Builder surfaces (e2e)', () => {
           id: `dummy-${randomUUID()}`,
           type: 'dummy',
           position: { x: -150, y: 0 },
-          data: { kind: 'dummy', label: 'Dummy', value: 42 }
+          data: { kind: 'dummy', label: 'Dummy', sample: { type: 'integer', value: 42 } }
         },
         {
           id: `page-${landingPageId}`,

@@ -133,8 +133,11 @@ export class ProjectsService {
           data: {
             kind: 'dummy',
             label: 'Dummy',
-            value: 42,
-            description: 'Placeholder output for prototyping'
+            description: 'Placeholder output for prototyping',
+            sample: {
+              type: 'integer',
+              value: 42
+            }
           }
         },
         {

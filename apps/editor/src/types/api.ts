@@ -21,5 +21,9 @@ export type {
   LogicEditorNode,
   LogicEditorEdge,
   DummyNodeData,
-  PageNodeData
+  PageNodeData,
+  ArithmeticNodeData,
+  StringNodeData,
+  ListNodeData,
+  ObjectNodeData
 } from '@buildweaver/libs';

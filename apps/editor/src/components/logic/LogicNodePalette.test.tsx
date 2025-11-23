@@ -6,7 +6,12 @@ describe('LogicNodePalette', () => {
     const handleAdd = jest.fn();
     render(<LogicNodePalette onAddNode={handleAdd} />);
 
-    fireEvent.click(screen.getByText('Page'));
-    expect(handleAdd).toHaveBeenCalledWith('page');
+    const buttons = ['Page', 'Dummy', 'Arithmetic', 'String', 'List', 'Object'];
+    buttons.forEach((label) => {
+      fireEvent.click(screen.getByText(label));
+    });
+
+    expect(handleAdd).toHaveBeenCalledTimes(buttons.length);
+    expect(handleAdd).toHaveBeenCalledWith('object');
   });
 });

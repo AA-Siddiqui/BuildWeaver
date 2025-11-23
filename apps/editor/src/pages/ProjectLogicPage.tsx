@@ -19,21 +19,34 @@ import { DragEvent, useCallback, useEffect, useMemo, useRef, useState } from 're
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useParams } from 'react-router-dom';
 import type {
+  ArithmeticNodeData,
   DummyNodeData,
+  ListNodeData,
   LogicEditorEdge,
   LogicEditorNode,
   LogicEditorNodeData,
+  ObjectNodeData,
   PageDocument,
-  ProjectGraphSnapshot
+  ProjectGraphSnapshot,
+  StringNodeData
 } from '../types/api';
 import { projectGraphApi, projectPagesApi } from '../lib/api-client';
 import { LogicNodePalette, PaletteNodeType } from '../components/logic/LogicNodePalette';
 import { DummyNode } from '../components/logic/DummyNode';
 import { PageNode } from '../components/logic/PageNode';
+import { ArithmeticNode } from '../components/logic/ArithmeticNode';
+import { StringNode } from '../components/logic/StringNode';
+import { ListNode } from '../components/logic/ListNode';
+import { ObjectNode } from '../components/logic/ObjectNode';
+import { logicLogger } from '../lib/logger';
 
 const nodeTypes = {
   dummy: DummyNode,
-  page: PageNode
+  page: PageNode,
+  arithmetic: ArithmeticNode,
+  string: StringNode,
+  list: ListNode,
+  object: ObjectNode
 };
 
 type FlowNode = Node<LogicEditorNodeData>;
@@ -48,10 +61,65 @@ const generateId = () => {
 
 const DEFAULT_DUMMY_DATA: DummyNodeData = {
   kind: 'dummy',
-  label: 'Dummy',
-  value: 42,
-  description: 'Placeholder output'
+  label: 'Sample data',
+  description: 'Placeholder output',
+  sample: {
+    type: 'integer',
+    value: 42
+  }
 };
+
+const createDummyData = (): DummyNodeData => ({
+  ...DEFAULT_DUMMY_DATA,
+  sample: { ...DEFAULT_DUMMY_DATA.sample }
+});
+
+const createArithmeticData = (): ArithmeticNodeData => ({
+  kind: 'arithmetic',
+  label: 'Math block',
+  description: 'Combine numbers',
+  operation: 'add',
+  precision: 2,
+  operands: [
+    { id: `op-${generateId()}`, label: 'Input A', sampleValue: 12 },
+    { id: `op-${generateId()}`, label: 'Input B', sampleValue: 4 }
+  ]
+});
+
+const createStringData = (): StringNodeData => ({
+  kind: 'string',
+  label: 'String block',
+  description: 'Transform strings',
+  operation: 'concat',
+  stringInputs: [
+    { id: `str-${generateId()}`, label: 'Input A', sampleValue: 'Hello' },
+    { id: `str-${generateId()}`, label: 'Input B', sampleValue: 'World' }
+  ],
+  options: { delimiter: ' ' },
+  limit: 5
+});
+
+const createListData = (): ListNodeData => ({
+  kind: 'list',
+  label: 'List block',
+  description: 'Slice, merge, count lists',
+  operation: 'append',
+  primarySample: [1, 2, 3],
+  secondarySample: [4, 5],
+  limit: 5,
+  sort: 'asc'
+});
+
+const createObjectData = (): ObjectNodeData => ({
+  kind: 'object',
+  label: 'Object block',
+  description: 'Merge and pick fields',
+  operation: 'merge',
+  sourceSample: { status: 'idle', attempts: 0 },
+  patchSample: { status: 'ready' },
+  selectedKeys: [],
+  path: ''
+});
 
 const toFlowNodes = (nodes: LogicEditorNode[]): FlowNode[] =>
   nodes.map((node) => ({
@@ -104,8 +172,46 @@ const createDummyNode = (position = { x: 0, y: 0 }): FlowNode => ({
   id: `dummy-${generateId()}`,
   type: 'dummy',
   position,
-  data: DEFAULT_DUMMY_DATA
+  data: createDummyData()
 });
+
+const createArithmeticFlowNode = (position = { x: 0, y: 0 }): FlowNode => ({
+  id: `arithmetic-${generateId()}`,
+  type: 'arithmetic',
+  position,
+  data: createArithmeticData()
+});
+
+const createStringFlowNode = (position = { x: 0, y: 0 }): FlowNode => ({
+  id: `string-${generateId()}`,
+  type: 'string',
+  position,
+  data: createStringData()
+});
+
+const createListFlowNode = (position = { x: 0, y: 0 }): FlowNode => ({
+  id: `list-${generateId()}`,
+  type: 'list',
+  position,
+  data: createListData()
+});
+
+const createObjectFlowNode = (position = { x: 0, y: 0 }): FlowNode => ({
+  id: `object-${generateId()}`,
+  type: 'object',
+  position,
+  data: createObjectData()
+});
+
+type StaticPaletteNode = Exclude<PaletteNodeType, 'page'>;
+
+const staticNodeFactory: Record<StaticPaletteNode, (position?: { x: number; y: number }) => FlowNode> = {
+  dummy: createDummyNode,
+  arithmetic: createArithmeticFlowNode,
+  string: createStringFlowNode,
+  list: createListFlowNode,
+  object: createObjectFlowNode
+};
 
 const LogicEditorView = () => {
   const { projectId } = useParams<{ projectId: string }>();
@@ -147,6 +253,7 @@ const LogicEditorView = () => {
   const saveMutation = useMutation({
     mutationFn: (payload: ProjectGraphSnapshot) => projectGraphApi.save(projectId!, payload),
     onSuccess: ({ graph }) => {
+      logicLogger.info('Graph saved', { projectId, nodes: graph.nodes.length, edges: graph.edges.length });
       setNodes(toFlowNodes(graph.nodes));
       setEdges(toFlowEdges(graph.edges));
       setHasUnsavedChanges(false);
@@ -154,6 +261,10 @@ const LogicEditorView = () => {
       setTimeout(() => setFeedback(''), 2000);
     },
     onError: (error: unknown) => {
+      logicLogger.error('Graph save failed', {
+        projectId,
+        message: error instanceof Error ? error.message : 'Unknown error'
+      });
       setFeedback(error instanceof Error ? error.message : 'Unable to save graph');
     }
   });
@@ -161,9 +272,11 @@ const LogicEditorView = () => {
   const createPageMutation = useMutation({
     mutationFn: (name: string) => projectPagesApi.create(projectId!, { name }),
     onSuccess: () => {
+      logicLogger.debug('Pages invalidated after creation', { projectId });
       queryClient.invalidateQueries({ queryKey: ['project-pages', projectId] });
     },
     onError: (error: unknown) => {
+      logicLogger.error('Page create failed', { projectId, message: error instanceof Error ? error.message : 'Unknown error' });
       setFeedback(error instanceof Error ? error.message : 'Unable to create page');
     }
   });
@@ -186,6 +299,7 @@ const LogicEditorView = () => {
 
   const handleConnect = useCallback(
     (connection: Connection) => {
+      logicLogger.debug('Nodes connected', { source: connection.source, target: connection.target });
       setHasUnsavedChanges(true);
       setEdges((eds: FlowEdge[]) => addEdge({ ...connection, id: `${connection.source}-${connection.target}-${Date.now()}` }, eds));
     },
@@ -196,6 +310,7 @@ const LogicEditorView = () => {
     if (!projectId) {
       return;
     }
+    logicLogger.info('Saving graph requested', { projectId, nodes: nodes.length, edges: edges.length });
     const payload: ProjectGraphSnapshot = {
       nodes: serializeNodes(nodes),
       edges: serializeEdges(edges)
@@ -209,8 +324,14 @@ const LogicEditorView = () => {
         return;
       }
 
-      if (type === 'dummy') {
-        setNodes((current: FlowNode[]) => current.concat(createDummyNode(position)));
+      if (type !== 'page') {
+        const factory = staticNodeFactory[type as StaticPaletteNode];
+        if (!factory) {
+          return;
+        }
+        const node = factory(position);
+        logicLogger.info('Logic node added', { projectId, nodeId: node.id, type });
+        setNodes((current: FlowNode[]) => current.concat(node));
         setHasUnsavedChanges(true);
         return;
       }
@@ -218,9 +339,11 @@ const LogicEditorView = () => {
       const defaultName = `Page ${nodes.filter((node: FlowNode) => node.type === 'page').length + 1}`;
       try {
         const { page } = await createPageMutation.mutateAsync(defaultName);
+        logicLogger.info('Page node created via API', { projectId, pageId: page.id });
         setNodes((current: FlowNode[]) => current.concat(createPageNode(page, position)));
         setHasUnsavedChanges(true);
       } catch (error) {
+        logicLogger.error('Unable to create page node', { projectId, message: (error as Error).message });
         // Error already surfaced via mutation onError handler.
       }
     },

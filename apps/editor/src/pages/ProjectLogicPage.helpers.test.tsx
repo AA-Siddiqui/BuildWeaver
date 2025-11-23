@@ -27,14 +27,19 @@ describe('ProjectLogicPage helpers', () => {
         id: 'dummy-1',
         type: 'dummy',
         position: { x: 0, y: 0 },
-        data: { kind: 'dummy', label: 'Dummy', value: 42 },
+        data: { kind: 'dummy', label: 'Dummy', sample: { type: 'integer', value: 42 } },
         dragging: true
       }
     ];
     const serializedNodes = serializeNodes(rawNodes);
 
     expect(serializedNodes).toEqual([
-      { id: 'dummy-1', type: 'dummy', position: { x: 0, y: 0 }, data: { kind: 'dummy', label: 'Dummy', value: 42 } }
+      {
+        id: 'dummy-1',
+        type: 'dummy',
+        position: { x: 0, y: 0 },
+        data: { kind: 'dummy', label: 'Dummy', sample: { type: 'integer', value: 42 } }
+      }
     ]);
 
     const rawEdges: Edge[] = [
