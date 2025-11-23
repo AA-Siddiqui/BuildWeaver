@@ -7,7 +7,7 @@ interface LogicNodePaletteProps {
 }
 
 const paletteItems: Array<{ type: PaletteNodeType; label: string; description: string }> = [
-  { type: 'page', label: 'Page', description: 'Render UI and dynamic data' },
+  { type: 'page', label: 'Page', description: 'Create a new UI surface' },
   { type: 'dummy', label: 'Dummy', description: 'Static sample outputs' },
   { type: 'arithmetic', label: 'Arithmetic', description: 'Math operators and aggregations' },
   { type: 'string', label: 'String', description: 'Text transforms (concat, slice, etc.)' },
@@ -16,6 +16,7 @@ const paletteItems: Array<{ type: PaletteNodeType; label: string; description: s
 ];
 
 export const LogicNodePalette = ({ onAddNode }: LogicNodePaletteProps) => {
+
   const handleDragStart = (event: DragEvent<HTMLButtonElement>, type: PaletteNodeType) => {
     event.dataTransfer.setData('application/reactflow', type);
     event.dataTransfer.effectAllowed = 'move';

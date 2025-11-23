@@ -7,6 +7,7 @@ import { CreateProjectPageDto } from './dto/create-project-page.dto';
 import { UpdateProjectPageDto } from './dto/update-project-page.dto';
 import { PageDynamicInputDto } from './dto/page-dynamic-input.dto';
 import { PageBuilderState, PageDynamicInput } from '@buildweaver/libs';
+import { resolvePageSlug } from './slug.util';
 
 @Injectable()
 export class ProjectPagesService {
@@ -29,8 +30,9 @@ export class ProjectPagesService {
 
     const builderState = dto.builderState ?? this.createEmptyBuilderState();
     const dynamicInputs = this.normalizeInputs(dto.dynamicInputs ?? []);
+    const slug = resolvePageSlug(dto.name, dto.slug);
     this.logger.log(
-      `Creating page "${dto.name}" in project ${projectId} (content=${this.describeBuilderState(builderState)}, inputs=${dynamicInputs.length})`
+      `Creating page "${dto.name}" in project ${projectId} (slug=${slug}, content=${this.describeBuilderState(builderState)}, inputs=${dynamicInputs.length})`
     );
 
     const [page] = await this.db
@@ -38,7 +40,7 @@ export class ProjectPagesService {
       .values({
         projectId,
         name: dto.name.trim(),
-        slug: this.toSlug(dto.name),
+        slug,
         builderState,
         dynamicInputs
       })
@@ -69,7 +71,9 @@ export class ProjectPagesService {
     const updatePayload: Partial<ProjectPage> = { updatedAt: new Date() };
     if (typeof dto.name !== 'undefined') {
       updatePayload.name = dto.name.trim();
-      updatePayload.slug = this.toSlug(dto.name);
+      updatePayload.slug = resolvePageSlug(dto.name, dto.slug);
+    } else if (typeof dto.slug !== 'undefined') {
+      updatePayload.slug = resolvePageSlug('', dto.slug);
     }
     if (typeof dto.builderState !== 'undefined') {
       this.logger.log(
@@ -129,19 +133,6 @@ export class ProjectPagesService {
         seen.add(input.id);
         return true;
       });
-  }
-
-  private toSlug(value: string): string {
-    const cleaned = value
-      .trim()
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/-{2,}/g, '-')
-      .replace(/(^-|-$)+/g, '')
-      .slice(0, 48)
-      .replace(/(^-|-$)+/g, '');
-
-    return cleaned || `page-${Math.random().toString(36).slice(2, 6)}`;
   }
 
   private createEmptyBuilderState(): PageBuilderState {

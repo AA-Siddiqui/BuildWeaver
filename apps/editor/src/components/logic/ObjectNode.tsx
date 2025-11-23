@@ -64,7 +64,7 @@ export const ObjectNode = ({ id, data }: NodeProps<ObjectNodeData>) => {
         <label className="flex flex-col text-[11px] uppercase tracking-[0.2em] text-bw-platinum/80">
           Operation
           <select
-            className="mt-1 rounded-xl border border-white/10 bg-white/10 px-3 py-2 text-xs text-white"
+            className="bw-node-select mt-1 text-xs"
             value={data.operation}
             onChange={handleOperationChange}
           >

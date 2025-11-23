@@ -84,7 +84,11 @@ export const DummyNode = ({ id, data }: NodeProps<DummyNodeData>) => {
         return <input type="text" value={String(data.sample.value ?? '')} {...commonProps} />;
       case 'boolean':
         return (
-          <select value={String(data.sample.value ?? true)} {...commonProps}>
+          <select
+            value={String(data.sample.value ?? true)}
+            className="bw-node-select mt-1 text-sm"
+            onChange={handleValueChange}
+          >
             <option value="true">True</option>
             <option value="false">False</option>
           </select>
@@ -116,7 +120,7 @@ export const DummyNode = ({ id, data }: NodeProps<DummyNodeData>) => {
         <label className="flex flex-col text-[11px] uppercase tracking-[0.2em] text-bw-platinum/80">
           Value kind
           <select
-            className="mt-1 rounded-xl border border-white/10 bg-white/10 px-3 py-2 text-xs text-white"
+            className="bw-node-select mt-1 text-xs"
             value={data.sample.type}
             onChange={handleTypeChange}
           >

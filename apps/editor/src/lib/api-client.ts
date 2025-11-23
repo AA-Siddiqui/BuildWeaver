@@ -105,13 +105,14 @@ export const projectGraphApi = {
 
 type UpdatePagePayload = {
   name?: string;
+  slug?: string;
   builderState?: PageBuilderState;
   dynamicInputs?: PageDynamicInput[];
 };
 
 export const projectPagesApi = {
   list: (projectId: string) => apiFetch<{ pages: PageDocument[] }>(`/projects/${projectId}/pages`),
-  create: (projectId: string, body: { name: string }) =>
+  create: (projectId: string, body: { name: string; slug?: string }) =>
     apiFetch<{ page: PageDocument }>(`/projects/${projectId}/pages`, { method: 'POST', body: serialize(body) }),
   get: (projectId: string, pageId: string) =>
     apiFetch<{ page: PageDocument }>(`/projects/${projectId}/pages/${pageId}`),

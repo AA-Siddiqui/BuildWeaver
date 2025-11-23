@@ -40,6 +40,9 @@ import { ListNode } from '../components/logic/ListNode';
 import { ObjectNode } from '../components/logic/ObjectNode';
 import { PreviewResolverProvider, createPreviewResolver } from '../components/logic/previewResolver';
 import { logicLogger } from '../lib/logger';
+import { useDeleteNodesShortcut } from '../hooks/useDeleteNodesShortcut';
+import { LogicNavigationProvider } from '../components/logic/LogicNavigationContext';
+import { deriveDefaultPageName, normalizeRouteSegment } from '../lib/routes';
 
 const nodeTypes = {
   dummy: DummyNode,
@@ -223,6 +226,11 @@ const staticNodeFactory: Record<StaticPaletteNode, (position?: { x: number; y: n
   object: createObjectFlowNode
 };
 
+type PaletteNodeOptions = {
+  name?: string;
+  slug?: string;
+};
+
 const LogicEditorView = () => {
   const { projectId } = useParams<{ projectId: string }>();
   const navigate = useNavigate();
@@ -232,12 +240,42 @@ const LogicEditorView = () => {
   const [nodes, setNodes, onNodesChange] = useNodesState<LogicEditorNodeData>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>([]);
   const [feedback, setFeedback] = useState('');
   const previewResolver = useMemo(() => createPreviewResolver(nodes, edges), [nodes, edges]);
+  const pendingSaveRef = useRef<Promise<unknown> | null>(null);
+  const deleteElements = useCallback(
+    (elements: { nodes?: FlowNode[]; edges?: FlowEdge[] }) => {
+      reactFlowInstance.deleteElements(elements);
+    },
+    [reactFlowInstance]
+  );
+
+  const deleteSelection = useDeleteNodesShortcut({
+    selectedNodeIds,
+    nodes,
+    deleteElements,
+    onNodesDeleted: (removedIds) => {
+      if (!removedIds.length) {
+        return;
+      }
+      setSelectedNodeIds((current) => current.filter((id) => !removedIds.includes(id)));
+      setHasUnsavedChanges(true);
+      setFeedback(`Deleted ${removedIds.length} node${removedIds.length > 1 ? 's' : ''}`);
+      setTimeout(() => setFeedback(''), 2000);
+    }
+  });
 
   useEffect(() => {
     setFeedback('');
   }, [projectId]);
+
+  useEffect(() => {
+    setSelectedNodeIds((current) => {
+      const next = current.filter((id) => nodes.some((node) => node.id === id));
+      return next.length === current.length ? current : next;
+    });
+  }, [nodes]);
 
   const graphQuery = useQuery({
     queryKey: ['project-graph', projectId],
@@ -281,9 +319,9 @@ const LogicEditorView = () => {
   });
 
   const createPageMutation = useMutation({
-    mutationFn: (name: string) => projectPagesApi.create(projectId!, { name }),
-    onSuccess: () => {
-      logicLogger.debug('Pages invalidated after creation', { projectId });
+    mutationFn: (payload: { name: string; slug?: string }) => projectPagesApi.create(projectId!, payload),
+    onSuccess: (_, payload) => {
+      logicLogger.debug('Pages invalidated after creation', { projectId, slug: payload.slug });
       queryClient.invalidateQueries({ queryKey: ['project-pages', projectId] });
     },
     onError: (error: unknown) => {
@@ -330,20 +368,43 @@ const LogicEditorView = () => {
     [isHandleAvailable, setEdges]
   );
 
+  const persistGraph = useCallback(
+    async ({ reason, force = false }: { reason: string; force?: boolean }) => {
+      if (!projectId) {
+        return;
+      }
+      if (!force && !hasUnsavedChanges) {
+        logicLogger.debug('Skipping graph persist — no changes', { reason, projectId });
+        return;
+      }
+      const payload: ProjectGraphSnapshot = {
+        nodes: serializeNodes(nodes),
+        edges: serializeEdges(edges)
+      };
+
+      if (pendingSaveRef.current) {
+        logicLogger.debug('Awaiting in-flight graph save', { reason, projectId });
+        return pendingSaveRef.current;
+      }
+
+      logicLogger.info('Saving graph', { projectId, reason, nodes: payload.nodes.length, edges: payload.edges.length });
+      const promise = saveMutation.mutateAsync(payload);
+      pendingSaveRef.current = promise;
+      try {
+        await promise;
+      } finally {
+        pendingSaveRef.current = null;
+      }
+    },
+    [edges, hasUnsavedChanges, nodes, projectId, saveMutation]
+  );
+
   const handleSave = useCallback(() => {
-    if (!projectId) {
-      return;
-    }
-    logicLogger.info('Saving graph requested', { projectId, nodes: nodes.length, edges: edges.length });
-    const payload: ProjectGraphSnapshot = {
-      nodes: serializeNodes(nodes),
-      edges: serializeEdges(edges)
-    };
-    saveMutation.mutate(payload);
-  }, [edges, nodes, projectId, saveMutation]);
+    void persistGraph({ reason: 'manual', force: true });
+  }, [persistGraph]);
 
   const handleAddNode = useCallback(
-    async (type: PaletteNodeType, position?: { x: number; y: number }) => {
+    async (type: PaletteNodeType, position?: { x: number; y: number }, options?: PaletteNodeOptions) => {
       if (!projectId) {
         return;
       }
@@ -360,10 +421,12 @@ const LogicEditorView = () => {
         return;
       }
 
-      const defaultName = `Page ${nodes.filter((node: FlowNode) => node.type === 'page').length + 1}`;
+      const pageCount = nodes.filter((node: FlowNode) => node.type === 'page').length;
+      const resolvedName = options?.name?.trim() || deriveDefaultPageName(pageCount);
+      const resolvedSlug = normalizeRouteSegment(options?.slug ?? '', resolvedName);
       try {
-        const { page } = await createPageMutation.mutateAsync(defaultName);
-        logicLogger.info('Page node created via API', { projectId, pageId: page.id });
+        const { page } = await createPageMutation.mutateAsync({ name: resolvedName, slug: resolvedSlug });
+        logicLogger.info('Page node created via API', { projectId, pageId: page.id, slug: page.slug });
         setNodes((current: FlowNode[]) => current.concat(createPageNode(page, position)));
         setHasUnsavedChanges(true);
       } catch (error) {
@@ -372,6 +435,13 @@ const LogicEditorView = () => {
       }
     },
     [createPageMutation, nodes, projectId, setNodes]
+  );
+
+  const handlePaletteAdd = useCallback(
+    (type: PaletteNodeType) => {
+      void handleAddNode(type);
+    },
+    [handleAddNode]
   );
 
   const handleDragOver = useCallback((event: DragEvent) => {
@@ -396,6 +466,10 @@ const LogicEditorView = () => {
     [handleAddNode, reactFlowInstance]
   );
 
+  const handleSelectionChange = useCallback(({ nodes: selected }: { nodes: FlowNode[] }) => {
+    setSelectedNodeIds(selected.map((node) => node.id));
+  }, []);
+
   const isSaving = saveMutation.isPending || createPageMutation.isPending;
   const isLoading = graphQuery.isLoading || !projectId;
 
@@ -405,6 +479,24 @@ const LogicEditorView = () => {
     }
     return `Project ${projectId}`;
   }, [projectId]);
+
+  const handleNavigateToBuilder = useCallback(
+    async (pageId: string) => {
+      if (!projectId) {
+        return;
+      }
+      try {
+        await persistGraph({ reason: 'ui-builder-transition' });
+        navigate(`/app/${projectId}/page/${pageId}`);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Unable to save before navigating';
+        logicLogger.error('Navigation blocked due to save failure', { projectId, pageId, message });
+        setFeedback(message);
+        setTimeout(() => setFeedback(''), 3000);
+      }
+    },
+    [navigate, persistGraph, projectId]
+  );
 
   if (!projectId) {
     return (
@@ -419,7 +511,7 @@ const LogicEditorView = () => {
 
   return (
     <div className="flex h-[calc(100vh-64px)]">
-      <LogicNodePalette onAddNode={handleAddNode} />
+      <LogicNodePalette onAddNode={handlePaletteAdd} />
       <div className="flex flex-1 flex-col">
         <header className="flex items-center justify-between border-b border-white/5 bg-bw-ink/80 px-6 py-4 text-white">
           <div>
@@ -427,6 +519,14 @@ const LogicEditorView = () => {
             <p className="text-lg font-semibold">{headerContent}</p>
           </div>
           <div className="flex items-center gap-3 text-sm">
+            <button
+              type="button"
+              onClick={deleteSelection}
+              disabled={selectedNodeIds.length === 0}
+              className="rounded-xl border border-white/20 px-4 py-2 text-bw-platinum transition hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              Delete selection
+            </button>
             {feedback && <span className="text-bw-platinum/70">{feedback}</span>}
             <button
               type="button"
@@ -451,25 +551,28 @@ const LogicEditorView = () => {
           )}
           <div ref={reactFlowWrapper} className="h-full">
             <PreviewResolverProvider resolver={previewResolver}>
-              <ReactFlow
-                nodes={nodes}
-                edges={edges}
-                nodeTypes={nodeTypes}
-                fitView
-                onNodesChange={handleNodesChange}
-                onEdgesChange={handleEdgesChange}
-                onConnect={handleConnect}
-                isValidConnection={isHandleAvailable}
-                onDrop={handleDrop}
-                onDragOver={handleDragOver}
-                panOnDrag
-                panOnScroll
-                zoomOnScroll
-              >
-                <MiniMap pannable zoomable className="!bg-bw-ink/80" />
-                <Controls />
-                <Background gap={16} color="#ffffff33" />
-              </ReactFlow>
+              <LogicNavigationProvider value={{ openPageBuilder: handleNavigateToBuilder }}>
+                <ReactFlow
+                  nodes={nodes}
+                  edges={edges}
+                  nodeTypes={nodeTypes}
+                  fitView
+                  onNodesChange={handleNodesChange}
+                  onEdgesChange={handleEdgesChange}
+                  onConnect={handleConnect}
+                  isValidConnection={isHandleAvailable}
+                  onDrop={handleDrop}
+                  onDragOver={handleDragOver}
+                  onSelectionChange={handleSelectionChange}
+                  panOnDrag
+                  panOnScroll
+                  zoomOnScroll
+                >
+                  <MiniMap pannable zoomable className="!bg-bw-ink/80" />
+                  <Controls />
+                  <Background gap={16} color="#ffffff33" />
+                </ReactFlow>
+              </LogicNavigationProvider>
             </PreviewResolverProvider>
           </div>
         </div>

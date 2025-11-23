@@ -9,6 +9,10 @@ export class UpdateProjectPageDto {
   name?: string;
 
   @IsOptional()
+  @IsString()
+  slug?: string;
+
+  @IsOptional()
   @IsObject()
   builderState?: PageBuilderState;
 

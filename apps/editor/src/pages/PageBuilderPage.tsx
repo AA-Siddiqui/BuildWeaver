@@ -113,6 +113,7 @@ export const PageBuilderPage = () => {
   const [feedback, setFeedback] = useState('');
   const draftStatusRef = useRef<{ restored: boolean; savedAt?: number }>({ restored: false });
   const draftPersistHandle = useRef<number | null>(null);
+  const pendingSaveRef = useRef<Promise<unknown> | null>(null);
   const draftStorageKey = useMemo(() => deriveDraftStorageKey(projectId, pageId), [projectId, pageId]);
   const updateDraftStatus = useCallback((next: Partial<{ restored: boolean; savedAt?: number }>) => {
     draftStatusRef.current = { ...draftStatusRef.current, ...next };
@@ -282,6 +283,36 @@ export const PageBuilderPage = () => {
     }
   });
 
+  const persistBuilderChanges = useCallback(
+    async ({ reason, force = false }: { reason: string; force?: boolean }) => {
+      if (!projectId || !pageId) {
+        return;
+      }
+      if (!force && !hasUnsavedChanges) {
+        logPageBuilderEvent('Skipping save — no pending changes', { reason, pageId, projectId });
+        return;
+      }
+      if (pendingSaveRef.current) {
+        logPageBuilderEvent('Awaiting in-flight save before proceeding', { reason, pageId, projectId });
+        return pendingSaveRef.current;
+      }
+      logPageBuilderEvent('Persisting builder data', {
+        reason,
+        pageId,
+        projectId,
+        summary: summarizeBuilderData(builderState)
+      });
+      const promise = saveMutation.mutateAsync();
+      pendingSaveRef.current = promise;
+      try {
+        await promise;
+      } finally {
+        pendingSaveRef.current = null;
+      }
+    },
+    [builderState, hasUnsavedChanges, pageId, projectId, saveMutation]
+  );
+
   const handleBuilderChange = useCallback((value: Data) => {
     setHasUnsavedChanges(true);
     setBuilderState(value);
@@ -336,8 +367,22 @@ export const PageBuilderPage = () => {
 
   const handleSave = useCallback(() => {
     logPageBuilderEvent('Save triggered', { pageId, projectId, hasUnsavedChanges });
-    saveMutation.mutate();
-  }, [hasUnsavedChanges, pageId, projectId, saveMutation]);
+    void persistBuilderChanges({ reason: 'manual', force: true });
+  }, [hasUnsavedChanges, pageId, persistBuilderChanges, projectId]);
+
+  const handleNavigateBack = useCallback(async () => {
+    if (!projectId) {
+      return;
+    }
+    try {
+      await persistBuilderChanges({ reason: 'logic-transition' });
+      navigate(`/app/${projectId}`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unable to save before returning to logic builder';
+      logPageBuilderEvent('Navigation blocked due to save failure', { message, pageId, projectId });
+      setFeedback(message);
+    }
+  }, [navigate, pageId, persistBuilderChanges, projectId]);
 
   if (!projectId || !pageId) {
     return (
@@ -479,10 +524,11 @@ export const PageBuilderPage = () => {
           <div className="flex items-center gap-3 text-sm">
             <button
               type="button"
-              className="rounded-lg border border-gray-300 px-3 py-1 text-gray-700"
-              onClick={() => navigate(`/app/${projectId}`)}
+              className="rounded-lg border border-gray-300 px-3 py-1 text-gray-700 disabled:opacity-60"
+              onClick={handleNavigateBack}
+              disabled={saveMutation.isPending}
             >
-              Back to logic
+              {saveMutation.isPending ? 'Saving…' : 'Back to logic'}
             </button>
             {feedback && <span className="text-gray-500">{feedback}</span>}
             <button
