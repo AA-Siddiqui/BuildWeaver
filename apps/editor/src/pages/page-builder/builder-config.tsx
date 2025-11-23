@@ -1,6 +1,12 @@
 import type { Config, Field } from '@measured/puck';
 import type { CSSProperties, ReactNode } from 'react';
-import { createInlineStyle, splitStyleProps, withStyleFields, type StyleFieldValues } from './style-controls';
+import {
+  buildAttributeProps,
+  createInlineStyle,
+  splitStyleProps,
+  withStyleFields,
+  type StyleableProps
+} from './style-controls';
 
 type BindingOption = { label: string; value: string };
 
@@ -13,29 +19,29 @@ type SlotRenderer = ((props?: { className?: string; minEmptyHeight?: number }) =
 
 type ColumnsLayout = 'equal' | 'wideLeft' | 'wideRight';
 
-type SectionProps = StyleFieldValues & {
+type SectionProps = StyleableProps<{
   eyebrow?: string;
   heading?: string;
   subheading?: string;
   description?: string;
   backgroundImage?: string;
   contentSlot?: SlotRenderer;
-};
+}>;
 
-type ColumnsProps = StyleFieldValues & {
+type ColumnsProps = StyleableProps<{
   left?: SlotRenderer;
   right?: SlotRenderer;
   layout?: ColumnsLayout;
   stackAt?: 'never' | 'md' | 'lg';
-};
+}>;
 
-type ImageProps = StyleFieldValues & {
+type ImageProps = StyleableProps<{
   src?: string;
   alt?: string;
   caption?: string;
   objectFit?: string;
   aspectRatio?: string;
-};
+}>;
 
 type ListItem = {
   text?: string;
@@ -43,41 +49,41 @@ type ListItem = {
   description?: string;
 };
 
-type ListProps = StyleFieldValues & {
+type ListProps = StyleableProps<{
   items?: ListItem[];
   variant?: 'bullet' | 'numbered' | 'plain';
-};
+}>;
 
-type CardProps = StyleFieldValues & {
+type CardProps = StyleableProps<{
   eyebrow?: string;
   heading?: string;
   content?: string;
   imageUrl?: string;
   actionLabel?: string;
   actionHref?: string;
-};
+}>;
 
-type ButtonProps = StyleFieldValues & {
+type ButtonProps = StyleableProps<{
   label?: string;
   variant?: 'primary' | 'ghost' | 'link';
   bindingId?: string;
   href?: string;
-};
+}>;
 
-type HeadingProps = StyleFieldValues & {
+type HeadingProps = StyleableProps<{
   content?: string;
   size?: string;
   bindingId?: string;
-};
+}>;
 
-type ParagraphProps = StyleFieldValues & {
+type ParagraphProps = StyleableProps<{
   content?: string;
   bindingId?: string;
-};
+}>;
 
-type SpacerProps = StyleFieldValues & {
+type SpacerProps = StyleableProps<{
   height?: string;
-};
+}>;
 
 const COMPONENT_ORDER = [
   'Section',
@@ -169,11 +175,12 @@ export const createPageBuilderConfig = ({ bindingOptions, resolveBinding }: Buil
       },
       render: (props) => {
         const { styleProps, rest } = splitStyleProps(props);
-        const { content, size = 'h2', bindingId } = rest as HeadingProps;
+        const { content, size = 'h2', bindingId, customAttributes } = rest as HeadingProps;
         const Tag = (size as keyof JSX.IntrinsicElements) || 'h2';
         const resolvedContent = resolveBinding(content, bindingId);
+        const attributeProps = buildAttributeProps(customAttributes);
         return (
-          <Tag style={createInlineStyle(styleProps)} className="text-bw-ink">
+          <Tag style={createInlineStyle(styleProps)} className="text-bw-ink" {...attributeProps}>
             {resolvedContent}
           </Tag>
         );
@@ -188,9 +195,10 @@ export const createPageBuilderConfig = ({ bindingOptions, resolveBinding }: Buil
       },
       render: (props) => {
         const { styleProps, rest } = splitStyleProps(props);
-        const { content, bindingId } = rest as ParagraphProps;
+        const { content, bindingId, customAttributes } = rest as ParagraphProps;
+        const attributeProps = buildAttributeProps(customAttributes);
         return (
-          <p style={createInlineStyle(styleProps)} className="text-base leading-relaxed">
+          <p style={createInlineStyle(styleProps)} className="text-base leading-relaxed" {...attributeProps}>
             {resolveBinding(content, bindingId)}
           </p>
         );
@@ -208,9 +216,10 @@ export const createPageBuilderConfig = ({ bindingOptions, resolveBinding }: Buil
       },
       render: (props) => {
         const { styleProps, rest } = splitStyleProps(props);
-        const { label, variant = 'primary', bindingId, href } = rest as ButtonProps;
+        const { label, variant = 'primary', bindingId, href, customAttributes } = rest as ButtonProps;
         const content = resolveBinding(label, bindingId);
         const baseStyle = createInlineStyle(styleProps);
+        const attributeProps = buildAttributeProps(customAttributes);
         const className =
           variant === 'ghost'
             ? 'border border-gray-300 bg-transparent text-gray-800'
@@ -224,6 +233,7 @@ export const createPageBuilderConfig = ({ bindingOptions, resolveBinding }: Buil
             style={baseStyle}
             href={href}
             role={href ? 'button' : undefined}
+            {...attributeProps}
           >
             {content}
           </Element>
@@ -252,15 +262,16 @@ export const createPageBuilderConfig = ({ bindingOptions, resolveBinding }: Buil
       }),
       render: (props) => {
         const { styleProps, rest } = splitStyleProps(props);
-        const { eyebrow, heading, subheading, description, contentSlot, backgroundImage } = rest as SectionProps;
+        const { eyebrow, heading, subheading, description, contentSlot, backgroundImage, customAttributes } = rest as SectionProps;
         const inlineStyle = {
           ...createInlineStyle(styleProps),
           backgroundImage: backgroundImage ? `url(${backgroundImage})` : undefined,
           backgroundSize: backgroundImage ? 'cover' : undefined,
           backgroundPosition: backgroundImage ? 'center' : undefined
         };
+        const attributeProps = buildAttributeProps(customAttributes);
         return (
-          <section style={inlineStyle} className="relative w-full overflow-hidden border border-gray-100 shadow-sm">
+          <section style={inlineStyle} className="relative w-full overflow-hidden border border-gray-100 shadow-sm" {...attributeProps}>
             <div className="space-y-3">
               {eyebrow && <p className="text-xs uppercase tracking-[0.2em] text-bw-amber">{eyebrow}</p>}
               {heading && <h2 className="text-3xl font-semibold text-bw-ink">{heading}</h2>}
@@ -304,11 +315,12 @@ export const createPageBuilderConfig = ({ bindingOptions, resolveBinding }: Buil
       }),
       render: (props) => {
         const { styleProps, rest } = splitStyleProps(props);
-        const { layout = 'equal', stackAt = 'md', left, right } = rest as ColumnsProps;
+        const { layout = 'equal', stackAt = 'md', left, right, customAttributes } = rest as ColumnsProps;
         const inlineStyle = createInlineStyle(styleProps);
         const template = getColumnsTemplate(layout);
         const responsiveClass = stackAt === 'never' ? '' : stackAt === 'md' ? 'md:grid-cols-2' : 'lg:grid-cols-2';
         const gridClass = stackAt === 'never' ? 'grid-cols-2' : `grid-cols-1 ${responsiveClass}`.trim();
+        const attributeProps = buildAttributeProps(customAttributes);
         return (
           <div
             style={{
@@ -317,6 +329,7 @@ export const createPageBuilderConfig = ({ bindingOptions, resolveBinding }: Buil
               gridTemplateColumns: stackAt === 'never' ? template : undefined
             }}
             className={`grid gap-6 ${gridClass}`}
+            {...attributeProps}
           >
             <div>{renderSlot(left, 'Left column content')}</div>
             <div>{renderSlot(right, 'Right column content')}</div>
@@ -356,10 +369,11 @@ export const createPageBuilderConfig = ({ bindingOptions, resolveBinding }: Buil
       }),
       render: (props) => {
         const { styleProps, rest } = splitStyleProps(props);
-        const { src, alt, caption, objectFit = 'cover', aspectRatio } = rest as ImageProps;
+        const { src, alt, caption, objectFit = 'cover', aspectRatio, customAttributes } = rest as ImageProps;
         const inlineStyle = createInlineStyle(styleProps);
+        const attributeProps = buildAttributeProps(customAttributes);
         return (
-          <figure style={inlineStyle} className="space-y-2">
+          <figure style={inlineStyle} className="space-y-2" {...attributeProps}>
             <div className="w-full overflow-hidden rounded-xl bg-gray-100">
               <img
                 src={src}
@@ -396,10 +410,11 @@ export const createPageBuilderConfig = ({ bindingOptions, resolveBinding }: Buil
       }),
       render: (props) => {
         const { styleProps, rest } = splitStyleProps(props);
-        const { eyebrow, heading, content, imageUrl, actionHref, actionLabel } = rest as CardProps;
+        const { eyebrow, heading, content, imageUrl, actionHref, actionLabel, customAttributes } = rest as CardProps;
         const inlineStyle = createInlineStyle(styleProps);
+        const attributeProps = buildAttributeProps(customAttributes);
         return (
-          <article style={inlineStyle} className="flex flex-col gap-4 border border-gray-100">
+          <article style={inlineStyle} className="flex flex-col gap-4 border border-gray-100" {...attributeProps}>
             {imageUrl && (
               <img src={imageUrl} alt={heading ?? ''} className="h-48 w-full rounded-xl object-cover" />
             )}
@@ -447,8 +462,9 @@ export const createPageBuilderConfig = ({ bindingOptions, resolveBinding }: Buil
       }),
       render: (props) => {
         const { styleProps, rest } = splitStyleProps(props);
-        const { items = [], variant = 'bullet' } = rest as ListProps;
+        const { items = [], variant = 'bullet', customAttributes } = rest as ListProps;
         const inlineStyle = createInlineStyle(styleProps);
+        const attributeProps = buildAttributeProps(customAttributes);
         const listClass =
           variant === 'numbered'
             ? 'list-decimal pl-6'
@@ -463,7 +479,7 @@ export const createPageBuilderConfig = ({ bindingOptions, resolveBinding }: Buil
         );
         if (variant === 'plain') {
           return (
-            <div style={inlineStyle} className="space-y-3">
+            <div style={inlineStyle} className="space-y-3" {...attributeProps}>
               {items.map((item, index) => (
                 <div key={`${item.text}-${index}`} className="border-l-2 border-bw-amber/30 pl-4 text-gray-700">
                   <div className="font-medium text-bw-ink">{item.text || `Item ${index + 1}`}</div>
@@ -474,7 +490,7 @@ export const createPageBuilderConfig = ({ bindingOptions, resolveBinding }: Buil
           );
         }
         return (
-          <ul style={inlineStyle} className={listClass}>
+          <ul style={inlineStyle} className={listClass} {...attributeProps}>
             {items.map((item, index) => renderItem(item, index))}
           </ul>
         );
@@ -489,8 +505,10 @@ export const createPageBuilderConfig = ({ bindingOptions, resolveBinding }: Buil
       },
       fields: styleableFields({}),
       render: (props) => {
-        const { styleProps } = splitStyleProps(props);
-        return <hr style={createInlineStyle(styleProps)} className="w-full" />;
+        const { styleProps, rest } = splitStyleProps(props);
+        const { customAttributes } = rest as StyleableProps<Record<string, never>>;
+        const attributeProps = buildAttributeProps(customAttributes);
+        return <hr style={createInlineStyle(styleProps)} className="w-full" {...attributeProps} />;
       }
     },
     Spacer: {
@@ -513,9 +531,10 @@ export const createPageBuilderConfig = ({ bindingOptions, resolveBinding }: Buil
       }),
       render: (props) => {
         const { styleProps, rest } = splitStyleProps(props);
-        const { height = '48px' } = rest as SpacerProps;
+        const { height = '48px', customAttributes } = rest as SpacerProps;
         const inlineStyle = createInlineStyle(styleProps);
-        return <div style={{ ...inlineStyle, height }} aria-hidden="true" />;
+        const attributeProps = buildAttributeProps(customAttributes);
+        return <div style={{ ...inlineStyle, height }} aria-hidden="true" {...attributeProps} />;
       }
     }
   };
