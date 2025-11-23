@@ -19,7 +19,9 @@ export interface NodePreview<T = unknown> {
 
 const clampList = (items: ScalarValue[], limit = 5) => items.slice(0, limit);
 
-const formatScalar = (value: ScalarValue | ScalarValue[] | Record<string, ScalarValue> | undefined): string => {
+export const formatScalar = (
+  value: ScalarValue | ScalarValue[] | Record<string, ScalarValue> | undefined
+): string => {
   if (value === null || value === undefined) {
     return '∅';
   }
@@ -49,8 +51,19 @@ export const evaluateDummyPreview = (data: DummyNodeData): NodePreview => {
   };
 };
 
-export const evaluateArithmeticPreview = (data: ArithmeticNodeData): NodePreview<number> => {
-  const operandValues = data.operands.map((operand) => operand.sampleValue ?? null);
+export type ArithmeticInputOverrides = Record<string, number | null | undefined>;
+
+export const evaluateArithmeticPreview = (
+  data: ArithmeticNodeData,
+  overrides: ArithmeticInputOverrides = {}
+): NodePreview<number> => {
+  const operandValues = data.operands.map((operand) => {
+    const override = overrides[operand.id];
+    if (override !== undefined) {
+      return override;
+    }
+    return operand.sampleValue ?? null;
+  });
   if (!requireSamples<number>(operandValues)) {
     return {
       state: 'unknown',
@@ -108,8 +121,13 @@ export const evaluateArithmeticPreview = (data: ArithmeticNodeData): NodePreview
   }
 };
 
-export const evaluateStringPreview = (data: StringNodeData): NodePreview<string | number> => {
-  const values = data.stringInputs.map((input) => input.sampleValue ?? '');
+export type StringInputOverrides = Record<string, string | undefined>;
+
+export const evaluateStringPreview = (
+  data: StringNodeData,
+  overrides: StringInputOverrides = {}
+): NodePreview<string | number> => {
+  const values = data.stringInputs.map((input) => overrides[input.id] ?? input.sampleValue ?? '');
   const primary = values[0] ?? '';
 
   try {
@@ -159,18 +177,24 @@ export const evaluateStringPreview = (data: StringNodeData): NodePreview<string 
   }
 };
 
-export const evaluateListPreview = (data: ListNodeData): NodePreview<ScalarValue[] | number> => {
-  const primary = data.primarySample ?? [];
+export type ListInputOverrides = Partial<Record<'primarySample' | 'secondarySample', ScalarValue[]>>;
+
+export const evaluateListPreview = (
+  data: ListNodeData,
+  overrides: ListInputOverrides = {}
+): NodePreview<ScalarValue[] | number> => {
+  const primary = overrides.primarySample ?? data.primarySample ?? [];
+  const secondary = overrides.secondarySample ?? data.secondarySample ?? [];
   const limit = Math.min(data.limit ?? 5, 5);
 
   try {
     switch (data.operation) {
       case 'append': {
-        const appended = clampList(primary.concat(data.secondarySample ?? []), limit);
+        const appended = clampList(primary.concat(secondary), limit);
         return { state: 'ready', heading: 'Append', summary: formatScalar(appended), value: appended };
       }
       case 'merge': {
-        const merged = clampList(primary.concat(data.secondarySample ?? []), limit);
+        const merged = clampList(primary.concat(secondary), limit);
         return { state: 'ready', heading: 'Merge', summary: formatScalar(merged), value: merged };
       }
       case 'slice':
@@ -217,9 +241,16 @@ const resolvePath = (source: Record<string, ScalarValue>, path?: string) => {
   return source[path];
 };
 
-export const evaluateObjectPreview = (data: ObjectNodeData): NodePreview => {
-  const source = data.sourceSample ?? {};
-  const patch = data.patchSample ?? {};
+export type ObjectInputOverrides = Partial<
+  Record<'sourceSample' | 'patchSample', Record<string, ScalarValue>>
+>;
+
+export const evaluateObjectPreview = (
+  data: ObjectNodeData,
+  overrides: ObjectInputOverrides = {}
+): NodePreview => {
+  const source = overrides.sourceSample ?? data.sourceSample ?? {};
+  const patch = overrides.patchSample ?? data.patchSample ?? {};
 
   try {
     switch (data.operation) {

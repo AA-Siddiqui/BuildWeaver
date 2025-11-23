@@ -1,10 +1,11 @@
 import { ChangeEvent } from 'react';
 import { Handle, NodeProps, Position } from 'reactflow';
-import { StringNodeData } from '@buildweaver/libs';
+import { ScalarValue, StringNodeData } from '@buildweaver/libs';
 import { NodeChrome } from './NodeChrome';
-import { evaluateStringPreview } from './preview';
 import { useNodeDataUpdater } from './hooks/useNodeDataUpdater';
 import { logicLogger } from '../../lib/logger';
+import { usePreviewResolver } from './previewResolver';
+import { formatScalar } from './preview';
 
 const MAX_INPUTS = 4;
 const MIN_INPUTS = 1;
@@ -13,7 +14,8 @@ const generateInputId = () => `str-${Math.random().toString(36).slice(2, 8)}`;
 
 export const StringNode = ({ id, data }: NodeProps<StringNodeData>) => {
   const updateData = useNodeDataUpdater<StringNodeData>(id);
-  const preview = evaluateStringPreview(data);
+  const previewResolver = usePreviewResolver();
+  const preview = previewResolver.getNodePreview(id);
 
   const handleOperationChange = (event: ChangeEvent<HTMLSelectElement>) => {
     const operation = event.target.value as StringNodeData['operation'];
@@ -149,14 +151,17 @@ export const StringNode = ({ id, data }: NodeProps<StringNodeData>) => {
           </select>
         </label>
         <div className="space-y-2">
-          {data.stringInputs.map((input, index) => (
-            <div key={input.id} className="relative rounded-xl border border-white/10 bg-white/5 px-3 py-2">
-              <Handle
-                type="target"
-                id={`string-${input.id}`}
-                position={Position.Left}
-                className="!left-[-6px] !h-3 !w-3 !bg-bw-platinum"
-              />
+          {data.stringInputs.map((input, index) => {
+            const handleId = `string-${input.id}`;
+            const binding = previewResolver.getHandleBinding(id, handleId);
+            return (
+              <div key={input.id} className="relative rounded-xl border border-white/10 bg-white/5 px-3 py-2">
+                <Handle
+                  type="target"
+                  id={handleId}
+                  position={Position.Left}
+                  className="!left-[-6px] !h-3 !w-3 !bg-bw-platinum"
+                />
               <div className="flex items-center justify-between text-[11px] uppercase tracking-[0.2em] text-bw-platinum/60">
                 <span>
                   {input.label}
@@ -168,14 +173,23 @@ export const StringNode = ({ id, data }: NodeProps<StringNodeData>) => {
                   </button>
                 )}
               </div>
-              <input
-                type="text"
-                className="mt-1 w-full rounded-lg border border-white/10 bg-bw-ink/60 px-2 py-1 text-sm text-white"
-                value={input.sampleValue ?? ''}
-                onChange={(event) => handleInputChange(input.id, event)}
-              />
-            </div>
-          ))}
+                {binding ? (
+                  <div className="mt-1 rounded-lg border border-white/10 bg-bw-ink/50 px-2 py-1 text-xs text-bw-platinum">
+                    <p className="text-[10px] uppercase tracking-[0.2em] text-bw-amber">Connected</p>
+                    <p className="text-white">{formatScalar(binding.value as ScalarValue)}</p>
+                    <p className="text-[10px] text-bw-platinum/60">{binding.sourceLabel}</p>
+                  </div>
+                ) : (
+                  <input
+                    type="text"
+                    className="mt-1 w-full rounded-lg border border-white/10 bg-bw-ink/60 px-2 py-1 text-sm text-white"
+                    value={input.sampleValue ?? ''}
+                    onChange={(event) => handleInputChange(input.id, event)}
+                  />
+                )}
+              </div>
+            );
+          })}
           <button
             type="button"
             className="w-full rounded-xl border border-dashed border-white/20 py-2 text-xs text-white/70"

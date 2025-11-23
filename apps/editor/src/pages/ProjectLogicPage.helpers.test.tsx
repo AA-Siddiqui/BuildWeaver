@@ -1,6 +1,6 @@
 import type { PageDocument, LogicEditorNodeData, PageNodeData } from '../types/api';
 import type { Edge, Node } from 'reactflow';
-import { createPageNode, serializeEdges, serializeNodes } from './ProjectLogicPage';
+import { createPageNode, serializeEdges, serializeNodes, isTargetHandleFree } from './ProjectLogicPage';
 
 describe('ProjectLogicPage helpers', () => {
   it('creates page nodes with derived id and metadata', () => {
@@ -57,5 +57,20 @@ describe('ProjectLogicPage helpers', () => {
     expect(serializedEdges).toEqual([
       { id: 'edge-1', source: 'dummy-1', target: 'page-1', sourceHandle: 'out', targetHandle: 'input' }
     ]);
+  });
+
+  it('detects when a target handle is already taken', () => {
+    const edges: Edge[] = [
+      {
+        id: 'edge-1',
+        source: 'dummy-1',
+        target: 'page-1',
+        sourceHandle: 'out',
+        targetHandle: 'input'
+      }
+    ];
+
+    expect(isTargetHandleFree(edges, { target: 'page-1', targetHandle: 'input' })).toBe(false);
+    expect(isTargetHandleFree(edges, { target: 'page-1', targetHandle: 'other' })).toBe(true);
   });
 });

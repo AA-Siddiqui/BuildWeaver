@@ -1,15 +1,34 @@
 import { ChangeEvent } from 'react';
 import { Handle, NodeProps, Position } from 'reactflow';
-import { ObjectNodeData } from '@buildweaver/libs';
+import { ObjectNodeData, ScalarValue } from '@buildweaver/libs';
 import { NodeChrome } from './NodeChrome';
-import { evaluateObjectPreview } from './preview';
 import { useNodeDataUpdater } from './hooks/useNodeDataUpdater';
 import { parseKeyValuePairs, stringifyKeyValuePairs } from './valueParsers';
 import { logicLogger } from '../../lib/logger';
+import { usePreviewResolver } from './previewResolver';
+import { formatScalar } from './preview';
+
+const renderBinding = (binding?: { value: unknown; sourceLabel: string }) => {
+  if (!binding) {
+    return null;
+  }
+  return (
+    <div className="mt-1 rounded-lg border border-white/10 bg-bw-ink/50 px-2 py-1 text-xs text-bw-platinum">
+      <p className="text-[10px] uppercase tracking-[0.2em] text-bw-amber">Connected</p>
+      <p className="text-white">{formatScalar(binding.value as ScalarValue | Record<string, ScalarValue>)}</p>
+      <p className="text-[10px] text-bw-platinum/60">{binding.sourceLabel}</p>
+    </div>
+  );
+};
 
 export const ObjectNode = ({ id, data }: NodeProps<ObjectNodeData>) => {
   const updateData = useNodeDataUpdater<ObjectNodeData>(id);
-  const preview = evaluateObjectPreview(data);
+  const previewResolver = usePreviewResolver();
+  const preview = previewResolver.getNodePreview(id);
+  const sourceHandleId = `object-${id}-source`;
+  const patchHandleId = `object-${id}-patch`;
+  const sourceBinding = previewResolver.getHandleBinding(id, sourceHandleId);
+  const patchBinding = previewResolver.getHandleBinding(id, patchHandleId);
 
   const handleOperationChange = (event: ChangeEvent<HTMLSelectElement>) => {
     const operation = event.target.value as ObjectNodeData['operation'];
@@ -59,24 +78,30 @@ export const ObjectNode = ({ id, data }: NodeProps<ObjectNodeData>) => {
         </label>
         <div className="space-y-2">
           <div className="relative rounded-xl border border-white/10 bg-white/5 px-3 py-2">
-            <Handle type="target" id={`object-${id}-source`} position={Position.Left} className="!left-[-6px] !h-3 !w-3 !bg-bw-platinum" />
+            <Handle type="target" id={sourceHandleId} position={Position.Left} className="!left-[-6px] !h-3 !w-3 !bg-bw-platinum" />
             <p className="text-[11px] uppercase tracking-[0.2em] text-bw-platinum/60">Source sample</p>
-            <textarea
-              rows={3}
-              className="mt-1 w-full rounded-lg border border-white/10 bg-bw-ink/60 px-2 py-1 text-sm text-white"
-              value={stringifyKeyValuePairs(data.sourceSample ?? {})}
-              onChange={(event) => handleSampleChange('sourceSample', event)}
-            />
+            {renderBinding(sourceBinding)}
+            {!sourceBinding && (
+              <textarea
+                rows={3}
+                className="mt-1 w-full rounded-lg border border-white/10 bg-bw-ink/60 px-2 py-1 text-sm text-white"
+                value={stringifyKeyValuePairs(data.sourceSample ?? {})}
+                onChange={(event) => handleSampleChange('sourceSample', event)}
+              />
+            )}
           </div>
           <div className="relative rounded-xl border border-white/10 bg-white/5 px-3 py-2">
-            <Handle type="target" id={`object-${id}-patch`} position={Position.Left} className="!left-[-6px] !h-3 !w-3 !bg-bw-platinum" />
+            <Handle type="target" id={patchHandleId} position={Position.Left} className="!left-[-6px] !h-3 !w-3 !bg-bw-platinum" />
             <p className="text-[11px] uppercase tracking-[0.2em] text-bw-platinum/60">Patch sample</p>
-            <textarea
-              rows={3}
-              className="mt-1 w-full rounded-lg border border-white/10 bg-bw-ink/60 px-2 py-1 text-sm text-white"
-              value={stringifyKeyValuePairs(data.patchSample ?? {})}
-              onChange={(event) => handleSampleChange('patchSample', event)}
-            />
+            {renderBinding(patchBinding)}
+            {!patchBinding && (
+              <textarea
+                rows={3}
+                className="mt-1 w-full rounded-lg border border-white/10 bg-bw-ink/60 px-2 py-1 text-sm text-white"
+                value={stringifyKeyValuePairs(data.patchSample ?? {})}
+                onChange={(event) => handleSampleChange('patchSample', event)}
+              />
+            )}
           </div>
         </div>
         {(data.operation === 'set' || data.operation === 'get') && (

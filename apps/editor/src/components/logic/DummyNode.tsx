@@ -2,10 +2,10 @@ import { ChangeEvent } from 'react';
 import { Handle, NodeProps, Position } from 'reactflow';
 import { DummyNodeData, DummySampleValue, ScalarValue } from '@buildweaver/libs';
 import { NodeChrome } from './NodeChrome';
-import { evaluateDummyPreview } from './preview';
 import { useNodeDataUpdater } from './hooks/useNodeDataUpdater';
 import { logicLogger } from '../../lib/logger';
 import { parseScalarList, stringifyScalarList, parseKeyValuePairs, stringifyKeyValuePairs } from './valueParsers';
+import { usePreviewResolver } from './previewResolver';
 
 const DEFAULT_SAMPLES: Record<DummySampleValue['type'], DummySampleValue> = {
   integer: { type: 'integer', value: 42 },
@@ -18,7 +18,8 @@ const DEFAULT_SAMPLES: Record<DummySampleValue['type'], DummySampleValue> = {
 
 export const DummyNode = ({ id, data }: NodeProps<DummyNodeData>) => {
   const updateData = useNodeDataUpdater<DummyNodeData>(id);
-  const preview = evaluateDummyPreview(data);
+  const previewResolver = usePreviewResolver();
+  const preview = previewResolver.getNodePreview(id);
 
   const handleSampleChange = (sample: DummySampleValue) => {
     updateData((prev) => ({ ...prev, sample }));

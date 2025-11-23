@@ -2,9 +2,10 @@ import { ChangeEvent } from 'react';
 import { Handle, NodeProps, Position } from 'reactflow';
 import { ArithmeticNodeData } from '@buildweaver/libs';
 import { NodeChrome } from './NodeChrome';
-import { evaluateArithmeticPreview } from './preview';
 import { useNodeDataUpdater } from './hooks/useNodeDataUpdater';
 import { logicLogger } from '../../lib/logger';
+import { usePreviewResolver } from './previewResolver';
+import { formatScalar } from './preview';
 
 const MAX_OPERANDS = 4;
 const MIN_OPERANDS = 2;
@@ -13,7 +14,8 @@ const generateOperandId = () => `operand-${Math.random().toString(36).slice(2, 8
 
 export const ArithmeticNode = ({ id, data }: NodeProps<ArithmeticNodeData>) => {
   const updateData = useNodeDataUpdater<ArithmeticNodeData>(id);
-  const preview = evaluateArithmeticPreview(data);
+  const previewResolver = usePreviewResolver();
+  const preview = previewResolver.getNodePreview(id);
 
   const handleOperationChange = (event: ChangeEvent<HTMLSelectElement>) => {
     const operation = event.target.value as ArithmeticNodeData['operation'];
@@ -82,14 +84,17 @@ export const ArithmeticNode = ({ id, data }: NodeProps<ArithmeticNodeData>) => {
           </select>
         </label>
         <div className="space-y-2">
-          {data.operands.map((operand, index) => (
-            <div key={operand.id} className="relative rounded-xl border border-white/10 bg-white/5 px-3 py-2">
-              <Handle
-                type="target"
-                id={`operand-${operand.id}`}
-                position={Position.Left}
-                className="!left-[-6px] !h-3 !w-3 !bg-bw-platinum"
-              />
+          {data.operands.map((operand, index) => {
+            const handleId = `operand-${operand.id}`;
+            const binding = previewResolver.getHandleBinding(id, handleId);
+            return (
+              <div key={operand.id} className="relative rounded-xl border border-white/10 bg-white/5 px-3 py-2">
+                <Handle
+                  type="target"
+                  id={handleId}
+                  position={Position.Left}
+                  className="!left-[-6px] !h-3 !w-3 !bg-bw-platinum"
+                />
               <div className="flex items-center justify-between text-[11px] uppercase tracking-[0.2em] text-bw-platinum/60">
                 <span>
                   {operand.label}
@@ -101,14 +106,23 @@ export const ArithmeticNode = ({ id, data }: NodeProps<ArithmeticNodeData>) => {
                   </button>
                 )}
               </div>
-              <input
-                type="number"
-                className="mt-1 w-full rounded-lg border border-white/10 bg-bw-ink/60 px-2 py-1 text-sm text-white"
-                value={operand.sampleValue ?? ''}
-                onChange={(event) => handleOperandSampleChange(operand.id, event)}
-              />
-            </div>
-          ))}
+                {binding ? (
+                  <div className="mt-1 rounded-lg border border-white/10 bg-bw-ink/50 px-2 py-1 text-xs text-bw-platinum">
+                    <p className="text-[10px] uppercase tracking-[0.2em] text-bw-amber">Connected</p>
+                    <p className="text-white">{formatScalar(binding.value as number)}</p>
+                    <p className="text-[10px] text-bw-platinum/60">{binding.sourceLabel}</p>
+                  </div>
+                ) : (
+                  <input
+                    type="number"
+                    className="mt-1 w-full rounded-lg border border-white/10 bg-bw-ink/60 px-2 py-1 text-sm text-white"
+                    value={operand.sampleValue ?? ''}
+                    onChange={(event) => handleOperandSampleChange(operand.id, event)}
+                  />
+                )}
+              </div>
+            );
+          })}
           <button
             type="button"
             className="w-full rounded-xl border border-dashed border-white/20 py-2 text-xs text-white/70"

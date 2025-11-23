@@ -1,15 +1,39 @@
 import { ChangeEvent } from 'react';
 import { Handle, NodeProps, Position } from 'reactflow';
-import { ListNodeData } from '@buildweaver/libs';
+import { ListNodeData, ScalarValue } from '@buildweaver/libs';
 import { NodeChrome } from './NodeChrome';
-import { evaluateListPreview } from './preview';
 import { useNodeDataUpdater } from './hooks/useNodeDataUpdater';
 import { parseScalarList, stringifyScalarList } from './valueParsers';
 import { logicLogger } from '../../lib/logger';
+import { usePreviewResolver } from './previewResolver';
+import { formatScalar } from './preview';
+
+const MAX_SAMPLE_LENGTH = 5;
+
+const renderBindingPreview = (binding?: { value: unknown; sourceLabel: string }) => {
+  if (!binding) {
+    return null;
+  }
+  const readable = Array.isArray(binding.value)
+    ? (binding.value as ScalarValue[]).map((item) => formatScalar(item)).join(', ')
+    : formatScalar(binding.value as ScalarValue);
+  return (
+    <div className="mt-1 rounded-lg border border-white/10 bg-bw-ink/50 px-2 py-1 text-xs text-bw-platinum">
+      <p className="text-[10px] uppercase tracking-[0.2em] text-bw-amber">Connected</p>
+      <p className="text-white">{readable}</p>
+      <p className="text-[10px] text-bw-platinum/60">{binding.sourceLabel}</p>
+    </div>
+  );
+};
 
 export const ListNode = ({ id, data }: NodeProps<ListNodeData>) => {
   const updateData = useNodeDataUpdater<ListNodeData>(id);
-  const preview = evaluateListPreview(data);
+  const previewResolver = usePreviewResolver();
+  const preview = previewResolver.getNodePreview(id);
+  const primaryHandleId = `list-${id}-primary`;
+  const secondaryHandleId = `list-${id}-secondary`;
+  const primaryBinding = previewResolver.getHandleBinding(id, primaryHandleId);
+  const secondaryBinding = previewResolver.getHandleBinding(id, secondaryHandleId);
 
   const handleOperationChange = (event: ChangeEvent<HTMLSelectElement>) => {
     const operation = event.target.value as ListNodeData['operation'];
@@ -18,13 +42,13 @@ export const ListNode = ({ id, data }: NodeProps<ListNodeData>) => {
   };
 
   const handleSampleChange = (key: 'primarySample' | 'secondarySample', event: ChangeEvent<HTMLTextAreaElement>) => {
-    const parsed = parseScalarList(event.target.value, data.limit ?? 5);
+    const parsed = parseScalarList(event.target.value, data.limit ?? MAX_SAMPLE_LENGTH);
     logicLogger.debug('List sample updated', { nodeId: id, key, size: parsed.length });
     updateData((prev) => ({ ...prev, [key]: parsed }));
   };
 
   const handleLimitChange = (event: ChangeEvent<HTMLInputElement>) => {
-    const limit = Math.max(1, Math.min(5, Number(event.target.value) || 5));
+    const limit = Math.max(1, Math.min(MAX_SAMPLE_LENGTH, Number(event.target.value) || MAX_SAMPLE_LENGTH));
     logicLogger.debug('List preview limit updated', { nodeId: id, limit });
     updateData((prev) => ({ ...prev, limit }));
   };
@@ -56,24 +80,40 @@ export const ListNode = ({ id, data }: NodeProps<ListNodeData>) => {
         </label>
         <div className="space-y-2">
           <div className="relative rounded-xl border border-white/10 bg-white/5 px-3 py-2">
-            <Handle type="target" id={`list-${id}-primary`} position={Position.Left} className="!left-[-6px] !h-3 !w-3 !bg-bw-platinum" />
-            <p className="text-[11px] uppercase tracking-[0.2em] text-bw-platinum/60">Primary sample</p>
-            <textarea
-              rows={3}
-              className="mt-1 w-full rounded-lg border border-white/10 bg-bw-ink/60 px-2 py-1 text-sm text-white"
-              value={stringifyScalarList(data.primarySample ?? [])}
-              onChange={(event) => handleSampleChange('primarySample', event)}
+            <Handle
+              type="target"
+              id={primaryHandleId}
+              position={Position.Left}
+              className="!left-[-6px] !h-3 !w-3 !bg-bw-platinum"
             />
+            <p className="text-[11px] uppercase tracking-[0.2em] text-bw-platinum/60">Primary sample</p>
+            {renderBindingPreview(primaryBinding)}
+            {!primaryBinding && (
+              <textarea
+                rows={3}
+                className="mt-1 w-full rounded-lg border border-white/10 bg-bw-ink/60 px-2 py-1 text-sm text-white"
+                value={stringifyScalarList(data.primarySample ?? [])}
+                onChange={(event) => handleSampleChange('primarySample', event)}
+              />
+            )}
           </div>
           <div className="relative rounded-xl border border-white/10 bg-white/5 px-3 py-2">
-            <Handle type="target" id={`list-${id}-secondary`} position={Position.Left} className="!left-[-6px] !h-3 !w-3 !bg-bw-platinum" />
-            <p className="text-[11px] uppercase tracking-[0.2em] text-bw-platinum/60">Secondary sample</p>
-            <textarea
-              rows={3}
-              className="mt-1 w-full rounded-lg border border-white/10 bg-bw-ink/60 px-2 py-1 text-sm text-white"
-              value={stringifyScalarList(data.secondarySample ?? [])}
-              onChange={(event) => handleSampleChange('secondarySample', event)}
+            <Handle
+              type="target"
+              id={secondaryHandleId}
+              position={Position.Left}
+              className="!left-[-6px] !h-3 !w-3 !bg-bw-platinum"
             />
+            <p className="text-[11px] uppercase tracking-[0.2em] text-bw-platinum/60">Secondary sample</p>
+            {renderBindingPreview(secondaryBinding)}
+            {!secondaryBinding && (
+              <textarea
+                rows={3}
+                className="mt-1 w-full rounded-lg border border-white/10 bg-bw-ink/60 px-2 py-1 text-sm text-white"
+                value={stringifyScalarList(data.secondarySample ?? [])}
+                onChange={(event) => handleSampleChange('secondarySample', event)}
+              />
+            )}
           </div>
         </div>
         <div className="flex gap-2">
@@ -82,9 +122,9 @@ export const ListNode = ({ id, data }: NodeProps<ListNodeData>) => {
             <input
               type="number"
               min={1}
-              max={5}
+              max={MAX_SAMPLE_LENGTH}
               className="mt-1 rounded-xl border border-white/10 bg-white/10 px-3 py-2 text-xs text-white"
-              value={data.limit ?? 5}
+              value={data.limit ?? MAX_SAMPLE_LENGTH}
               onChange={handleLimitChange}
             />
           </label>

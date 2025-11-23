@@ -38,6 +38,7 @@ import { ArithmeticNode } from '../components/logic/ArithmeticNode';
 import { StringNode } from '../components/logic/StringNode';
 import { ListNode } from '../components/logic/ListNode';
 import { ObjectNode } from '../components/logic/ObjectNode';
+import { PreviewResolverProvider, createPreviewResolver } from '../components/logic/previewResolver';
 import { logicLogger } from '../lib/logger';
 
 const nodeTypes = {
@@ -51,6 +52,15 @@ const nodeTypes = {
 
 type FlowNode = Node<LogicEditorNodeData>;
 type FlowEdge = Edge;
+
+export const isTargetHandleFree = (edges: Edge[], connection: Partial<Connection>): boolean => {
+  if (!connection.target || !connection.targetHandle) {
+    return true;
+  }
+  return !edges.some(
+    (edge) => edge.target === connection.target && edge.targetHandle === connection.targetHandle
+  );
+};
 
 const generateId = () => {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -223,6 +233,7 @@ const LogicEditorView = () => {
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [feedback, setFeedback] = useState('');
+  const previewResolver = useMemo(() => createPreviewResolver(nodes, edges), [nodes, edges]);
 
   useEffect(() => {
     setFeedback('');
@@ -297,13 +308,26 @@ const LogicEditorView = () => {
     [onEdgesChange]
   );
 
+  const isHandleAvailable = useCallback(
+    (connection: Partial<Connection>) => isTargetHandleFree(edges, connection),
+    [edges]
+  );
+
   const handleConnect = useCallback(
     (connection: Connection) => {
+      if (!isHandleAvailable(connection)) {
+        logicLogger.warn('Connection rejected: handle already in use', {
+          target: connection.target,
+          targetHandle: connection.targetHandle
+        });
+        setFeedback('Input already connected. Remove existing link first.');
+        return;
+      }
       logicLogger.debug('Nodes connected', { source: connection.source, target: connection.target });
       setHasUnsavedChanges(true);
       setEdges((eds: FlowEdge[]) => addEdge({ ...connection, id: `${connection.source}-${connection.target}-${Date.now()}` }, eds));
     },
-    [setEdges]
+    [isHandleAvailable, setEdges]
   );
 
   const handleSave = useCallback(() => {
@@ -426,24 +450,27 @@ const LogicEditorView = () => {
             </div>
           )}
           <div ref={reactFlowWrapper} className="h-full">
-            <ReactFlow
-              nodes={nodes}
-              edges={edges}
-              nodeTypes={nodeTypes}
-              fitView
-              onNodesChange={handleNodesChange}
-              onEdgesChange={handleEdgesChange}
-              onConnect={handleConnect}
-              onDrop={handleDrop}
-              onDragOver={handleDragOver}
-              panOnDrag
-              panOnScroll
-              zoomOnScroll
-            >
-              <MiniMap pannable zoomable className="!bg-bw-ink/80" />
-              <Controls />
-              <Background gap={16} color="#ffffff33" />
-            </ReactFlow>
+            <PreviewResolverProvider resolver={previewResolver}>
+              <ReactFlow
+                nodes={nodes}
+                edges={edges}
+                nodeTypes={nodeTypes}
+                fitView
+                onNodesChange={handleNodesChange}
+                onEdgesChange={handleEdgesChange}
+                onConnect={handleConnect}
+                isValidConnection={isHandleAvailable}
+                onDrop={handleDrop}
+                onDragOver={handleDragOver}
+                panOnDrag
+                panOnScroll
+                zoomOnScroll
+              >
+                <MiniMap pannable zoomable className="!bg-bw-ink/80" />
+                <Controls />
+                <Background gap={16} color="#ffffff33" />
+              </ReactFlow>
+            </PreviewResolverProvider>
           </div>
         </div>
       </div>
