@@ -2,10 +2,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Puck } from '@measured/puck';
-import type { ComponentData, Config, Content, Data } from '@measured/puck';
+import type { ComponentData, Content, Data } from '@measured/puck';
 import '@measured/puck/puck.css';
 import type { PageBuilderState, PageDocument, PageDynamicInput } from '../types/api';
 import { projectPagesApi } from '../lib/api-client';
+import { createPageBuilderConfig } from './page-builder/builder-config';
+import { clearBuilderDraft, loadBuilderDraft, persistBuilderDraft } from './page-builder/draft-storage';
 
 const createEmptyBuilderState = (): Data =>
   ({
@@ -24,6 +26,8 @@ export const derivePuckSessionKey = (page?: Pick<PageDocument, 'id' | 'updatedAt
   const updatedAt = page?.updatedAt ?? 'initial';
   return `${id}:${updatedAt}`;
 };
+
+const deriveDraftStorageKey = (projectId?: string, pageId?: string): string => `${projectId ?? 'unknown-project'}:${pageId ?? 'unknown-page'}`;
 
 const getZoneCount = (zones?: Record<string, Content> | Map<string, Content>) => {
   if (!zones) {
@@ -107,6 +111,12 @@ export const PageBuilderPage = () => {
   const sheetToggleButtonRef = useRef<HTMLButtonElement | null>(null);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [feedback, setFeedback] = useState('');
+  const draftStatusRef = useRef<{ restored: boolean; savedAt?: number }>({ restored: false });
+  const draftPersistHandle = useRef<number | null>(null);
+  const draftStorageKey = useMemo(() => deriveDraftStorageKey(projectId, pageId), [projectId, pageId]);
+  const updateDraftStatus = useCallback((next: Partial<{ restored: boolean; savedAt?: number }>) => {
+    draftStatusRef.current = { ...draftStatusRef.current, ...next };
+  }, []);
 
   const pageQuery = useQuery({
     queryKey: ['project-page', projectId, pageId],
@@ -130,10 +140,39 @@ export const PageBuilderPage = () => {
   );
 
   useEffect(() => {
-    if (pageQuery.data?.page) {
-      hydrateFromPage(pageQuery.data.page as PageDocument);
+    const incomingPage = pageQuery.data?.page as PageDocument | undefined;
+    if (!incomingPage) {
+      return;
     }
-  }, [pageQuery.data?.page, hydrateFromPage]);
+    const serverUpdatedAt = incomingPage.updatedAt ? Date.parse(incomingPage.updatedAt) : 0;
+    const { restored, savedAt } = draftStatusRef.current;
+    if (restored && savedAt && savedAt > serverUpdatedAt) {
+      logPageBuilderEvent('Draft newer than API payload — skipping hydrate', {
+        pageId: incomingPage.id,
+        savedAt,
+        serverUpdatedAt
+      });
+      return;
+    }
+    hydrateFromPage(incomingPage);
+    updateDraftStatus({ restored: false, savedAt: undefined });
+  }, [hydrateFromPage, pageQuery.data?.page, updateDraftStatus]);
+
+  useEffect(() => {
+    const draft = loadBuilderDraft(draftStorageKey);
+    if (draft) {
+      logPageBuilderEvent('Restoring draft from local storage', {
+        sessionKey: draftStorageKey,
+        savedAt: draft.savedAt
+      });
+      setBuilderState(toPuckValue(draft.state));
+      setDynamicInputs(draft.dynamicInputs);
+      setHasUnsavedChanges(true);
+      updateDraftStatus({ restored: true, savedAt: draft.savedAt });
+      return;
+    }
+    updateDraftStatus({ restored: false, savedAt: undefined });
+  }, [draftStorageKey, updateDraftStatus]);
 
   useEffect(() => {
     if (pageQuery.isError) {
@@ -144,6 +183,14 @@ export const PageBuilderPage = () => {
       });
     }
   }, [pageQuery.error, pageQuery.isError, pageId, projectId]);
+
+  useEffect(() => {
+    return () => {
+      if (typeof window !== 'undefined' && draftPersistHandle.current) {
+        window.clearTimeout(draftPersistHandle.current);
+      }
+    };
+  }, []);
 
   const dynamicLabelMap = useMemo(() => {
     const map = new Map<string, string>();
@@ -156,86 +203,50 @@ export const PageBuilderPage = () => {
     [dynamicInputs]
   );
 
-  const builderConfig = useMemo(() => {
-    const resolveContent = (text?: string, bindingId?: string) => {
-      if (bindingId) {
-        return `{{${dynamicLabelMap.get(bindingId) ?? bindingId}}}`;
-      }
-      return text || 'Text';
-    };
-
-    return {
-      components: {
-        Heading: {
-          label: 'Heading',
-          fields: {
-            content: { type: 'text', label: 'Content' },
-            size: {
-              type: 'select',
-              label: 'Size',
-              options: [
-                { label: 'XL', value: 'h1' },
-                { label: 'Large', value: 'h2' },
-                { label: 'Medium', value: 'h3' }
-              ]
-            },
-            bindingId: {
-              type: 'select',
-              label: 'Dynamic value',
-              options: bindingOptions
-            }
-          },
-          render: ({ content, size = 'h2', bindingId }: { content?: string; size?: string; bindingId?: string }) => {
-            const Tag = size as keyof JSX.IntrinsicElements;
-            return <Tag className="font-semibold text-3xl">{resolveContent(content, bindingId)}</Tag>;
+  const builderConfig = useMemo(
+    () =>
+      createPageBuilderConfig({
+        bindingOptions,
+        resolveBinding: (text?: string, bindingId?: string) => {
+          if (bindingId) {
+            return `{{${dynamicLabelMap.get(bindingId) ?? bindingId}}}`;
           }
-        },
-        Paragraph: {
-          label: 'Paragraph',
-          fields: {
-            content: { type: 'textarea', label: 'Content' },
-            bindingId: {
-              type: 'select',
-              label: 'Dynamic value',
-              options: bindingOptions
-            }
-          },
-          render: ({ content, bindingId }: { content?: string; bindingId?: string }) => (
-            <p className="text-base text-gray-600">{resolveContent(content, bindingId)}</p>
-          )
-        },
-        Button: {
-          label: 'Button',
-          fields: {
-            label: { type: 'text', label: 'Label' },
-            bindingId: {
-              type: 'select',
-              label: 'Dynamic value',
-              options: bindingOptions
-            },
-            variant: {
-              type: 'select',
-              label: 'Variant',
-              options: [
-                { label: 'Primary', value: 'primary' },
-                { label: 'Ghost', value: 'ghost' }
-              ]
-            }
-          },
-          render: ({ label, variant = 'primary', bindingId }: { label?: string; variant?: string; bindingId?: string }) => (
-            <button
-              className={`rounded-xl px-4 py-2 font-semibold ${
-                variant === 'ghost' ? 'border border-gray-300 text-gray-700' : 'bg-bw-sand text-bw-ink'
-              }`}
-              type="button"
-            >
-              {resolveContent(label, bindingId)}
-            </button>
-          )
+          return text || 'Text';
         }
+      }),
+    [bindingOptions, dynamicLabelMap]
+  );
+
+  const scheduleDraftPersist = useCallback(
+    (nextState: Data, nextInputs?: PageDynamicInput[]) => {
+      if (typeof window === 'undefined') {
+        return;
       }
-    } as Config;
-  }, [bindingOptions, dynamicLabelMap]);
+      if (draftPersistHandle.current) {
+        window.clearTimeout(draftPersistHandle.current);
+      }
+      draftPersistHandle.current = window.setTimeout(() => {
+        try {
+          const normalizedState = normalizeBuilderStateForSave(nextState) as PageBuilderState;
+          const savedAt = persistBuilderDraft(draftStorageKey, normalizedState, nextInputs ?? dynamicInputs);
+          if (savedAt) {
+            updateDraftStatus({ savedAt });
+            logPageBuilderEvent('Draft stored locally', {
+              storageKey: draftStorageKey,
+              savedAt,
+              summary: summarizeBuilderData(nextState)
+            });
+          }
+        } catch (error) {
+          logPageBuilderEvent('Draft storage failed', {
+            storageKey: draftStorageKey,
+            error: error instanceof Error ? error.message : 'Unknown error'
+          });
+        }
+      }, 450);
+    },
+    [draftStorageKey, dynamicInputs, updateDraftStatus]
+  );
 
   const saveMutation = useMutation({
     mutationFn: () => {
@@ -255,6 +266,8 @@ export const PageBuilderPage = () => {
         summary: summarizeBuilderData(page.builderState as Data)
       });
       hydrateFromPage(page);
+      clearBuilderDraft(draftStorageKey);
+      updateDraftStatus({ restored: false, savedAt: undefined });
       setFeedback('Saved');
       queryClient.invalidateQueries({ queryKey: ['project-graph', projectId] });
       setTimeout(() => setFeedback(''), 2000);
@@ -276,34 +289,50 @@ export const PageBuilderPage = () => {
       pageId,
       summary: summarizeBuilderData(value)
     });
-  }, [pageId]);
+    scheduleDraftPersist(value);
+  }, [pageId, scheduleDraftPersist]);
 
   const handleDynamicInputChange = useCallback(
     (inputId: string, updates: Partial<PageDynamicInput>) => {
-      setDynamicInputs((current) =>
-        current.map((input) => (input.id === inputId ? { ...input, ...updates, label: updates.label ?? input.label } : input))
-      );
+      setDynamicInputs((current) => {
+        const next = current.map((input) =>
+          input.id === inputId ? { ...input, ...updates, label: updates.label ?? input.label } : input
+        );
+        scheduleDraftPersist(builderState, next);
+        return next;
+      });
       setHasUnsavedChanges(true);
       logPageBuilderEvent('Dynamic input updated', { inputId, updates: Object.keys(updates) });
     },
-    []
+    [builderState, scheduleDraftPersist]
   );
 
-  const handleRemoveInput = useCallback((inputId: string) => {
-    setDynamicInputs((current) => current.filter((input) => input.id !== inputId));
-    setHasUnsavedChanges(true);
-    logPageBuilderEvent('Dynamic input removed', { inputId });
-  }, []);
+  const handleRemoveInput = useCallback(
+    (inputId: string) => {
+      setDynamicInputs((current) => {
+        const next = current.filter((input) => input.id !== inputId);
+        scheduleDraftPersist(builderState, next);
+        return next;
+      });
+      setHasUnsavedChanges(true);
+      logPageBuilderEvent('Dynamic input removed', { inputId });
+    },
+    [builderState, scheduleDraftPersist]
+  );
 
   const handleAddDynamicInput = useCallback(() => {
     const label = window.prompt('Dynamic field label');
     if (!label) {
       return;
     }
-    setDynamicInputs((current) => current.concat({ id: randomId(), label, dataType: 'string' }));
+    setDynamicInputs((current) => {
+      const next = current.concat({ id: randomId(), label, dataType: 'string' });
+      scheduleDraftPersist(builderState, next);
+      return next;
+    });
     setHasUnsavedChanges(true);
     logPageBuilderEvent('Dynamic input added', { label });
-  }, []);
+  }, [builderState, scheduleDraftPersist]);
 
   const handleSave = useCallback(() => {
     logPageBuilderEvent('Save triggered', { pageId, projectId, hasUnsavedChanges });
