@@ -7,6 +7,14 @@ It combines a **visual UI builder (Puck)**, a **node-based logic builder (React 
 The codebase is a **monorepo** managed with **pnpm workspaces** and structured for modularity.  
 Copilot should follow the architectural conventions and use the correct packages and patterns described below.
 
+You are encouraged to read the official docs for the main libraries used to understand their APIs and best practices:
+
+Docs for Puck can be found at:
+- https://puckeditor.com/docs
+
+Docs for React Flow can be found at:
+- https://reactflow.dev/api-reference
+
 ---
 
 ## Monorepo Structure
