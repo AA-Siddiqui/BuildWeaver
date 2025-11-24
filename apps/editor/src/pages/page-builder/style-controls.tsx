@@ -1,4 +1,4 @@
-import { useId } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import type { CSSProperties, ChangeEvent } from 'react';
 import type { CustomField, Field, FieldProps } from '@measured/puck';
 
@@ -17,6 +17,11 @@ type PresetOrCustomFieldConfig = {
   label: string;
   fieldKey: string;
   presetOptions: ReadonlyArray<{ label: string; value: string }>;
+  placeholder?: string;
+};
+
+type CustomCssFieldConfig = {
+  label: string;
   placeholder?: string;
 };
 
@@ -70,6 +75,12 @@ const createPresetOrCustomField = ({ label, fieldKey, presetOptions, placeholder
       placeholder={placeholder}
     />
   )
+});
+
+const createCustomCssField = ({ label, placeholder }: CustomCssFieldConfig): Field => ({
+  type: 'custom',
+  label,
+  render: (props) => <CustomCssFieldControl {...props} placeholder={placeholder} />
 });
 
 const spacingOptions = [
@@ -335,18 +346,22 @@ const sharedStyleFields = {
 
 type SharedFields = typeof sharedStyleFields & {
   customAttributes: ReturnType<typeof createCustomAttributesField>;
+  customCss: ReturnType<typeof createCustomCssField>;
 };
 
 const sharedFields: SharedFields = {
   ...sharedStyleFields,
-  customAttributes: createCustomAttributesField()
+  customAttributes: createCustomAttributesField(),
+  customCss: createCustomCssField({ label: 'Custom CSS', placeholder: 'e.g. color: #000; margin-top: 2rem;' })
 };
 
 export type StyleFieldKey = keyof typeof sharedStyleFields;
 export type StyleFieldValues = Partial<Record<StyleFieldKey, string>>;
 
 export type StyleableProps<T extends Record<string, unknown>> = T & StyleFieldValues & {
+  id?: string;
   customAttributes?: CustomAttributeList;
+  customCss?: string;
 };
 
 export const STYLE_FIELD_KEYS = Object.keys(sharedStyleFields) as StyleFieldKey[];
@@ -483,7 +498,22 @@ const PresetOrCustomFieldControl = ({
   const inputId = `${resolvedId}-custom`;
   const normalizedValue = value ?? '';
   const hasPresetMatch = presetOptions.some((option) => option.value === normalizedValue);
-  const selectValue = hasPresetMatch ? normalizedValue : CUSTOM_OPTION_VALUE;
+  const [mode, setMode] = useState<'preset' | 'custom'>(() => (hasPresetMatch ? 'preset' : 'custom'));
+  const previousValueRef = useRef(normalizedValue);
+
+  useEffect(() => {
+    if (previousValueRef.current !== normalizedValue) {
+      previousValueRef.current = normalizedValue;
+      setMode(hasPresetMatch ? 'preset' : 'custom');
+      return;
+    }
+    if (!hasPresetMatch && mode !== 'custom') {
+      setMode('custom');
+    }
+  }, [hasPresetMatch, normalizedValue, mode]);
+
+  const selectValue = mode === 'custom' ? CUSTOM_OPTION_VALUE : normalizedValue;
+  const showCustomInput = mode === 'custom';
 
   const emitChange = (next: string) => {
     if (readOnly) {
@@ -496,21 +526,24 @@ const PresetOrCustomFieldControl = ({
     const next = event.target.value;
     if (next === CUSTOM_OPTION_VALUE) {
       logStyleControlEvent('Preset switched to custom entry', { fieldKey });
+      setMode('custom');
       return;
     }
     logStyleControlEvent('Preset value selected', { fieldKey, value: next });
+    setMode('preset');
     emitChange(next);
   };
 
   const handleCustomChange = (event: ChangeEvent<HTMLInputElement>) => {
     const next = event.target.value;
     logStyleControlEvent('Custom value updated', { fieldKey, value: next });
+    setMode('custom');
     emitChange(next);
   };
 
   return (
     <div className="space-y-2">
-      <label htmlFor={inputId} className="text-[0.65rem] uppercase tracking-[0.3em] text-gray-500">
+      <label htmlFor={selectId} className="text-[0.65rem] uppercase tracking-[0.3em] text-gray-500">
         {field.label ?? 'Value'}
       </label>
       <div className="flex flex-col gap-2">
@@ -529,16 +562,18 @@ const PresetOrCustomFieldControl = ({
             </option>
           ))}
         </select>
-        <input
-          id={inputId}
-          aria-label={`${field.label ?? 'Value'} custom value`}
-          type="text"
-          className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:border-bw-amber focus:outline-none disabled:cursor-not-allowed"
-          value={normalizedValue}
-          onChange={handleCustomChange}
-          placeholder={placeholder}
-          disabled={readOnly}
-        />
+        {showCustomInput ? (
+          <input
+            id={inputId}
+            aria-label={`${field.label ?? 'Value'} custom value`}
+            type="text"
+            className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:border-bw-amber focus:outline-none disabled:cursor-not-allowed"
+            value={normalizedValue}
+            onChange={handleCustomChange}
+            placeholder={placeholder}
+            disabled={readOnly}
+          />
+        ) : null}
       </div>
     </div>
   );
@@ -547,6 +582,40 @@ const PresetOrCustomFieldControl = ({
 type ColorPickerFieldControlProps = FieldProps<CustomField<string>, string> & {
   placeholder?: string;
   fieldKey: string;
+};
+
+type CustomCssFieldControlProps = FieldProps<CustomField<string>, string> & {
+  placeholder?: string;
+};
+
+const CustomCssFieldControl = ({ id, field, value, onChange, readOnly, placeholder }: CustomCssFieldControlProps) => {
+  const generatedId = useId();
+  const resolvedId = id ?? generatedId;
+  const handleChange = (event: ChangeEvent<HTMLTextAreaElement>) => {
+    if (readOnly) {
+      return;
+    }
+    const next = event.target.value;
+    logStyleControlEvent('Custom CSS updated', { fieldKey: 'customCss', length: next.length });
+    onChange(next);
+  };
+
+  return (
+    <div className="space-y-2">
+      <label htmlFor={resolvedId} className="text-[0.65rem] uppercase tracking-[0.3em] text-gray-500">
+        {field.label ?? 'Custom CSS'}
+      </label>
+      <textarea
+        id={resolvedId}
+        className="h-28 w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:border-bw-amber focus:outline-none disabled:cursor-not-allowed"
+        value={value ?? ''}
+        onChange={handleChange}
+        placeholder={placeholder ?? 'color: #000;\npadding: 12px;'}
+        disabled={readOnly}
+      />
+      <p className="text-[0.65rem] uppercase tracking-[0.3em] text-gray-400">Scoped to this component</p>
+    </div>
+  );
 };
 
 const ColorPickerFieldControl = ({ id, field, onChange, readOnly, value, placeholder, fieldKey }: ColorPickerFieldControlProps) => {

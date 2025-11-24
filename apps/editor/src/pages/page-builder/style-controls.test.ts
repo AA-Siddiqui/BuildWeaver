@@ -112,9 +112,32 @@ describe('style-control custom fields', () => {
         onChange: handleChange
       } as Parameters<NonNullable<typeof widthField.render>>[0])
     );
+    expect(screen.queryByLabelText(/width custom value/i)).not.toBeInTheDocument();
     fireEvent.change(screen.getByLabelText(/width preset options/i), { target: { value: '100%' } });
     expect(handleChange).toHaveBeenCalledWith('100%');
-    fireEvent.change(screen.getByLabelText(/width custom value/i), { target: { value: '640px' } });
+    fireEvent.change(screen.getByLabelText(/width preset options/i), { target: { value: '__custom__' } });
+    const customInput = screen.getByLabelText(/width custom value/i);
+    fireEvent.change(customInput, { target: { value: '640px' } });
     expect(handleChange).toHaveBeenLastCalledWith('640px');
+  });
+
+  it('captures custom CSS updates for scoped styling', () => {
+    const fields = withStyleFields({});
+    const cssField = fields.customCss;
+    if (!cssField || cssField.type !== 'custom') {
+      throw new Error('Expected customCss field to be custom');
+    }
+    const handleChange = jest.fn();
+    render(
+      cssField.render({
+        field: cssField,
+        value: '',
+        id: 'css-field',
+        name: 'customCss',
+        onChange: handleChange
+      } as Parameters<NonNullable<typeof cssField.render>>[0])
+    );
+    fireEvent.change(screen.getByLabelText(/custom css/i), { target: { value: 'color: red;' } });
+    expect(handleChange).toHaveBeenCalledWith('color: red;');
   });
 });

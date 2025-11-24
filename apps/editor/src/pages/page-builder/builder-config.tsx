@@ -7,6 +7,7 @@ import {
   withStyleFields,
   type StyleableProps
 } from './style-controls';
+import { attachNodeIdentity, renderScopedCss } from './custom-css';
 
 type BindingOption = { label: string; value: string };
 
@@ -175,14 +176,17 @@ export const createPageBuilderConfig = ({ bindingOptions, resolveBinding }: Buil
       },
       render: (props) => {
         const { styleProps, rest } = splitStyleProps(props);
-        const { content, size = 'h2', bindingId, customAttributes } = rest as HeadingProps;
+        const { content, size = 'h2', bindingId, customAttributes, customCss, id } = rest as HeadingProps;
         const Tag = (size as keyof JSX.IntrinsicElements) || 'h2';
         const resolvedContent = resolveBinding(content, bindingId);
-        const attributeProps = buildAttributeProps(customAttributes);
+        const attributeProps = attachNodeIdentity(id, buildAttributeProps(customAttributes));
         return (
-          <Tag style={createInlineStyle(styleProps)} className="text-bw-ink" {...attributeProps}>
-            {resolvedContent}
-          </Tag>
+          <>
+            <Tag style={createInlineStyle(styleProps)} className="text-bw-ink" {...attributeProps}>
+              {resolvedContent}
+            </Tag>
+            {renderScopedCss(id, customCss)}
+          </>
         );
       }
     },
@@ -195,12 +199,15 @@ export const createPageBuilderConfig = ({ bindingOptions, resolveBinding }: Buil
       },
       render: (props) => {
         const { styleProps, rest } = splitStyleProps(props);
-        const { content, bindingId, customAttributes } = rest as ParagraphProps;
-        const attributeProps = buildAttributeProps(customAttributes);
+        const { content, bindingId, customAttributes, customCss, id } = rest as ParagraphProps;
+        const attributeProps = attachNodeIdentity(id, buildAttributeProps(customAttributes));
         return (
-          <p style={createInlineStyle(styleProps)} className="text-base leading-relaxed" {...attributeProps}>
-            {resolveBinding(content, bindingId)}
-          </p>
+          <>
+            <p style={createInlineStyle(styleProps)} className="text-base leading-relaxed" {...attributeProps}>
+              {resolveBinding(content, bindingId)}
+            </p>
+            {renderScopedCss(id, customCss)}
+          </>
         );
       }
     },
@@ -216,10 +223,10 @@ export const createPageBuilderConfig = ({ bindingOptions, resolveBinding }: Buil
       },
       render: (props) => {
         const { styleProps, rest } = splitStyleProps(props);
-        const { label, variant = 'primary', bindingId, href, customAttributes } = rest as ButtonProps;
+        const { label, variant = 'primary', bindingId, href, customAttributes, customCss, id } = rest as ButtonProps;
         const content = resolveBinding(label, bindingId);
         const baseStyle = createInlineStyle(styleProps);
-        const attributeProps = buildAttributeProps(customAttributes);
+        const attributeProps = attachNodeIdentity(id, buildAttributeProps(customAttributes));
         const className =
           variant === 'ghost'
             ? 'border border-gray-300 bg-transparent text-gray-800'
@@ -228,15 +235,18 @@ export const createPageBuilderConfig = ({ bindingOptions, resolveBinding }: Buil
               : 'bg-bw-sand text-bw-ink shadow-sm';
         const Element = href ? 'a' : 'button';
         return (
-          <Element
-            className={`inline-flex items-center justify-center font-semibold transition hover:opacity-90 ${className}`}
-            style={baseStyle}
-            href={href}
-            role={href ? 'button' : undefined}
-            {...attributeProps}
-          >
-            {content}
-          </Element>
+          <>
+            <Element
+              className={`inline-flex items-center justify-center font-semibold transition hover:opacity-90 ${className}`}
+              style={baseStyle}
+              href={href}
+              role={href ? 'button' : undefined}
+              {...attributeProps}
+            >
+              {content}
+            </Element>
+            {renderScopedCss(id, customCss)}
+          </>
         );
       }
     },
@@ -262,24 +272,37 @@ export const createPageBuilderConfig = ({ bindingOptions, resolveBinding }: Buil
       }),
       render: (props) => {
         const { styleProps, rest } = splitStyleProps(props);
-        const { eyebrow, heading, subheading, description, contentSlot, backgroundImage, customAttributes } = rest as SectionProps;
+        const {
+          eyebrow,
+          heading,
+          subheading,
+          description,
+          contentSlot,
+          backgroundImage,
+          customAttributes,
+          customCss,
+          id
+        } = rest as SectionProps;
         const inlineStyle = {
           ...createInlineStyle(styleProps),
           backgroundImage: backgroundImage ? `url(${backgroundImage})` : undefined,
           backgroundSize: backgroundImage ? 'cover' : undefined,
           backgroundPosition: backgroundImage ? 'center' : undefined
         };
-        const attributeProps = buildAttributeProps(customAttributes);
+        const attributeProps = attachNodeIdentity(id, buildAttributeProps(customAttributes));
         return (
-          <section style={inlineStyle} className="relative w-full overflow-hidden border border-gray-100 shadow-sm" {...attributeProps}>
-            <div className="space-y-3">
-              {eyebrow && <p className="text-xs uppercase tracking-[0.2em] text-bw-amber">{eyebrow}</p>}
-              {heading && <h2 className="text-3xl font-semibold text-bw-ink">{heading}</h2>}
-              {subheading && <p className="text-lg text-gray-600">{subheading}</p>}
-              {description && <p className="text-base text-gray-500">{description}</p>}
-            </div>
-            <div className="mt-6">{renderSlot(contentSlot, 'Add components into this section', 120)}</div>
-          </section>
+          <>
+            <section style={inlineStyle} className="relative w-full overflow-hidden border border-gray-100 shadow-sm" {...attributeProps}>
+              <div className="space-y-3">
+                {eyebrow && <p className="text-xs uppercase tracking-[0.2em] text-bw-amber">{eyebrow}</p>}
+                {heading && <h2 className="text-3xl font-semibold text-bw-ink">{heading}</h2>}
+                {subheading && <p className="text-lg text-gray-600">{subheading}</p>}
+                {description && <p className="text-base text-gray-500">{description}</p>}
+              </div>
+              <div className="mt-6">{renderSlot(contentSlot, 'Add components into this section', 120)}</div>
+            </section>
+            {renderScopedCss(id, customCss)}
+          </>
         );
       }
     },
@@ -315,25 +338,28 @@ export const createPageBuilderConfig = ({ bindingOptions, resolveBinding }: Buil
       }),
       render: (props) => {
         const { styleProps, rest } = splitStyleProps(props);
-        const { layout = 'equal', stackAt = 'md', left, right, customAttributes } = rest as ColumnsProps;
+        const { layout = 'equal', stackAt = 'md', left, right, customAttributes, customCss, id } = rest as ColumnsProps;
         const inlineStyle = createInlineStyle(styleProps);
         const template = getColumnsTemplate(layout);
         const responsiveClass = stackAt === 'never' ? '' : stackAt === 'md' ? 'md:grid-cols-2' : 'lg:grid-cols-2';
         const gridClass = stackAt === 'never' ? 'grid-cols-2' : `grid-cols-1 ${responsiveClass}`.trim();
-        const attributeProps = buildAttributeProps(customAttributes);
+        const attributeProps = attachNodeIdentity(id, buildAttributeProps(customAttributes));
         return (
-          <div
-            style={{
-              ...inlineStyle,
-              display: 'grid',
-              gridTemplateColumns: stackAt === 'never' ? template : undefined
-            }}
-            className={`grid gap-6 ${gridClass}`}
-            {...attributeProps}
-          >
-            <div>{renderSlot(left, 'Left column content')}</div>
-            <div>{renderSlot(right, 'Right column content')}</div>
-          </div>
+          <>
+            <div
+              style={{
+                ...inlineStyle,
+                display: 'grid',
+                gridTemplateColumns: stackAt === 'never' ? template : undefined
+              }}
+              className={`grid gap-6 ${gridClass}`}
+              {...attributeProps}
+            >
+              <div>{renderSlot(left, 'Left column content')}</div>
+              <div>{renderSlot(right, 'Right column content')}</div>
+            </div>
+            {renderScopedCss(id, customCss)}
+          </>
         );
       }
     },
@@ -369,26 +395,29 @@ export const createPageBuilderConfig = ({ bindingOptions, resolveBinding }: Buil
       }),
       render: (props) => {
         const { styleProps, rest } = splitStyleProps(props);
-        const { src, alt, caption, objectFit = 'cover', aspectRatio, customAttributes } = rest as ImageProps;
+        const { src, alt, caption, objectFit = 'cover', aspectRatio, customAttributes, customCss, id } = rest as ImageProps;
         const inlineStyle = createInlineStyle(styleProps);
-        const attributeProps = buildAttributeProps(customAttributes);
+        const attributeProps = attachNodeIdentity(id, buildAttributeProps(customAttributes));
         return (
-          <figure style={inlineStyle} className="space-y-2" {...attributeProps}>
-            <div className="w-full overflow-hidden rounded-xl bg-gray-100">
-              <img
-                src={src}
-                alt={alt}
-                style={{
-                  width: '100%',
-                  height: '100%',
-                  objectFit: (objectFit as CSSProperties['objectFit']) ?? 'cover',
-                  aspectRatio: aspectRatio || undefined
-                }}
-                className="block"
-              />
-            </div>
-            {caption && <figcaption className="text-sm text-gray-500">{caption}</figcaption>}
-          </figure>
+          <>
+            <figure style={inlineStyle} className="space-y-2" {...attributeProps}>
+              <div className="w-full overflow-hidden rounded-xl bg-gray-100">
+                <img
+                  src={src}
+                  alt={alt}
+                  style={{
+                    width: '100%',
+                    height: '100%',
+                    objectFit: (objectFit as CSSProperties['objectFit']) ?? 'cover',
+                    aspectRatio: aspectRatio || undefined
+                  }}
+                  className="block"
+                />
+              </div>
+              {caption && <figcaption className="text-sm text-gray-500">{caption}</figcaption>}
+            </figure>
+            {renderScopedCss(id, customCss)}
+          </>
         );
       }
     },
@@ -410,25 +439,28 @@ export const createPageBuilderConfig = ({ bindingOptions, resolveBinding }: Buil
       }),
       render: (props) => {
         const { styleProps, rest } = splitStyleProps(props);
-        const { eyebrow, heading, content, imageUrl, actionHref, actionLabel, customAttributes } = rest as CardProps;
+        const { eyebrow, heading, content, imageUrl, actionHref, actionLabel, customAttributes, customCss, id } = rest as CardProps;
         const inlineStyle = createInlineStyle(styleProps);
-        const attributeProps = buildAttributeProps(customAttributes);
+        const attributeProps = attachNodeIdentity(id, buildAttributeProps(customAttributes));
         return (
-          <article style={inlineStyle} className="flex flex-col gap-4 border border-gray-100" {...attributeProps}>
-            {imageUrl && (
-              <img src={imageUrl} alt={heading ?? ''} className="h-48 w-full rounded-xl object-cover" />
-            )}
-            <div className="space-y-2">
-              {eyebrow && <p className="text-xs uppercase tracking-[0.2em] text-bw-amber">{eyebrow}</p>}
-              {heading && <h3 className="text-xl font-semibold text-bw-ink">{heading}</h3>}
-              {content && <p className="text-base text-gray-600">{content}</p>}
-            </div>
-            {actionLabel && (
-              <a href={actionHref} className="text-sm font-semibold text-bw-amber">
-                {actionLabel}
-              </a>
-            )}
-          </article>
+          <>
+            <article style={inlineStyle} className="flex flex-col gap-4 border border-gray-100" {...attributeProps}>
+              {imageUrl && (
+                <img src={imageUrl} alt={heading ?? ''} className="h-48 w-full rounded-xl object-cover" />
+              )}
+              <div className="space-y-2">
+                {eyebrow && <p className="text-xs uppercase tracking-[0.2em] text-bw-amber">{eyebrow}</p>}
+                {heading && <h3 className="text-xl font-semibold text-bw-ink">{heading}</h3>}
+                {content && <p className="text-base text-gray-600">{content}</p>}
+              </div>
+              {actionLabel && (
+                <a href={actionHref} className="text-sm font-semibold text-bw-amber">
+                  {actionLabel}
+                </a>
+              )}
+            </article>
+            {renderScopedCss(id, customCss)}
+          </>
         );
       }
     },
@@ -462,9 +494,9 @@ export const createPageBuilderConfig = ({ bindingOptions, resolveBinding }: Buil
       }),
       render: (props) => {
         const { styleProps, rest } = splitStyleProps(props);
-        const { items = [], variant = 'bullet', customAttributes } = rest as ListProps;
+        const { items = [], variant = 'bullet', customAttributes, customCss, id } = rest as ListProps;
         const inlineStyle = createInlineStyle(styleProps);
-        const attributeProps = buildAttributeProps(customAttributes);
+        const attributeProps = attachNodeIdentity(id, buildAttributeProps(customAttributes));
         const listClass =
           variant === 'numbered'
             ? 'list-decimal pl-6'
@@ -479,20 +511,26 @@ export const createPageBuilderConfig = ({ bindingOptions, resolveBinding }: Buil
         );
         if (variant === 'plain') {
           return (
-            <div style={inlineStyle} className="space-y-3" {...attributeProps}>
-              {items.map((item, index) => (
-                <div key={`${item.text}-${index}`} className="border-l-2 border-bw-amber/30 pl-4 text-gray-700">
-                  <div className="font-medium text-bw-ink">{item.text || `Item ${index + 1}`}</div>
-                  {item.description && <p className="text-sm text-gray-500">{item.description}</p>}
-                </div>
-              ))}
-            </div>
+            <>
+              <div style={inlineStyle} className="space-y-3" {...attributeProps}>
+                {items.map((item, index) => (
+                  <div key={`${item.text}-${index}`} className="border-l-2 border-bw-amber/30 pl-4 text-gray-700">
+                    <div className="font-medium text-bw-ink">{item.text || `Item ${index + 1}`}</div>
+                    {item.description && <p className="text-sm text-gray-500">{item.description}</p>}
+                  </div>
+                ))}
+              </div>
+              {renderScopedCss(id, customCss)}
+            </>
           );
         }
         return (
-          <ul style={inlineStyle} className={listClass} {...attributeProps}>
-            {items.map((item, index) => renderItem(item, index))}
-          </ul>
+          <>
+            <ul style={inlineStyle} className={listClass} {...attributeProps}>
+              {items.map((item, index) => renderItem(item, index))}
+            </ul>
+            {renderScopedCss(id, customCss)}
+          </>
         );
       }
     },
@@ -506,9 +544,14 @@ export const createPageBuilderConfig = ({ bindingOptions, resolveBinding }: Buil
       fields: styleableFields({}),
       render: (props) => {
         const { styleProps, rest } = splitStyleProps(props);
-        const { customAttributes } = rest as StyleableProps<Record<string, never>>;
-        const attributeProps = buildAttributeProps(customAttributes);
-        return <hr style={createInlineStyle(styleProps)} className="w-full" {...attributeProps} />;
+        const { customAttributes, customCss, id } = rest as StyleableProps<Record<string, never>>;
+        const attributeProps = attachNodeIdentity(id, buildAttributeProps(customAttributes));
+        return (
+          <>
+            <hr style={createInlineStyle(styleProps)} className="w-full" {...attributeProps} />
+            {renderScopedCss(id, customCss)}
+          </>
+        );
       }
     },
     Spacer: {
@@ -531,10 +574,15 @@ export const createPageBuilderConfig = ({ bindingOptions, resolveBinding }: Buil
       }),
       render: (props) => {
         const { styleProps, rest } = splitStyleProps(props);
-        const { height = '48px', customAttributes } = rest as SpacerProps;
+        const { height = '48px', customAttributes, customCss, id } = rest as SpacerProps;
         const inlineStyle = createInlineStyle(styleProps);
-        const attributeProps = buildAttributeProps(customAttributes);
-        return <div style={{ ...inlineStyle, height }} aria-hidden="true" {...attributeProps} />;
+        const attributeProps = attachNodeIdentity(id, buildAttributeProps(customAttributes));
+        return (
+          <>
+            <div style={{ ...inlineStyle, height }} aria-hidden="true" {...attributeProps} />
+            {renderScopedCss(id, customCss)}
+          </>
+        );
       }
     }
   };
