@@ -29,7 +29,6 @@ const LOGIC_OPERATIONS = [
   'length',
   'append',
   'merge',
-  'take',
   'unique',
   'sort',
   'set',
