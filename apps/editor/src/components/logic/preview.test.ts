@@ -65,13 +65,59 @@ describe('logic previews', () => {
       description: 'Concat',
       operation: 'concat',
       stringInputs: [
-        { id: 'a', label: 'A', sampleValue: 'Hello' },
-        { id: 'b', label: 'B', sampleValue: 'World' }
-      ],
-      options: { delimiter: ' ' }
+        { id: 'a', label: 'Text 1', role: 'text', sampleValue: 'Hello' },
+        { id: 'b', label: 'Text 2', role: 'text', sampleValue: 'World' },
+        { id: 'c', label: 'Delimiter', role: 'delimiter', sampleValue: ' ' }
+      ]
     };
 
     expect(evaluateStringPreview(stringNode)).toMatchObject({ summary: 'Hello World', state: 'ready' });
+  });
+
+  it('replaces strings using dedicated inputs', () => {
+    const stringNode: StringNodeData = {
+      kind: 'string',
+      label: 'Strings',
+      description: 'Replace',
+      operation: 'replace',
+      stringInputs: [
+        { id: 'text', label: 'Text', role: 'text', sampleValue: 'foo bar foo' },
+        { id: 'search', label: 'Search', role: 'search', sampleValue: 'foo' },
+        { id: 'replace', label: 'Replace', role: 'replace', sampleValue: 'baz' }
+      ]
+    };
+
+    expect(evaluateStringPreview(stringNode)).toMatchObject({ summary: 'baz bar baz', state: 'ready' });
+  });
+
+  it('slices strings using node inputs for start and end', () => {
+    const stringNode: StringNodeData = {
+      kind: 'string',
+      label: 'Strings',
+      description: 'Slice',
+      operation: 'slice',
+      stringInputs: [
+        { id: 'text', label: 'Text', role: 'text', sampleValue: 'BuildWeaver' },
+        { id: 'start', label: 'Start', role: 'start', sampleValue: '5' },
+        { id: 'end', label: 'End', role: 'end', sampleValue: '11' }
+      ]
+    };
+
+    expect(evaluateStringPreview(stringNode)).toMatchObject({ summary: 'Weaver', state: 'ready' });
+  });
+
+  it('limits single-input operations to the primary sample', () => {
+    const stringNode: StringNodeData = {
+      kind: 'string',
+      label: 'Strings',
+      description: 'Uppercase',
+      operation: 'uppercase',
+      stringInputs: [
+        { id: 'text', label: 'Text', role: 'text', sampleValue: 'hello' }
+      ]
+    };
+
+    expect(evaluateStringPreview(stringNode)).toMatchObject({ summary: 'HELLO', state: 'ready' });
   });
 
   it('limits list preview samples to five entries', () => {

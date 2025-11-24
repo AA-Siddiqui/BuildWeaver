@@ -126,8 +126,12 @@ const evaluateNodePreview = (
       const overrides: Record<string, string | undefined> = {};
       data.stringInputs.forEach((input) => {
         const binding = getBindingValue(`string-${input.id}`);
-        if (binding && typeof binding.value === 'string') {
-          overrides[input.id] = binding.value;
+        if (binding && binding.value !== undefined && binding.value !== null) {
+          if (typeof binding.value === 'string') {
+            overrides[input.id] = binding.value;
+          } else if (typeof binding.value === 'number' || typeof binding.value === 'boolean') {
+            overrides[input.id] = String(binding.value);
+          }
         }
       });
       return evaluateStringPreview(data, overrides);

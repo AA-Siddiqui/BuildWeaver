@@ -5,6 +5,7 @@ import {
   LogicEditorNode,
   ListOperation,
   ObjectOperation,
+  StringNodeInputRole,
   StringOperation
 } from '@buildweaver/libs';
 import { Type } from 'class-transformer';
@@ -99,6 +100,10 @@ class StringInputDto {
   @IsOptional()
   @IsString()
   sampleValue?: string;
+
+  @IsOptional()
+  @IsIn(['text', 'delimiter', 'search', 'replace', 'start', 'end'])
+  role?: StringNodeInputRole;
 }
 
 class StringOptionsDto {

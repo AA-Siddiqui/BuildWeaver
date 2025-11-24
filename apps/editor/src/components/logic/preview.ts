@@ -4,7 +4,8 @@ import {
   ListNodeData,
   ObjectNodeData,
   ScalarValue,
-  StringNodeData
+  StringNodeData,
+  StringNodeInputRole
 } from '@buildweaver/libs';
 import { logicLogger } from '../../lib/logger';
 
@@ -123,18 +124,85 @@ export const evaluateArithmeticPreview = (
 
 export type StringInputOverrides = Record<string, string | undefined>;
 
+type StringRoleBuckets = Partial<Record<StringNodeInputRole, string[]>>;
+
+const getStringInputRole = (inputRole?: StringNodeInputRole): StringNodeInputRole => inputRole ?? 'text';
+
+const bucketizeStringInputs = (data: StringNodeData, overrides: StringInputOverrides): StringRoleBuckets => {
+  return data.stringInputs.reduce<StringRoleBuckets>((acc, input) => {
+    const role = getStringInputRole(input.role);
+    const value = overrides[input.id] ?? input.sampleValue ?? '';
+    const list = acc[role] ?? [];
+    list.push(value);
+    acc[role] = list;
+    return acc;
+  }, {});
+};
+
+const getOptionFallbackForRole = (role: StringNodeInputRole, options?: StringNodeData['options']): string | undefined => {
+  if (!options) {
+    return undefined;
+  }
+  switch (role) {
+    case 'delimiter':
+      return options.delimiter;
+    case 'search':
+      return options.search;
+    case 'replace':
+      return options.replace;
+    case 'start':
+      return options.start !== undefined ? String(options.start) : undefined;
+    case 'end':
+      return options.end !== undefined ? String(options.end) : undefined;
+    default:
+      return undefined;
+  }
+};
+
+const getRoleValue = (
+  buckets: StringRoleBuckets,
+  role: StringNodeInputRole,
+  options?: StringNodeData['options']
+): string | undefined => {
+  const list = buckets[role];
+  if (list && list.length) {
+    const value = list[0];
+    return value === undefined || value === null ? undefined : value;
+  }
+  return getOptionFallbackForRole(role, options);
+};
+
+const getNumericRoleValue = (
+  buckets: StringRoleBuckets,
+  role: StringNodeInputRole,
+  fallback: number
+): number => {
+  const rawValue = getRoleValue(buckets, role, undefined);
+  if (rawValue === undefined || rawValue === '') {
+    return fallback;
+  }
+  const parsed = Number(rawValue);
+  return Number.isFinite(parsed) ? parsed : fallback;
+};
+
 export const evaluateStringPreview = (
   data: StringNodeData,
   overrides: StringInputOverrides = {}
 ): NodePreview<string | number> => {
-  const values = data.stringInputs.map((input) => overrides[input.id] ?? input.sampleValue ?? '');
-  const primary = values[0] ?? '';
+  const buckets = bucketizeStringInputs(data, overrides);
+  const textValues = buckets.text ?? [];
+  const primary = textValues[0] ?? '';
 
   try {
+    logicLogger.debug('Evaluating string preview', {
+      operation: data.operation,
+      overrideCount: Object.keys(overrides).length,
+      textInputs: textValues.length
+    });
     switch (data.operation) {
       case 'concat': {
-        const delimiter = data.options?.delimiter ?? '';
-        const concatenated = values.filter((value) => value !== '').join(delimiter);
+        const delimiter = getRoleValue(buckets, 'delimiter', data.options) ?? '';
+        const concatenated = textValues.filter((value) => value !== '').join(delimiter);
         return { state: 'ready', heading: 'Concatenated', summary: concatenated, value: concatenated };
       }
       case 'uppercase': {
@@ -150,14 +218,16 @@ export const evaluateStringPreview = (
         return { state: 'ready', heading: 'Trimmed', summary: result, value: result };
       }
       case 'slice': {
-        const start = data.options?.start ?? 0;
-        const end = data.options?.end ?? primary.length;
+        const start = getNumericRoleValue(buckets, 'start', data.options?.start ?? 0);
+        const endValue = getRoleValue(buckets, 'end', data.options);
+        const parsedEnd = endValue === undefined ? undefined : Number(endValue);
+        const end = endValue === undefined ? primary.length : Number.isFinite(parsedEnd) ? parsedEnd : primary.length;
         const result = primary.slice(start, end);
         return { state: 'ready', heading: 'Slice', summary: result, value: result };
       }
       case 'replace': {
-        const search = data.options?.search ?? '';
-        const replace = data.options?.replace ?? '';
+        const search = getRoleValue(buckets, 'search', data.options) ?? '';
+        const replace = getRoleValue(buckets, 'replace', data.options) ?? '';
         const result = search ? primary.replace(new RegExp(search, 'g'), replace) : primary;
         return { state: 'ready', heading: 'Replace', summary: result, value: result };
       }

@@ -105,8 +105,9 @@ const createStringData = (): StringNodeData => ({
   description: 'Transform strings',
   operation: 'concat',
   stringInputs: [
-    { id: `str-${generateId()}`, label: 'Input A', sampleValue: 'Hello' },
-    { id: `str-${generateId()}`, label: 'Input B', sampleValue: 'World' }
+    { id: `str-${generateId()}`, label: 'Text 1', role: 'text', sampleValue: 'Hello' },
+    { id: `str-${generateId()}`, label: 'Text 2', role: 'text', sampleValue: 'World' },
+    { id: `str-${generateId()}`, label: 'Delimiter', role: 'delimiter', sampleValue: ' ' }
   ],
   options: { delimiter: ' ' },
   limit: 5

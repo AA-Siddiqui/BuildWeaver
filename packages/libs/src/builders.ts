@@ -44,10 +44,13 @@ export interface ArithmeticNodeData {
 
 export type StringOperation = 'concat' | 'uppercase' | 'lowercase' | 'trim' | 'slice' | 'replace' | 'length';
 
+export type StringNodeInputRole = 'text' | 'delimiter' | 'search' | 'replace' | 'start' | 'end';
+
 export interface StringNodeInput {
   id: string;
   label: string;
   sampleValue?: string;
+  role?: StringNodeInputRole;
 }
 
 export interface StringNodeOptions {
