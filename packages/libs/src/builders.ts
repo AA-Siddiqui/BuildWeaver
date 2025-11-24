@@ -71,7 +71,7 @@ export interface StringNodeData {
   limit?: number;
 }
 
-export type ListOperation = 'append' | 'merge' | 'slice' | 'take' | 'unique' | 'sort' | 'length';
+export type ListOperation = 'append' | 'merge' | 'slice' | 'unique' | 'sort' | 'length';
 
 export interface ListNodeData {
   kind: 'list';

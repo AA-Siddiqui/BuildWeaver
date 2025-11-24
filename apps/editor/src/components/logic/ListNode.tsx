@@ -72,7 +72,6 @@ export const ListNode = ({ id, data }: NodeProps<ListNodeData>) => {
             <option value="append">Append</option>
             <option value="merge">Merge</option>
             <option value="slice">Slice</option>
-            <option value="take">Take</option>
             <option value="unique">Unique</option>
             <option value="sort">Sort</option>
             <option value="length">Length</option>

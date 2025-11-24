@@ -267,8 +267,7 @@ export const evaluateListPreview = (
         const merged = clampList(primary.concat(secondary), limit);
         return { state: 'ready', heading: 'Merge', summary: formatScalar(merged), value: merged };
       }
-      case 'slice':
-      case 'take': {
+      case 'slice': {
         const sliceEnd = Math.min(limit, primary.length);
         const sliced = clampList(primary.slice(0, sliceEnd), limit);
         return { state: 'ready', heading: 'Slice', summary: formatScalar(sliced), value: sliced };
