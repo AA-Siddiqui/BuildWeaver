@@ -61,7 +61,7 @@ describe('previewResolver', () => {
         data: {
           kind: 'dummy',
           label: 'Primary list',
-          sample: { type: 'list', value: [1, 2, 3], limit: 5 }
+          sample: { type: 'list', value: [1, 2, 3] }
         } satisfies DummyNodeData
       },
       {
@@ -71,7 +71,7 @@ describe('previewResolver', () => {
         data: {
           kind: 'dummy',
           label: 'Secondary list',
-          sample: { type: 'list', value: [4, 5], limit: 5 }
+          sample: { type: 'list', value: [4, 5] }
         } satisfies DummyNodeData
       },
       {
@@ -84,7 +84,6 @@ describe('previewResolver', () => {
           operation: 'append',
           primarySample: [],
           secondarySample: [],
-          limit: 5,
           sort: 'asc'
         } satisfies ListNodeData
       }
@@ -121,7 +120,7 @@ describe('previewResolver', () => {
         data: {
           kind: 'dummy',
           label: 'List source',
-          sample: { type: 'list', value: [10, 11, 12, 13], limit: 5 }
+          sample: { type: 'list', value: [10, 11, 12, 13] }
         } satisfies DummyNodeData
       },
       {
@@ -156,7 +155,6 @@ describe('previewResolver', () => {
           secondarySample: [],
           startSample: 0,
           endSample: 0,
-          limit: 5,
           sort: 'asc'
         } satisfies ListNodeData
       }

@@ -3,6 +3,7 @@ import { Handle, NodeProps, Position } from 'reactflow';
 import { ScalarValue, StringNodeData, StringNodeInput, StringNodeInputRole } from '@buildweaver/libs';
 import { NodeChrome } from './NodeChrome';
 import { useNodeDataUpdater } from './hooks/useNodeDataUpdater';
+import { useCursorRestorer } from './hooks/useCursorRestorer';
 import { logicLogger } from '../../lib/logger';
 import { usePreviewResolver } from './previewResolver';
 import { formatScalar } from './preview';
@@ -137,6 +138,7 @@ const isNumericRole = (role: StringNodeInputRole): boolean => role === 'start' |
 
 export const StringNode = ({ id, data }: NodeProps<StringNodeData>) => {
   const updateData = useNodeDataUpdater<StringNodeData>(id);
+  const restoreCursor = useCursorRestorer();
   const previewResolver = usePreviewResolver();
   const preview = previewResolver.getNodePreview(id);
   const config = getOperationConfig(data.operation);
@@ -184,6 +186,11 @@ export const StringNode = ({ id, data }: NodeProps<StringNodeData>) => {
       ...prev,
       stringInputs: prev.stringInputs.map((input) => (input.id === inputId ? { ...input, sampleValue } : input))
     }));
+    restoreCursor(event.target, {
+      nodeId: id,
+      field: inputId,
+      role: targetInput ? getInputRole(targetInput) : undefined
+    });
   };
 
   const handleAddInput = () => {

@@ -1,11 +1,10 @@
 import { ScalarValue } from '@buildweaver/libs';
 
-export const parseScalarList = (value: string, limit = 5): ScalarValue[] =>
+export const parseScalarList = (value: string): ScalarValue[] =>
   value
     .split(/\r?\n|,/)
     .map((entry) => entry.trim())
     .filter(Boolean)
-    .slice(0, limit)
     .map((entry) => {
       if (entry === 'true' || entry === 'false') {
         return entry === 'true';
@@ -20,12 +19,11 @@ export const parseScalarList = (value: string, limit = 5): ScalarValue[] =>
 export const stringifyScalarList = (value: ScalarValue[] = []): string =>
   value.map((entry) => String(entry ?? '')).join('\n');
 
-export const parseKeyValuePairs = (value: string, limit = 5): Record<string, ScalarValue> => {
+export const parseKeyValuePairs = (value: string): Record<string, ScalarValue> => {
   const pairs = value
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter(Boolean)
-    .slice(0, limit)
     .map((line) => {
       const [key, ...rest] = line.split('=');
       return { key: key?.trim() ?? '', value: rest.join('=').trim() };

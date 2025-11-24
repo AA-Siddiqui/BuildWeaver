@@ -3,13 +3,12 @@ import { Handle, NodeProps, Position } from 'reactflow';
 import { ListNodeData, ScalarValue } from '@buildweaver/libs';
 import { NodeChrome } from './NodeChrome';
 import { useNodeDataUpdater } from './hooks/useNodeDataUpdater';
+import { useCursorRestorer } from './hooks/useCursorRestorer';
 import { parseScalarList, stringifyScalarList } from './valueParsers';
 import { logicLogger } from '../../lib/logger';
 import { usePreviewResolver } from './previewResolver';
 import { formatScalar } from './preview';
 import { getListHandleId, getListOperationInputs, ListInputDefinition } from './listOperationConfig';
-
-const MAX_SAMPLE_LENGTH = 5;
 
 const renderBindingPreview = (
   binding?: { value: unknown; sourceLabel: string },
@@ -34,6 +33,7 @@ const renderBindingPreview = (
 
 export const ListNode = ({ id, data }: NodeProps<ListNodeData>) => {
   const updateData = useNodeDataUpdater<ListNodeData>(id);
+  const restoreCursor = useCursorRestorer();
   const previewResolver = usePreviewResolver();
   const preview = previewResolver.getNodePreview(id);
   const inputDefinitions = getListOperationInputs(data.operation);
@@ -48,15 +48,10 @@ export const ListNode = ({ id, data }: NodeProps<ListNodeData>) => {
     key: 'primarySample' | 'secondarySample',
     event: ChangeEvent<HTMLTextAreaElement>
   ) => {
-    const parsed = parseScalarList(event.target.value, data.limit ?? MAX_SAMPLE_LENGTH);
+    const parsed = parseScalarList(event.target.value);
     logicLogger.debug('List sample updated', { nodeId: id, key, size: parsed.length, operation: data.operation });
     updateData((prev) => ({ ...prev, [key]: parsed }));
-  };
-
-  const handleLimitChange = (event: ChangeEvent<HTMLInputElement>) => {
-    const limit = Math.max(1, Math.min(MAX_SAMPLE_LENGTH, Number(event.target.value) || MAX_SAMPLE_LENGTH));
-    logicLogger.debug('List preview limit updated', { nodeId: id, limit, operation: data.operation });
-    updateData((prev) => ({ ...prev, limit }));
+    restoreCursor(event.target, { nodeId: id, field: key });
   };
 
   const handleSortChange = (event: ChangeEvent<HTMLSelectElement>) => {
@@ -78,6 +73,7 @@ export const ListNode = ({ id, data }: NodeProps<ListNodeData>) => {
       operation: data.operation
     });
     updateData((prev) => ({ ...prev, [key]: normalized }));
+    restoreCursor(event.target, { nodeId: id, field: key });
   };
 
   const renderInputBody = (definition: ListInputDefinition) => {
@@ -171,19 +167,6 @@ export const ListNode = ({ id, data }: NodeProps<ListNodeData>) => {
           </select>
         </label>
         <div className="space-y-2">{inputDefinitions.map((definition) => renderInputBody(definition))}</div>
-        <div className="flex gap-2">
-          <label className="flex flex-1 flex-col text-[11px] uppercase tracking-[0.2em] text-bw-platinum/80">
-            Preview limit
-            <input
-              type="number"
-              min={1}
-              max={MAX_SAMPLE_LENGTH}
-              className="mt-1 rounded-xl border border-white/10 bg-white/10 px-3 py-2 text-xs text-white"
-              value={data.limit ?? MAX_SAMPLE_LENGTH}
-              onChange={handleLimitChange}
-            />
-          </label>
-        </div>
       </NodeChrome>
       <Handle type="source" position={Position.Right} className="!h-3 !w-3 !bg-bw-sand" id={`list-${id}-out`} />
     </div>

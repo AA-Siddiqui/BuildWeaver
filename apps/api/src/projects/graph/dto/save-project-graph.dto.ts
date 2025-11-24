@@ -71,10 +71,6 @@ class DummySampleDto {
   @IsOptional()
   @IsNumber()
   precision?: number;
-
-  @IsOptional()
-  @IsNumber()
-  limit?: number;
 }
 
 class ArithmeticOperandDto {
@@ -183,10 +179,6 @@ class GraphNodeDataDto {
   @ValidateNested()
   @Type(() => StringOptionsDto)
   options?: StringOptionsDto;
-
-  @IsOptional()
-  @IsNumber()
-  limit?: number;
 
   @IsOptional()
   @IsIn(['asc', 'desc'])

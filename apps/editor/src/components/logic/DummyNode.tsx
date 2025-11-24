@@ -3,6 +3,7 @@ import { Handle, NodeProps, Position } from 'reactflow';
 import { DummyNodeData, DummySampleValue, ScalarValue } from '@buildweaver/libs';
 import { NodeChrome } from './NodeChrome';
 import { useNodeDataUpdater } from './hooks/useNodeDataUpdater';
+import { useCursorRestorer } from './hooks/useCursorRestorer';
 import { logicLogger } from '../../lib/logger';
 import { parseScalarList, stringifyScalarList, parseKeyValuePairs, stringifyKeyValuePairs } from './valueParsers';
 import { usePreviewResolver } from './previewResolver';
@@ -12,12 +13,13 @@ const DEFAULT_SAMPLES: Record<DummySampleValue['type'], DummySampleValue> = {
   decimal: { type: 'decimal', value: 3.14, precision: 2 },
   string: { type: 'string', value: 'Hello world' },
   boolean: { type: 'boolean', value: true },
-  list: { type: 'list', value: [1, 2, 3], limit: 5 },
+  list: { type: 'list', value: [1, 2, 3] },
   object: { type: 'object', value: { status: 'ok', retries: 1 } }
 };
 
 export const DummyNode = ({ id, data }: NodeProps<DummyNodeData>) => {
   const updateData = useNodeDataUpdater<DummyNodeData>(id);
+  const restoreCursor = useCursorRestorer();
   const previewResolver = usePreviewResolver();
   const preview = previewResolver.getNodePreview(id);
 
@@ -49,10 +51,10 @@ export const DummyNode = ({ id, data }: NodeProps<DummyNodeData>) => {
         nextSample.value = raw === 'true';
         break;
       case 'list':
-        nextSample.value = parseScalarList(raw, data.sample.limit ?? 5);
+        nextSample.value = parseScalarList(raw);
         break;
       case 'object':
-        nextSample.value = parseKeyValuePairs(raw, 5);
+        nextSample.value = parseKeyValuePairs(raw);
         break;
       default:
         break;
@@ -60,6 +62,7 @@ export const DummyNode = ({ id, data }: NodeProps<DummyNodeData>) => {
 
     logicLogger.debug('Dummy sample updated', { nodeId: id, type: nextSample.type });
     handleSampleChange(nextSample);
+    restoreCursor(event.target, { nodeId: id, field: nextSample.type });
   };
 
   const renderValueInput = () => {

@@ -14,7 +14,7 @@ export type DummySampleValue =
   | { type: 'decimal'; value: number; precision?: number }
   | { type: 'string'; value: string }
   | { type: 'boolean'; value: boolean }
-  | { type: 'list'; value: ScalarValue[]; limit?: number }
+  | { type: 'list'; value: ScalarValue[] }
   | { type: 'object'; value: Record<string, ScalarValue> };
 
 export interface DummyNodeData {
@@ -68,7 +68,6 @@ export interface StringNodeData {
   operation: StringOperation;
   stringInputs: StringNodeInput[];
   options?: StringNodeOptions;
-  limit?: number;
 }
 
 export type ListOperation = 'append' | 'merge' | 'slice' | 'unique' | 'sort' | 'length';
@@ -82,7 +81,6 @@ export interface ListNodeData {
   secondarySample?: ScalarValue[];
   startSample?: number | null;
   endSample?: number | null;
-  limit?: number;
   sort?: 'asc' | 'desc';
 }
 

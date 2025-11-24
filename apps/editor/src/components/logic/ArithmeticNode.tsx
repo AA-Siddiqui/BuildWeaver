@@ -3,6 +3,7 @@ import { Handle, NodeProps, Position } from 'reactflow';
 import { ArithmeticNodeData } from '@buildweaver/libs';
 import { NodeChrome } from './NodeChrome';
 import { useNodeDataUpdater } from './hooks/useNodeDataUpdater';
+import { useCursorRestorer } from './hooks/useCursorRestorer';
 import { logicLogger } from '../../lib/logger';
 import { usePreviewResolver } from './previewResolver';
 import { formatScalar } from './preview';
@@ -26,6 +27,7 @@ const createOperand = (operation: ArithmeticNodeData['operation'], index: number
 
 export const ArithmeticNode = ({ id, data }: NodeProps<ArithmeticNodeData>) => {
   const updateData = useNodeDataUpdater<ArithmeticNodeData>(id);
+  const restoreCursor = useCursorRestorer();
   const previewResolver = usePreviewResolver();
   const preview = previewResolver.getNodePreview(id);
   const config = getArithmeticOperationConfig(data.operation);
@@ -74,6 +76,7 @@ export const ArithmeticNode = ({ id, data }: NodeProps<ArithmeticNodeData>) => {
         operand.id === operandId ? { ...operand, sampleValue: Number.isNaN(value) ? null : value } : operand
       )
     }));
+    restoreCursor(event.target, { nodeId: id, field: operandId });
   };
 
   const handleAddOperand = () => {
@@ -120,6 +123,7 @@ export const ArithmeticNode = ({ id, data }: NodeProps<ArithmeticNodeData>) => {
     const precision = Math.max(0, Math.min(5, Number(event.target.value) || 0));
     logicLogger.debug('Arithmetic precision updated', { nodeId: id, precision, operation: data.operation });
     updateData((prev) => ({ ...prev, precision }));
+    restoreCursor(event.target, { nodeId: id, field: 'precision' });
   };
 
   return (

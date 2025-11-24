@@ -18,8 +18,6 @@ export interface NodePreview<T = unknown> {
   value?: T;
 }
 
-const clampList = (items: ScalarValue[], limit = 5) => items.slice(0, limit);
-
 export const formatScalar = (
   value: ScalarValue | ScalarValue[] | Record<string, ScalarValue> | undefined
 ): string => {
@@ -281,17 +279,16 @@ export const evaluateListPreview = (
 ): NodePreview<ScalarValue[] | number> => {
   const primary = overrides.primarySample ?? data.primarySample ?? [];
   const secondary = overrides.secondarySample ?? data.secondarySample ?? [];
-  const limit = Math.min(data.limit ?? 5, 5);
   const order = overrides.order ?? data.sort ?? 'asc';
 
   try {
     switch (data.operation) {
       case 'append': {
-        const appended = clampList(primary.concat(secondary), limit);
+        const appended = primary.concat(secondary);
         return { state: 'ready', heading: 'Append', summary: formatScalar(appended), value: appended };
       }
       case 'merge': {
-        const merged = clampList(primary.concat(secondary), limit);
+        const merged = primary.concat(secondary);
         return { state: 'ready', heading: 'Merge', summary: formatScalar(merged), value: merged };
       }
       case 'slice': {
@@ -299,11 +296,11 @@ export const evaluateListPreview = (
         const endFallback = overrides.end ?? data.endSample ?? primary.length;
         const endIndex = clampIndex(resolveIndex(endFallback, primary.length), primary.length);
         const normalizedEnd = Math.max(endIndex, startIndex);
-        const sliced = clampList(primary.slice(startIndex, normalizedEnd), limit);
+        const sliced = primary.slice(startIndex, normalizedEnd);
         return { state: 'ready', heading: 'Slice', summary: formatScalar(sliced), value: sliced };
       }
       case 'unique': {
-        const unique = clampList(Array.from(new Set(primary)), limit);
+        const unique = Array.from(new Set(primary));
         return { state: 'ready', heading: 'Unique', summary: formatScalar(unique), value: unique };
       }
       case 'sort': {
@@ -318,8 +315,7 @@ export const evaluateListPreview = (
             ? String(b ?? '').localeCompare(String(a ?? ''))
             : String(a ?? '').localeCompare(String(b ?? ''));
         });
-        const clipped = clampList(sorted, limit);
-        return { state: 'ready', heading: 'Sorted', summary: formatScalar(clipped), value: clipped };
+        return { state: 'ready', heading: 'Sorted', summary: formatScalar(sorted), value: sorted };
       }
       case 'length': {
         return { state: 'ready', heading: 'Length', summary: `${primary.length}`, value: primary.length };

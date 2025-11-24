@@ -14,7 +14,6 @@ describe('ListNode component', () => {
     secondarySample: [4, 5],
     startSample: 0,
     endSample: 2,
-    limit: 5,
     sort: 'asc'
   };
 
@@ -47,5 +46,10 @@ describe('ListNode component', () => {
     expect(label).toBeInTheDocument();
     expect(screen.queryByText(/Start index/i)).toBeNull();
     expect(screen.queryByText(/Additional input/i)).toBeNull();
+  });
+
+  it('does not render a preview limit input anymore', () => {
+    renderNode(baseData);
+    expect(screen.queryByText(/Preview limit/i)).toBeNull();
   });
 });

@@ -3,6 +3,7 @@ import { Handle, NodeProps, Position } from 'reactflow';
 import { ObjectNodeData, ScalarValue } from '@buildweaver/libs';
 import { NodeChrome } from './NodeChrome';
 import { useNodeDataUpdater } from './hooks/useNodeDataUpdater';
+import { useCursorRestorer } from './hooks/useCursorRestorer';
 import { parseKeyValuePairs, stringifyKeyValuePairs } from './valueParsers';
 import { logicLogger } from '../../lib/logger';
 import { usePreviewResolver } from './previewResolver';
@@ -23,6 +24,7 @@ const renderBinding = (binding?: { value: unknown; sourceLabel: string }) => {
 
 export const ObjectNode = ({ id, data }: NodeProps<ObjectNodeData>) => {
   const updateData = useNodeDataUpdater<ObjectNodeData>(id);
+  const restoreCursor = useCursorRestorer();
   const previewResolver = usePreviewResolver();
   const preview = previewResolver.getNodePreview(id);
   const sourceHandleId = `object-${id}-source`;
@@ -37,25 +39,27 @@ export const ObjectNode = ({ id, data }: NodeProps<ObjectNodeData>) => {
   };
 
   const handleSampleChange = (key: 'sourceSample' | 'patchSample', event: ChangeEvent<HTMLTextAreaElement>) => {
-    const parsed = parseKeyValuePairs(event.target.value, 5);
+    const parsed = parseKeyValuePairs(event.target.value);
     logicLogger.debug('Object sample updated', { nodeId: id, key, size: Object.keys(parsed).length });
     updateData((prev) => ({ ...prev, [key]: parsed }));
+    restoreCursor(event.target, { nodeId: id, field: key });
   };
 
   const handlePathChange = (event: ChangeEvent<HTMLInputElement>) => {
     const path = event.target.value;
     logicLogger.debug('Object path updated', { nodeId: id, path });
     updateData((prev) => ({ ...prev, path }));
+    restoreCursor(event.target, { nodeId: id, field: 'path' });
   };
 
   const handleSelectedKeysChange = (event: ChangeEvent<HTMLInputElement>) => {
     const keys = event.target.value
       .split(',')
       .map((entry) => entry.trim())
-      .filter(Boolean)
-      .slice(0, 5);
+      .filter(Boolean);
     logicLogger.debug('Object keys updated', { nodeId: id, keysCount: keys.length });
     updateData((prev) => ({ ...prev, selectedKeys: keys }));
+    restoreCursor(event.target, { nodeId: id, field: 'selectedKeys' });
   };
 
   return (

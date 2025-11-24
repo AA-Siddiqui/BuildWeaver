@@ -120,21 +120,19 @@ describe('logic previews', () => {
     expect(evaluateStringPreview(stringNode)).toMatchObject({ summary: 'HELLO', state: 'ready' });
   });
 
-  it('limits list preview samples to five entries', () => {
+  it('keeps the full list when previewing append operations', () => {
     const listNode: ListNodeData = {
       kind: 'list',
       label: 'List',
       description: 'Append',
       operation: 'append',
       primarySample: [1, 2, 3, 4, 5, 6],
-      secondarySample: [7, 8, 9],
-      limit: 5
+      secondarySample: [7, 8, 9]
     };
 
     const preview = evaluateListPreview(listNode);
     expect(preview.state).toBe('ready');
-    expect(preview.summary).toContain('1');
-    expect(preview.summary).not.toContain('7');
+    expect(preview.value).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9]);
   });
 
   it('uses start/end samples for list slices', () => {
@@ -145,8 +143,7 @@ describe('logic previews', () => {
       operation: 'slice',
       primarySample: [10, 11, 12, 13, 14],
       startSample: 1,
-      endSample: 3,
-      limit: 5
+      endSample: 3
     };
 
     const preview = evaluateListPreview(listNode);
@@ -160,7 +157,6 @@ describe('logic previews', () => {
       description: 'Sort',
       operation: 'sort',
       primarySample: [3, 1, 2],
-      limit: 5,
       sort: 'asc'
     };
 

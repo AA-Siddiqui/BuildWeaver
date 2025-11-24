@@ -109,8 +109,7 @@ const createStringData = (): StringNodeData => ({
     { id: `str-${generateId()}`, label: 'Text 2', role: 'text', sampleValue: 'World' },
     { id: `str-${generateId()}`, label: 'Delimiter', role: 'delimiter', sampleValue: ' ' }
   ],
-  options: { delimiter: ' ' },
-  limit: 5
+  options: { delimiter: ' ' }
 });
 
 const createListData = (): ListNodeData => ({
@@ -122,7 +121,6 @@ const createListData = (): ListNodeData => ({
   secondarySample: [4, 5],
   startSample: 0,
   endSample: 3,
-  limit: 5,
   sort: 'asc'
 });
 
