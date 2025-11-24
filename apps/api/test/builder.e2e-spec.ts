@@ -43,6 +43,17 @@ describe('Builder surfaces (e2e)', () => {
     expect(pagesRes.status).toBe(200);
     expect(pagesRes.body.data.pages).toHaveLength(1);
     expect(pagesRes.body.data.pages[0].id).toBe(defaultPageId);
+
+    const defaultPageRes = await request(app.getHttpServer())
+      .get(`/projects/${projectId}/pages/${defaultPageId}`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(defaultPageRes.status).toBe(200);
+    const defaultContent = defaultPageRes.body.data.page.builderState.content;
+    expect(defaultContent).toHaveLength(1);
+    expect(defaultContent[0]).toMatchObject({
+      type: 'Section',
+      props: expect.objectContaining({ minHeight: '100vh', backgroundColor: '#FFFFFF' })
+    });
   });
 
   it('creates additional pages and saves graph connections', async () => {

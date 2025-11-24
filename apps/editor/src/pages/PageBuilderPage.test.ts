@@ -1,9 +1,21 @@
 import type { ComponentData, Content, Data } from '@measured/puck';
-import { derivePuckSessionKey, normalizeBuilderStateForSave } from './PageBuilderPage';
+import { createEmptyBuilderState, derivePuckSessionKey, normalizeBuilderStateForSave } from './PageBuilderPage';
 
 jest.mock('@measured/puck', () => ({
   Puck: () => null
 }));
+
+describe('createEmptyBuilderState', () => {
+  it('creates a customizable Section scaffold', () => {
+    const state = createEmptyBuilderState();
+    expect(state.content).toHaveLength(1);
+    const [component] = state.content as ComponentData[];
+    expect(component.type).toBe('Section');
+    expect(component.props?.minHeight).toBe('100vh');
+    expect(component.props?.padding).toBe('0px');
+    expect(component.props?.backgroundColor).toBe('#FFFFFF');
+  });
+});
 
 describe('normalizeBuilderStateForSave', () => {
   const createComponent = (overrides: Partial<ComponentData> = {}): ComponentData => {

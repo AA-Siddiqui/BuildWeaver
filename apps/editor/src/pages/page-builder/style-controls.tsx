@@ -13,6 +13,13 @@ type ColorPickerFieldConfig = {
   fieldKey: string;
 };
 
+type PresetOrCustomFieldConfig = {
+  label: string;
+  fieldKey: string;
+  presetOptions: ReadonlyArray<{ label: string; value: string }>;
+  placeholder?: string;
+};
+
 export type CustomAttribute = {
   id: string;
   name?: string;
@@ -40,7 +47,7 @@ const isValidHexColor = (value?: string): value is string => HEX_COLOR_PATTERN.t
 export const deriveColorPickerValue = (value?: string, fallback = DEFAULT_COLOR_FALLBACK) =>
   isValidHexColor(value) ? value : fallback;
 
-const createColorPickerField = ({ label, placeholder, fieldKey }: ColorPickerFieldConfig): Field<string> => ({
+const createColorPickerField = ({ label, placeholder, fieldKey }: ColorPickerFieldConfig): Field => ({
   type: 'custom',
   label,
   render: (props) => <ColorPickerFieldControl {...props} placeholder={placeholder} fieldKey={fieldKey} />
@@ -50,6 +57,19 @@ const createCustomAttributesField = (): Field<CustomAttributeList> => ({
   type: 'custom',
   label: 'Custom attributes',
   render: (props) => <CustomAttributesFieldControl {...props} />
+});
+
+const createPresetOrCustomField = ({ label, fieldKey, presetOptions, placeholder }: PresetOrCustomFieldConfig): Field => ({
+  type: 'custom',
+  label,
+  render: (props) => (
+    <PresetOrCustomFieldControl
+      {...props}
+      fieldKey={fieldKey}
+      presetOptions={presetOptions}
+      placeholder={placeholder}
+    />
+  )
 });
 
 const spacingOptions = [
@@ -171,11 +191,12 @@ const baseStyleFields = {
       { label: 'End', value: 'flex-end' }
     ]
   },
-  gap: {
-    type: 'select',
+  gap: createPresetOrCustomField({
     label: 'Layout / Gap',
-    options: spacingOptions
-  },
+    fieldKey: 'gap',
+    presetOptions: spacingOptions,
+    placeholder: 'e.g. 24px or 1.5rem'
+  }),
   position: {
     type: 'select',
     label: 'Position',
@@ -196,11 +217,12 @@ const baseStyleFields = {
       { label: 'Justify', value: 'justify' }
     ]
   },
-  fontSize: {
-    type: 'select',
+  fontSize: createPresetOrCustomField({
     label: 'Font size',
-    options: fontSizeOptions
-  },
+    fieldKey: 'fontSize',
+    presetOptions: fontSizeOptions,
+    placeholder: 'e.g. 2.4rem'
+  }),
   fontWeight: {
     type: 'select',
     label: 'Font weight',
@@ -216,61 +238,72 @@ const baseStyleFields = {
       { label: 'Relaxed (1.6)', value: '1.6' }
     ]
   },
-  width: {
-    type: 'select',
+  width: createPresetOrCustomField({
     label: 'Width',
-    options: widthOptions
-  },
-  maxWidth: {
-    type: 'select',
+    fieldKey: 'width',
+    presetOptions: widthOptions,
+    placeholder: 'e.g. 960px or 80%'
+  }),
+  maxWidth: createPresetOrCustomField({
     label: 'Max width',
-    options: widthOptions
-  },
-  minHeight: {
-    type: 'select',
+    fieldKey: 'maxWidth',
+    presetOptions: widthOptions,
+    placeholder: 'e.g. 1200px'
+  }),
+  minHeight: createPresetOrCustomField({
     label: 'Min height',
-    options: minHeightOptions
-  },
-  margin: {
-    type: 'select',
+    fieldKey: 'minHeight',
+    presetOptions: minHeightOptions,
+    placeholder: 'e.g. 75vh or 640px'
+  }),
+  margin: createPresetOrCustomField({
     label: 'Margin (all)',
-    options: spacingOptions
-  },
-  marginX: {
-    type: 'select',
+    fieldKey: 'margin',
+    presetOptions: spacingOptions,
+    placeholder: 'e.g. 32px'
+  }),
+  marginX: createPresetOrCustomField({
     label: 'Margin X',
-    options: spacingOptions
-  },
-  marginY: {
-    type: 'select',
+    fieldKey: 'marginX',
+    presetOptions: spacingOptions,
+    placeholder: 'e.g. auto'
+  }),
+  marginY: createPresetOrCustomField({
     label: 'Margin Y',
-    options: spacingOptions
-  },
-  padding: {
-    type: 'select',
+    fieldKey: 'marginY',
+    presetOptions: spacingOptions,
+    placeholder: 'e.g. 48px'
+  }),
+  padding: createPresetOrCustomField({
     label: 'Padding (all)',
-    options: spacingOptions
-  },
-  paddingX: {
-    type: 'select',
+    fieldKey: 'padding',
+    presetOptions: spacingOptions,
+    placeholder: 'e.g. 64px'
+  }),
+  paddingX: createPresetOrCustomField({
     label: 'Padding X',
-    options: spacingOptions
-  },
-  paddingY: {
-    type: 'select',
+    fieldKey: 'paddingX',
+    presetOptions: spacingOptions,
+    placeholder: 'e.g. 5%'
+  }),
+  paddingY: createPresetOrCustomField({
     label: 'Padding Y',
-    options: spacingOptions
-  },
-  borderRadius: {
-    type: 'select',
+    fieldKey: 'paddingY',
+    presetOptions: spacingOptions,
+    placeholder: 'e.g. 80px'
+  }),
+  borderRadius: createPresetOrCustomField({
     label: 'Border radius',
-    options: borderRadiusOptions
-  },
-  borderWidth: {
-    type: 'select',
+    fieldKey: 'borderRadius',
+    presetOptions: borderRadiusOptions,
+    placeholder: 'e.g. 24px'
+  }),
+  borderWidth: createPresetOrCustomField({
     label: 'Border width',
-    options: borderWidthOptions
-  },
+    fieldKey: 'borderWidth',
+    presetOptions: borderWidthOptions,
+    placeholder: 'e.g. 3px'
+  }),
   boxShadow: {
     type: 'select',
     label: 'Shadow',
@@ -424,6 +457,91 @@ export const buildAttributeProps = (customAttributes?: CustomAttributeList): Rec
     logStyleControlEvent('Applied custom attribute', { name: cleanedName });
     return acc;
   }, {});
+};
+
+const CUSTOM_OPTION_VALUE = '__custom__';
+
+type PresetOrCustomFieldControlProps = FieldProps<CustomField<string>, string> & {
+  presetOptions: ReadonlyArray<{ label: string; value: string }>;
+  placeholder?: string;
+  fieldKey: string;
+};
+
+const PresetOrCustomFieldControl = ({
+  id,
+  field,
+  onChange,
+  readOnly,
+  value,
+  presetOptions,
+  placeholder,
+  fieldKey
+}: PresetOrCustomFieldControlProps) => {
+  const generatedId = useId();
+  const resolvedId = id ?? generatedId;
+  const selectId = `${resolvedId}-preset`;
+  const inputId = `${resolvedId}-custom`;
+  const normalizedValue = value ?? '';
+  const hasPresetMatch = presetOptions.some((option) => option.value === normalizedValue);
+  const selectValue = hasPresetMatch ? normalizedValue : CUSTOM_OPTION_VALUE;
+
+  const emitChange = (next: string) => {
+    if (readOnly) {
+      return;
+    }
+    onChange(next);
+  };
+
+  const handlePresetChange = (event: ChangeEvent<HTMLSelectElement>) => {
+    const next = event.target.value;
+    if (next === CUSTOM_OPTION_VALUE) {
+      logStyleControlEvent('Preset switched to custom entry', { fieldKey });
+      return;
+    }
+    logStyleControlEvent('Preset value selected', { fieldKey, value: next });
+    emitChange(next);
+  };
+
+  const handleCustomChange = (event: ChangeEvent<HTMLInputElement>) => {
+    const next = event.target.value;
+    logStyleControlEvent('Custom value updated', { fieldKey, value: next });
+    emitChange(next);
+  };
+
+  return (
+    <div className="space-y-2">
+      <label htmlFor={inputId} className="text-[0.65rem] uppercase tracking-[0.3em] text-gray-500">
+        {field.label ?? 'Value'}
+      </label>
+      <div className="flex flex-col gap-2">
+        <select
+          id={selectId}
+          aria-label={`${field.label ?? 'Value'} preset options`}
+          className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 focus:border-bw-amber focus:outline-none disabled:cursor-not-allowed"
+          value={selectValue}
+          onChange={handlePresetChange}
+          disabled={readOnly}
+        >
+          <option value={CUSTOM_OPTION_VALUE}>Custom value</option>
+          {presetOptions.map((option) => (
+            <option key={option.value ?? option.label} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+        <input
+          id={inputId}
+          aria-label={`${field.label ?? 'Value'} custom value`}
+          type="text"
+          className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:border-bw-amber focus:outline-none disabled:cursor-not-allowed"
+          value={normalizedValue}
+          onChange={handleCustomChange}
+          placeholder={placeholder}
+          disabled={readOnly}
+        />
+      </div>
+    </div>
+  );
 };
 
 type ColorPickerFieldControlProps = FieldProps<CustomField<string>, string> & {

@@ -135,16 +135,40 @@ export class ProjectPagesService {
       });
   }
 
+  private buildDefaultSection(): { type: string; props: Record<string, unknown> } {
+    return {
+      type: 'Section',
+      props: {
+        id: `section-${randomUUID()}`,
+        minHeight: '100vh',
+        padding: '0px',
+        paddingX: '0px',
+        paddingY: '0px',
+        margin: '0px',
+        marginX: '0px',
+        marginY: '0px',
+        borderWidth: '',
+        borderColor: '',
+        backgroundColor: '#FFFFFF'
+      }
+    };
+  }
+
   private createEmptyBuilderState(): PageBuilderState {
+    const defaultSection = this.buildDefaultSection();
+    this.logger.log('Seeding default builder state with section scaffold', {
+      defaultComponent: defaultSection.type,
+      minHeight: defaultSection.props?.minHeight
+    });
     return {
       root: {
         id: 'root',
         props: {},
         children: []
       },
-      content: [],
+      content: [defaultSection],
       zones: {}
-    };
+    } satisfies PageBuilderState;
   }
 
   private describeBuilderState(state?: PageBuilderState): string {

@@ -9,15 +9,52 @@ import { projectPagesApi } from '../lib/api-client';
 import { createPageBuilderConfig } from './page-builder/builder-config';
 import { clearBuilderDraft, loadBuilderDraft, persistBuilderDraft } from './page-builder/draft-storage';
 
-const createEmptyBuilderState = (): Data =>
-  ({
+const randomId = () => {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return Math.random().toString(36).slice(2, 10);
+};
+
+const logPageBuilderEvent = (message: string, details?: Record<string, unknown>) => {
+  if (typeof console !== 'undefined') {
+    console.info(`[PageBuilder] ${message}`, details ?? '');
+  }
+};
+
+const buildDefaultSection = (): ComponentData => ({
+  type: 'Section',
+  props: {
+    id: `section-${randomId()}`,
+    minHeight: '100vh',
+    padding: '0px',
+    paddingX: '0px',
+    paddingY: '0px',
+    margin: '0px',
+    marginX: '0px',
+    marginY: '0px',
+    borderWidth: '',
+    borderColor: '',
+    backgroundColor: '#FFFFFF'
+  }
+});
+
+export const createEmptyBuilderState = (): Data => {
+  const defaultSection = buildDefaultSection();
+  const state: Data = {
     root: {
       id: 'root',
       props: {},
       children: []
     },
-    content: []
-  } as Data);
+    content: [defaultSection]
+  } as Data;
+  logPageBuilderEvent('Initialized default page shell', {
+    defaultComponent: defaultSection.type,
+    minHeight: defaultSection.props?.minHeight
+  });
+  return state;
+};
 
 const toPuckValue = (state?: PageBuilderState): Data => (state as Data) ?? createEmptyBuilderState();
 
@@ -43,12 +80,6 @@ const summarizeBuilderData = (state?: Data) => ({
   contentCount: Array.isArray(state?.content) ? state.content.length : 0,
   zoneCount: getZoneCount(state?.zones as Record<string, Content> | Map<string, Content> | undefined)
 });
-
-const logPageBuilderEvent = (message: string, details?: Record<string, unknown>) => {
-  if (typeof console !== 'undefined') {
-    console.info(`[PageBuilder] ${message}`, details ?? '');
-  }
-};
 
 const cloneComponent = (component: ComponentData): ComponentData => ({
   ...component,
@@ -90,13 +121,6 @@ export const normalizeBuilderStateForSave = (state: Data): PageBuilderState => {
   }
 
   return result;
-};
-
-const randomId = () => {
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-    return crypto.randomUUID();
-  }
-  return Math.random().toString(36).slice(2, 10);
 };
 
 export const PageBuilderPage = () => {

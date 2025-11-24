@@ -95,4 +95,26 @@ describe('style-control custom fields', () => {
     expect(Array.isArray(next)).toBe(true);
     expect(next[0]).toEqual(expect.objectContaining({ id: expect.any(String) }));
   });
+
+  it('lets numeric style fields toggle between presets and custom values', () => {
+    const fields = withStyleFields({});
+    const widthField = fields.width;
+    if (!widthField || widthField.type !== 'custom') {
+      throw new Error('Expected width field to be custom');
+    }
+    const handleChange = jest.fn();
+    render(
+      widthField.render({
+        field: widthField,
+        value: '',
+        id: 'width-field',
+        name: 'width',
+        onChange: handleChange
+      } as Parameters<NonNullable<typeof widthField.render>>[0])
+    );
+    fireEvent.change(screen.getByLabelText(/width preset options/i), { target: { value: '100%' } });
+    expect(handleChange).toHaveBeenCalledWith('100%');
+    fireEvent.change(screen.getByLabelText(/width custom value/i), { target: { value: '640px' } });
+    expect(handleChange).toHaveBeenLastCalledWith('640px');
+  });
 });
