@@ -1,6 +1,9 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import type { CSSProperties, ChangeEvent } from 'react';
 import type { CustomField, Field, FieldProps } from '@measured/puck';
+import type { BindingOption, DynamicBindingValue } from './dynamic-binding';
+import { isDynamicBindingValue } from './dynamic-binding';
+import { DynamicFieldControl, createDynamicSelectField, type StaticControlRendererProps } from './dynamic-field-control';
 
 const STYLE_LOG_PREFIX = '[PageBuilder:StyleControls]';
 const HEX_COLOR_PATTERN = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/;
@@ -52,10 +55,17 @@ const isValidHexColor = (value?: string): value is string => HEX_COLOR_PATTERN.t
 export const deriveColorPickerValue = (value?: string, fallback = DEFAULT_COLOR_FALLBACK) =>
   isValidHexColor(value) ? value : fallback;
 
-const createColorPickerField = ({ label, placeholder, fieldKey }: ColorPickerFieldConfig): Field => ({
+const createColorPickerField = ({ label, placeholder, fieldKey }: ColorPickerFieldConfig, bindingOptions: BindingOption[]): Field => ({
   type: 'custom',
   label,
-  render: (props) => <ColorPickerFieldControl {...props} placeholder={placeholder} fieldKey={fieldKey} />
+  render: (props) => (
+    <ColorPickerFieldControl
+      {...props}
+      placeholder={placeholder}
+      fieldKey={fieldKey}
+      bindingOptions={bindingOptions}
+    />
+  )
 });
 
 const createCustomAttributesField = (): Field<CustomAttributeList> => ({
@@ -64,7 +74,10 @@ const createCustomAttributesField = (): Field<CustomAttributeList> => ({
   render: (props) => <CustomAttributesFieldControl {...props} />
 });
 
-const createPresetOrCustomField = ({ label, fieldKey, presetOptions, placeholder }: PresetOrCustomFieldConfig): Field => ({
+const createPresetOrCustomField = (
+  { label, fieldKey, presetOptions, placeholder }: PresetOrCustomFieldConfig,
+  bindingOptions: BindingOption[]
+): Field => ({
   type: 'custom',
   label,
   render: (props) => (
@@ -73,14 +86,15 @@ const createPresetOrCustomField = ({ label, fieldKey, presetOptions, placeholder
       fieldKey={fieldKey}
       presetOptions={presetOptions}
       placeholder={placeholder}
+      bindingOptions={bindingOptions}
     />
   )
 });
 
-const createCustomCssField = ({ label, placeholder }: CustomCssFieldConfig): Field => ({
+const createCustomCssField = ({ label, placeholder }: CustomCssFieldConfig, bindingOptions: BindingOption[]): Field => ({
   type: 'custom',
   label,
-  render: (props) => <CustomCssFieldControl {...props} placeholder={placeholder} />
+  render: (props) => <CustomCssFieldControl {...props} placeholder={placeholder} bindingOptions={bindingOptions} />
 });
 
 const spacingOptions = [
@@ -150,9 +164,10 @@ const shadowOptions = [
   { label: 'Lifted', value: '0 25px 55px rgba(15, 23, 42, 0.15)' }
 ] as const;
 
-const baseStyleFields = {
-  layoutDisplay: {
-    type: 'select',
+const createBaseStyleFields = (bindingOptions: BindingOption[]) => ({
+  layoutDisplay: createDynamicSelectField({
+    fieldKey: 'layoutDisplay',
+    bindingOptions,
     label: 'Layout / Display',
     options: [
       { label: 'Inherit', value: '' },
@@ -161,9 +176,10 @@ const baseStyleFields = {
       { label: 'Inline flex', value: 'inline-flex' },
       { label: 'Grid', value: 'grid' }
     ]
-  },
-  layoutDirection: {
-    type: 'select',
+  }),
+  layoutDirection: createDynamicSelectField({
+    fieldKey: 'layoutDirection',
+    bindingOptions,
     label: 'Layout / Direction',
     options: [
       { label: 'Row', value: 'row' },
@@ -171,17 +187,19 @@ const baseStyleFields = {
       { label: 'Column', value: 'column' },
       { label: 'Column reverse', value: 'column-reverse' }
     ]
-  },
-  layoutWrap: {
-    type: 'select',
+  }),
+  layoutWrap: createDynamicSelectField({
+    fieldKey: 'layoutWrap',
+    bindingOptions,
     label: 'Layout / Wrap',
     options: [
       { label: 'No wrap', value: 'nowrap' },
       { label: 'Wrap', value: 'wrap' }
     ]
-  },
-  justifyContent: {
-    type: 'select',
+  }),
+  justifyContent: createDynamicSelectField({
+    fieldKey: 'justifyContent',
+    bindingOptions,
     label: 'Layout / Justify',
     options: [
       { label: 'Start', value: 'flex-start' },
@@ -191,9 +209,10 @@ const baseStyleFields = {
       { label: 'Space around', value: 'space-around' },
       { label: 'Space evenly', value: 'space-evenly' }
     ]
-  },
-  alignItems: {
-    type: 'select',
+  }),
+  alignItems: createDynamicSelectField({
+    fieldKey: 'alignItems',
+    bindingOptions,
     label: 'Layout / Align',
     options: [
       { label: 'Stretch', value: 'stretch' },
@@ -201,24 +220,26 @@ const baseStyleFields = {
       { label: 'Center', value: 'center' },
       { label: 'End', value: 'flex-end' }
     ]
-  },
+  }),
   gap: createPresetOrCustomField({
     label: 'Layout / Gap',
     fieldKey: 'gap',
     presetOptions: spacingOptions,
     placeholder: 'e.g. 24px or 1.5rem'
-  }),
-  position: {
-    type: 'select',
+  }, bindingOptions),
+  position: createDynamicSelectField({
+    fieldKey: 'position',
+    bindingOptions,
     label: 'Position',
     options: [
       { label: 'Static', value: 'static' },
       { label: 'Relative', value: 'relative' },
       { label: 'Absolute', value: 'absolute' }
     ]
-  },
-  textAlign: {
-    type: 'select',
+  }),
+  textAlign: createDynamicSelectField({
+    fieldKey: 'textAlign',
+    bindingOptions,
     label: 'Text align',
     options: [
       { label: 'Inherit', value: '' },
@@ -227,20 +248,22 @@ const baseStyleFields = {
       { label: 'Right', value: 'right' },
       { label: 'Justify', value: 'justify' }
     ]
-  },
+  }),
   fontSize: createPresetOrCustomField({
     label: 'Font size',
     fieldKey: 'fontSize',
     presetOptions: fontSizeOptions,
     placeholder: 'e.g. 2.4rem'
-  }),
-  fontWeight: {
-    type: 'select',
+  }, bindingOptions),
+  fontWeight: createDynamicSelectField({
+    fieldKey: 'fontWeight',
+    bindingOptions,
     label: 'Font weight',
     options: fontWeightOptions
-  },
-  lineHeight: {
-    type: 'select',
+  }),
+  lineHeight: createDynamicSelectField({
+    fieldKey: 'lineHeight',
+    bindingOptions,
     label: 'Line height',
     options: [
       { label: 'Inherit', value: '' },
@@ -248,80 +271,82 @@ const baseStyleFields = {
       { label: 'Snug (1.3)', value: '1.3' },
       { label: 'Relaxed (1.6)', value: '1.6' }
     ]
-  },
+  }),
   width: createPresetOrCustomField({
     label: 'Width',
     fieldKey: 'width',
     presetOptions: widthOptions,
     placeholder: 'e.g. 960px or 80%'
-  }),
+  }, bindingOptions),
   maxWidth: createPresetOrCustomField({
     label: 'Max width',
     fieldKey: 'maxWidth',
     presetOptions: widthOptions,
     placeholder: 'e.g. 1200px'
-  }),
+  }, bindingOptions),
   minHeight: createPresetOrCustomField({
     label: 'Min height',
     fieldKey: 'minHeight',
     presetOptions: minHeightOptions,
     placeholder: 'e.g. 75vh or 640px'
-  }),
+  }, bindingOptions),
   margin: createPresetOrCustomField({
     label: 'Margin (all)',
     fieldKey: 'margin',
     presetOptions: spacingOptions,
     placeholder: 'e.g. 32px'
-  }),
+  }, bindingOptions),
   marginX: createPresetOrCustomField({
     label: 'Margin X',
     fieldKey: 'marginX',
     presetOptions: spacingOptions,
     placeholder: 'e.g. auto'
-  }),
+  }, bindingOptions),
   marginY: createPresetOrCustomField({
     label: 'Margin Y',
     fieldKey: 'marginY',
     presetOptions: spacingOptions,
     placeholder: 'e.g. 48px'
-  }),
+  }, bindingOptions),
   padding: createPresetOrCustomField({
     label: 'Padding (all)',
     fieldKey: 'padding',
     presetOptions: spacingOptions,
     placeholder: 'e.g. 64px'
-  }),
+  }, bindingOptions),
   paddingX: createPresetOrCustomField({
     label: 'Padding X',
     fieldKey: 'paddingX',
     presetOptions: spacingOptions,
     placeholder: 'e.g. 5%'
-  }),
+  }, bindingOptions),
   paddingY: createPresetOrCustomField({
     label: 'Padding Y',
     fieldKey: 'paddingY',
     presetOptions: spacingOptions,
     placeholder: 'e.g. 80px'
-  }),
+  }, bindingOptions),
   borderRadius: createPresetOrCustomField({
     label: 'Border radius',
     fieldKey: 'borderRadius',
     presetOptions: borderRadiusOptions,
     placeholder: 'e.g. 24px'
-  }),
+  }, bindingOptions),
   borderWidth: createPresetOrCustomField({
     label: 'Border width',
     fieldKey: 'borderWidth',
     presetOptions: borderWidthOptions,
     placeholder: 'e.g. 3px'
-  }),
-  boxShadow: {
-    type: 'select',
+  }, bindingOptions),
+  boxShadow: createDynamicSelectField({
+    fieldKey: 'boxShadow',
+    bindingOptions,
     label: 'Shadow',
     options: shadowOptions
-  },
-  opacity: {
-    type: 'select',
+  }),
+  opacity: createDynamicSelectField({
+    fieldKey: 'opacity',
+    bindingOptions,
     label: 'Opacity',
     options: [
       { label: '100%', value: '1' },
@@ -330,33 +355,35 @@ const baseStyleFields = {
       { label: '70%', value: '0.7' },
       { label: '60%', value: '0.6' }
     ]
-  }
-} satisfies Record<string, Field>;
+  })
+}) satisfies Record<string, Field>;
 
-const colorFields = {
-  textColor: createColorPickerField({ label: 'Text color', placeholder: 'e.g. #111827', fieldKey: 'textColor' }),
-  backgroundColor: createColorPickerField({ label: 'Background color', placeholder: 'e.g. #F9E7B2', fieldKey: 'backgroundColor' }),
-  borderColor: createColorPickerField({ label: 'Border color', placeholder: 'e.g. rgba(0,0,0,0.08)', fieldKey: 'borderColor' })
-};
+const createColorFields = (bindingOptions: BindingOption[]) => ({
+  textColor: createColorPickerField({ label: 'Text color', placeholder: 'e.g. #111827', fieldKey: 'textColor' }, bindingOptions),
+  backgroundColor: createColorPickerField({ label: 'Background color', placeholder: 'e.g. #F9E7B2', fieldKey: 'backgroundColor' }, bindingOptions),
+  borderColor: createColorPickerField({ label: 'Border color', placeholder: 'e.g. rgba(0,0,0,0.08)', fieldKey: 'borderColor' }, bindingOptions)
+});
 
-const sharedStyleFields = {
-  ...baseStyleFields,
-  ...colorFields
-};
+const createSharedStyleFields = (bindingOptions: BindingOption[]) => ({
+  ...createBaseStyleFields(bindingOptions),
+  ...createColorFields(bindingOptions)
+});
 
-type SharedFields = typeof sharedStyleFields & {
+type SharedStyleFields = ReturnType<typeof createSharedStyleFields>;
+
+type SharedFields = SharedStyleFields & {
   customAttributes: ReturnType<typeof createCustomAttributesField>;
   customCss: ReturnType<typeof createCustomCssField>;
 };
 
-const sharedFields: SharedFields = {
-  ...sharedStyleFields,
+const createSharedFields = (bindingOptions: BindingOption[]): SharedFields => ({
+  ...createSharedStyleFields(bindingOptions),
   customAttributes: createCustomAttributesField(),
-  customCss: createCustomCssField({ label: 'Custom CSS', placeholder: 'e.g. color: #000; margin-top: 2rem;' })
-};
+  customCss: createCustomCssField({ label: 'Custom CSS', placeholder: 'e.g. color: #000; margin-top: 2rem;' }, bindingOptions)
+});
 
-export type StyleFieldKey = keyof typeof sharedStyleFields;
-export type StyleFieldValues = Partial<Record<StyleFieldKey, string>>;
+export type StyleFieldKey = keyof SharedStyleFields;
+export type StyleFieldValues = Partial<Record<StyleFieldKey, DynamicBindingValue>>;
 
 export type StyleableProps<T extends Record<string, unknown>> = T & StyleFieldValues & {
   id?: string;
@@ -364,11 +391,11 @@ export type StyleableProps<T extends Record<string, unknown>> = T & StyleFieldVa
   customCss?: string;
 };
 
-export const STYLE_FIELD_KEYS = Object.keys(sharedStyleFields) as StyleFieldKey[];
+export const STYLE_FIELD_KEYS = Object.keys(createSharedStyleFields([])) as StyleFieldKey[];
 
-export const withStyleFields = <T extends Record<string, Field>>(fields: T): T & SharedFields => ({
+export const withStyleFields = <T extends Record<string, Field>>(fields: T, bindingOptions: BindingOption[]): T & SharedFields => ({
   ...fields,
-  ...sharedFields
+  ...createSharedFields(bindingOptions)
 });
 
 export const splitStyleProps = <Props extends Record<string, unknown>>(props: Props) => {
@@ -378,7 +405,7 @@ export const splitStyleProps = <Props extends Record<string, unknown>>(props: Pr
   Object.entries(props ?? {}).forEach(([key, value]) => {
     if (STYLE_FIELD_KEYS.includes(key as StyleFieldKey)) {
       if (value !== undefined) {
-        styleProps[key as StyleFieldKey] = value as string;
+        styleProps[key as StyleFieldKey] = value as DynamicBindingValue;
       }
       return;
     }
@@ -391,13 +418,27 @@ export const splitStyleProps = <Props extends Record<string, unknown>>(props: Pr
   };
 };
 
-export const createInlineStyle = (styleProps: StyleFieldValues): CSSProperties => {
+export const createInlineStyle = (
+  styleProps: StyleFieldValues,
+  resolveDynamic?: (value: DynamicBindingValue | undefined, key: StyleFieldKey) => string
+): CSSProperties => {
   const style: CSSProperties = {};
   const assign = <Key extends keyof CSSProperties>(key: Key, value?: CSSProperties[Key]) => {
     if (value === undefined || value === '') {
       return;
     }
     style[key] = value;
+  };
+
+  const read = (key: StyleFieldKey): string => {
+    const raw = styleProps[key];
+    if (resolveDynamic) {
+      return resolveDynamic(raw, key);
+    }
+    if (isDynamicBindingValue(raw)) {
+      return raw.fallback ?? '';
+    }
+    return typeof raw === 'string' ? raw : '';
   };
 
   const applyAxis = (value: string | undefined, keys: Array<keyof CSSProperties>) => {
@@ -409,38 +450,39 @@ export const createInlineStyle = (styleProps: StyleFieldValues): CSSProperties =
     });
   };
 
-  assign('display', styleProps.layoutDisplay as CSSProperties['display']);
-  assign('flexDirection', styleProps.layoutDirection as CSSProperties['flexDirection']);
-  assign('flexWrap', styleProps.layoutWrap as CSSProperties['flexWrap']);
-  assign('justifyContent', styleProps.justifyContent as CSSProperties['justifyContent']);
-  assign('alignItems', styleProps.alignItems as CSSProperties['alignItems']);
-  assign('gap', styleProps.gap);
-  assign('position', styleProps.position as CSSProperties['position']);
-  assign('textAlign', styleProps.textAlign as CSSProperties['textAlign']);
-  assign('fontSize', styleProps.fontSize as CSSProperties['fontSize']);
-  assign('fontWeight', styleProps.fontWeight as CSSProperties['fontWeight']);
-  assign('lineHeight', styleProps.lineHeight as CSSProperties['lineHeight']);
-  assign('color', styleProps.textColor);
-  assign('backgroundColor', styleProps.backgroundColor);
-  assign('width', styleProps.width);
-  assign('maxWidth', styleProps.maxWidth);
-  assign('minHeight', styleProps.minHeight);
-  assign('margin', styleProps.margin);
-  assign('padding', styleProps.padding);
-  assign('borderRadius', styleProps.borderRadius);
-  assign('borderWidth', styleProps.borderWidth);
-  assign('borderColor', styleProps.borderColor);
-  assign('boxShadow', styleProps.boxShadow);
-  assign('opacity', styleProps.opacity as CSSProperties['opacity']);
+  assign('display', read('layoutDisplay') as CSSProperties['display']);
+  assign('flexDirection', read('layoutDirection') as CSSProperties['flexDirection']);
+  assign('flexWrap', read('layoutWrap') as CSSProperties['flexWrap']);
+  assign('justifyContent', read('justifyContent') as CSSProperties['justifyContent']);
+  assign('alignItems', read('alignItems') as CSSProperties['alignItems']);
+  assign('gap', read('gap'));
+  assign('position', read('position') as CSSProperties['position']);
+  assign('textAlign', read('textAlign') as CSSProperties['textAlign']);
+  assign('fontSize', read('fontSize') as CSSProperties['fontSize']);
+  assign('fontWeight', read('fontWeight') as CSSProperties['fontWeight']);
+  assign('lineHeight', read('lineHeight') as CSSProperties['lineHeight']);
+  assign('color', read('textColor'));
+  assign('backgroundColor', read('backgroundColor'));
+  assign('width', read('width'));
+  assign('maxWidth', read('maxWidth'));
+  assign('minHeight', read('minHeight'));
+  assign('margin', read('margin'));
+  assign('padding', read('padding'));
+  assign('borderRadius', read('borderRadius'));
+  const borderWidthValue = read('borderWidth');
+  assign('borderWidth', borderWidthValue);
+  assign('borderColor', read('borderColor'));
+  assign('boxShadow', read('boxShadow'));
+  assign('opacity', read('opacity') as CSSProperties['opacity']);
 
-  if (styleProps.borderWidth && !style.borderStyle) {
+  if (borderWidthValue && !style.borderStyle) {
     style.borderStyle = 'solid';
   }
 
-  applyAxis(styleProps.marginX, ['marginLeft', 'marginRight']);
-  applyAxis(styleProps.marginY, ['marginTop', 'marginBottom']);
-  applyAxis(styleProps.paddingX, ['paddingLeft', 'paddingRight']);
-  applyAxis(styleProps.paddingY, ['paddingTop', 'paddingBottom']);
+  applyAxis(read('marginX'), ['marginLeft', 'marginRight']);
+  applyAxis(read('marginY'), ['marginTop', 'marginBottom']);
+  applyAxis(read('paddingX'), ['paddingLeft', 'paddingRight']);
+  applyAxis(read('paddingY'), ['paddingTop', 'paddingBottom']);
 
   return style;
 };
@@ -476,26 +518,27 @@ export const buildAttributeProps = (customAttributes?: CustomAttributeList): Rec
 
 const CUSTOM_OPTION_VALUE = '__custom__';
 
-type PresetOrCustomFieldControlProps = FieldProps<CustomField<string>, string> & {
+type PresetOrCustomFieldControlProps = FieldProps<CustomField<DynamicBindingValue>, DynamicBindingValue> & {
   presetOptions: ReadonlyArray<{ label: string; value: string }>;
   placeholder?: string;
   fieldKey: string;
+  bindingOptions: BindingOption[];
 };
 
-const PresetOrCustomFieldControl = ({
-  id,
-  field,
-  onChange,
-  readOnly,
+const PresetOrCustomStaticControl = ({
+  inputId,
   value,
-  presetOptions,
+  readOnly,
   placeholder,
+  onChange,
+  presetOptions,
   fieldKey
-}: PresetOrCustomFieldControlProps) => {
-  const generatedId = useId();
-  const resolvedId = id ?? generatedId;
-  const selectId = `${resolvedId}-preset`;
-  const inputId = `${resolvedId}-custom`;
+}: StaticControlRendererProps & {
+  presetOptions: ReadonlyArray<{ label: string; value: string }>;
+  fieldKey: string;
+}) => {
+  const selectId = `${inputId}-preset`;
+  const customInputId = `${inputId}-custom`;
   const normalizedValue = value ?? '';
   const hasPresetMatch = presetOptions.some((option) => option.value === normalizedValue);
   const [mode, setMode] = useState<'preset' | 'custom'>(() => (hasPresetMatch ? 'preset' : 'custom'));
@@ -515,13 +558,6 @@ const PresetOrCustomFieldControl = ({
   const selectValue = mode === 'custom' ? CUSTOM_OPTION_VALUE : normalizedValue;
   const showCustomInput = mode === 'custom';
 
-  const emitChange = (next: string) => {
-    if (readOnly) {
-      return;
-    }
-    onChange(next);
-  };
-
   const handlePresetChange = (event: ChangeEvent<HTMLSelectElement>) => {
     const next = event.target.value;
     if (next === CUSTOM_OPTION_VALUE) {
@@ -531,140 +567,150 @@ const PresetOrCustomFieldControl = ({
     }
     logStyleControlEvent('Preset value selected', { fieldKey, value: next });
     setMode('preset');
-    emitChange(next);
+    onChange(next);
   };
 
   const handleCustomChange = (event: ChangeEvent<HTMLInputElement>) => {
     const next = event.target.value;
     logStyleControlEvent('Custom value updated', { fieldKey, value: next });
     setMode('custom');
-    emitChange(next);
+    onChange(next);
   };
 
   return (
-    <div className="space-y-2">
-      <label htmlFor={selectId} className="text-[0.65rem] uppercase tracking-[0.3em] text-gray-500">
-        {field.label ?? 'Value'}
-      </label>
-      <div className="flex flex-col gap-2">
-        <select
-          id={selectId}
-          aria-label={`${field.label ?? 'Value'} preset options`}
-          className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 focus:border-bw-amber focus:outline-none disabled:cursor-not-allowed"
-          value={selectValue}
-          onChange={handlePresetChange}
+    <div className="flex flex-col gap-2">
+      <select
+        id={selectId}
+        aria-label="Preset options"
+        className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 focus:border-bw-amber focus:outline-none disabled:cursor-not-allowed"
+        value={selectValue}
+        onChange={handlePresetChange}
+        disabled={readOnly}
+      >
+        <option value={CUSTOM_OPTION_VALUE}>Custom value</option>
+        {presetOptions.map((option) => (
+          <option key={option.value ?? option.label} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+      {showCustomInput ? (
+        <input
+          id={customInputId}
+          aria-label="Custom value"
+          type="text"
+          className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:border-bw-amber focus:outline-none disabled:cursor-not-allowed"
+          value={normalizedValue}
+          onChange={handleCustomChange}
+          placeholder={placeholder}
           disabled={readOnly}
-        >
-          <option value={CUSTOM_OPTION_VALUE}>Custom value</option>
-          {presetOptions.map((option) => (
-            <option key={option.value ?? option.label} value={option.value}>
-              {option.label}
-            </option>
-          ))}
-        </select>
-        {showCustomInput ? (
-          <input
-            id={inputId}
-            aria-label={`${field.label ?? 'Value'} custom value`}
-            type="text"
-            className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:border-bw-amber focus:outline-none disabled:cursor-not-allowed"
-            value={normalizedValue}
-            onChange={handleCustomChange}
-            placeholder={placeholder}
-            disabled={readOnly}
-          />
-        ) : null}
-      </div>
+        />
+      ) : null}
     </div>
   );
 };
 
-type ColorPickerFieldControlProps = FieldProps<CustomField<string>, string> & {
+const PresetOrCustomFieldControl = ({ fieldKey, bindingOptions, presetOptions, placeholder, ...rest }: PresetOrCustomFieldControlProps) => (
+  <DynamicFieldControl
+    {...rest}
+    fieldKey={fieldKey}
+    bindingOptions={bindingOptions}
+    placeholder={placeholder}
+    renderStaticControl={(controlProps) => (
+      <PresetOrCustomStaticControl
+        {...controlProps}
+        presetOptions={presetOptions}
+        placeholder={placeholder}
+        fieldKey={fieldKey}
+      />
+    )}
+  />
+);
+
+type ColorPickerFieldControlProps = FieldProps<CustomField<DynamicBindingValue>, DynamicBindingValue> & {
   placeholder?: string;
   fieldKey: string;
+  bindingOptions: BindingOption[];
 };
 
-type CustomCssFieldControlProps = FieldProps<CustomField<string>, string> & {
+type CustomCssFieldControlProps = FieldProps<CustomField<DynamicBindingValue>, DynamicBindingValue> & {
   placeholder?: string;
+  bindingOptions: BindingOption[];
 };
 
-const CustomCssFieldControl = ({ id, field, value, onChange, readOnly, placeholder }: CustomCssFieldControlProps) => {
-  const generatedId = useId();
-  const resolvedId = id ?? generatedId;
-  const handleChange = (event: ChangeEvent<HTMLTextAreaElement>) => {
-    if (readOnly) {
-      return;
-    }
-    const next = event.target.value;
-    logStyleControlEvent('Custom CSS updated', { fieldKey: 'customCss', length: next.length });
-    onChange(next);
-  };
+const CustomCssStaticControl = ({
+  inputId,
+  value,
+  onChange,
+  readOnly,
+  placeholder
+}: StaticControlRendererProps & { placeholder?: string }) => (
+  <div className="space-y-2">
+    <textarea
+      id={inputId}
+      className="h-28 w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:border-bw-amber focus:outline-none disabled:cursor-not-allowed"
+      value={value ?? ''}
+      onChange={(event) => {
+        const next = event.target.value;
+        logStyleControlEvent('Custom CSS updated', { fieldKey: 'customCss', length: next.length });
+        onChange(next);
+      }}
+      placeholder={placeholder ?? 'color: #000;\npadding: 12px;'}
+      disabled={readOnly}
+    />
+    <p className="text-[0.65rem] uppercase tracking-[0.3em] text-gray-400">Scoped to this component</p>
+  </div>
+);
 
-  return (
-    <div className="space-y-2">
-      <label htmlFor={resolvedId} className="text-[0.65rem] uppercase tracking-[0.3em] text-gray-500">
-        {field.label ?? 'Custom CSS'}
-      </label>
-      <textarea
-        id={resolvedId}
-        className="h-28 w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:border-bw-amber focus:outline-none disabled:cursor-not-allowed"
-        value={value ?? ''}
-        onChange={handleChange}
-        placeholder={placeholder ?? 'color: #000;\npadding: 12px;'}
-        disabled={readOnly}
-      />
-      <p className="text-[0.65rem] uppercase tracking-[0.3em] text-gray-400">Scoped to this component</p>
-    </div>
-  );
-};
+const CustomCssFieldControl = ({ bindingOptions, placeholder, ...rest }: CustomCssFieldControlProps) => (
+  <DynamicFieldControl
+    {...rest}
+    fieldKey="customCss"
+    bindingOptions={bindingOptions}
+    placeholder={placeholder}
+    renderStaticControl={(controlProps) => (
+      <CustomCssStaticControl {...controlProps} placeholder={placeholder} />
+    )}
+  />
+);
 
-const ColorPickerFieldControl = ({ id, field, onChange, readOnly, value, placeholder, fieldKey }: ColorPickerFieldControlProps) => {
-  const generatedId = useId();
-  const resolvedId = id ?? generatedId;
-  const colorInputId = `${resolvedId}-color`;
-  const textInputId = `${resolvedId}-text`;
+const ColorPickerStaticControl = ({
+  inputId,
+  value,
+  onChange,
+  readOnly,
+  placeholder,
+  fieldKey
+}: StaticControlRendererProps & { placeholder?: string; fieldKey: string }) => {
+  const colorInputId = `${inputId}-color`;
+  const textInputId = `${inputId}-text`;
   const colorPickerValue = deriveColorPickerValue(value);
-
-  const emitChange = (next: string) => {
-    if (readOnly) {
-      return;
-    }
-    onChange(next);
-  };
 
   const handleColorChange = (event: ChangeEvent<HTMLInputElement>) => {
     const next = event.target.value;
     logStyleControlEvent('Color picker used', { fieldKey, value: next });
-    emitChange(next);
+    onChange(next);
   };
 
   const handleTextChange = (event: ChangeEvent<HTMLInputElement>) => {
     const next = event.target.value;
     logStyleControlEvent('Color text updated', { fieldKey, value: next });
-    emitChange(next);
+    onChange(next);
   };
 
   const handleReset = () => {
     logStyleControlEvent('Color reset requested', { fieldKey });
-    emitChange('');
+    onChange('');
   };
 
   return (
     <div className="space-y-2">
-      <label htmlFor={textInputId} className="flex items-center justify-between text-[0.65rem] uppercase tracking-[0.3em] text-gray-500">
-        {field.label ?? 'Color'}
-        {value && !readOnly ? (
-          <button type="button" onClick={handleReset} className="text-[0.65rem] font-semibold text-bw-amber">
-            Reset
-          </button>
-        ) : null}
-      </label>
       <div className="flex items-center gap-3">
         <input
           id={colorInputId}
           type="color"
           className="h-9 w-10 cursor-pointer rounded border border-gray-300 bg-white p-0 disabled:cursor-not-allowed"
-          aria-label={`${field.label ?? 'Color'} picker`}
+          aria-label="Color picker"
           value={colorPickerValue}
           onChange={handleColorChange}
           disabled={readOnly}
@@ -678,10 +724,31 @@ const ColorPickerFieldControl = ({ id, field, onChange, readOnly, value, placeho
           placeholder={placeholder}
           disabled={readOnly}
         />
+        {value && !readOnly ? (
+          <button type="button" onClick={handleReset} className="text-xs font-semibold text-bw-amber">
+            Reset
+          </button>
+        ) : null}
       </div>
     </div>
   );
 };
+
+const ColorPickerFieldControl = ({ fieldKey, bindingOptions, placeholder, ...rest }: ColorPickerFieldControlProps) => (
+  <DynamicFieldControl
+    {...rest}
+    fieldKey={fieldKey}
+    bindingOptions={bindingOptions}
+    placeholder={placeholder}
+    renderStaticControl={(controlProps) => (
+      <ColorPickerStaticControl
+        {...controlProps}
+        placeholder={placeholder}
+        fieldKey={fieldKey}
+      />
+    )}
+  />
+);
 
 type CustomAttributesFieldControlProps = FieldProps<CustomField<CustomAttributeList>, CustomAttributeList>;
 

@@ -8,12 +8,17 @@ import {
   type StyleableProps
 } from './style-controls';
 import { attachNodeIdentity, renderScopedCss } from './custom-css';
-
-type BindingOption = { label: string; value: string };
+import {
+  type BindingOption,
+  type BindingResolver,
+  type DynamicBindingValue,
+  resolveDynamicBindingValue
+} from './dynamic-binding';
+import { createDynamicSelectField, createDynamicTextField, createDynamicTextareaField } from './dynamic-field-control';
 
 type BuilderConfigParams = {
   bindingOptions: BindingOption[];
-  resolveBinding: (text?: string, bindingId?: string) => string;
+  resolveBinding: BindingResolver;
 };
 
 type SlotRenderer = ((props?: { className?: string; minEmptyHeight?: number }) => ReactNode) | undefined;
@@ -21,69 +26,69 @@ type SlotRenderer = ((props?: { className?: string; minEmptyHeight?: number }) =
 type ColumnsLayout = 'equal' | 'wideLeft' | 'wideRight';
 
 type SectionProps = StyleableProps<{
-  eyebrow?: string;
-  heading?: string;
-  subheading?: string;
-  description?: string;
-  backgroundImage?: string;
+  eyebrow?: DynamicBindingValue;
+  heading?: DynamicBindingValue;
+  subheading?: DynamicBindingValue;
+  description?: DynamicBindingValue;
+  backgroundImage?: DynamicBindingValue;
   contentSlot?: SlotRenderer;
 }>;
 
 type ColumnsProps = StyleableProps<{
   left?: SlotRenderer;
   right?: SlotRenderer;
-  layout?: ColumnsLayout;
-  stackAt?: 'never' | 'md' | 'lg';
+  layout?: DynamicBindingValue;
+  stackAt?: DynamicBindingValue;
 }>;
 
 type ImageProps = StyleableProps<{
-  src?: string;
-  alt?: string;
-  caption?: string;
-  objectFit?: string;
-  aspectRatio?: string;
+  src?: DynamicBindingValue;
+  alt?: DynamicBindingValue;
+  caption?: DynamicBindingValue;
+  objectFit?: DynamicBindingValue;
+  aspectRatio?: DynamicBindingValue;
 }>;
 
 type ListItem = {
-  text?: string;
-  icon?: string;
-  description?: string;
+  text?: DynamicBindingValue;
+  icon?: DynamicBindingValue;
+  description?: DynamicBindingValue;
 };
 
 type ListProps = StyleableProps<{
   items?: ListItem[];
-  variant?: 'bullet' | 'numbered' | 'plain';
+  variant?: DynamicBindingValue;
 }>;
 
 type CardProps = StyleableProps<{
-  eyebrow?: string;
-  heading?: string;
-  content?: string;
-  imageUrl?: string;
-  actionLabel?: string;
-  actionHref?: string;
+  eyebrow?: DynamicBindingValue;
+  heading?: DynamicBindingValue;
+  content?: DynamicBindingValue;
+  imageUrl?: DynamicBindingValue;
+  actionLabel?: DynamicBindingValue;
+  actionHref?: DynamicBindingValue;
 }>;
 
 type ButtonProps = StyleableProps<{
-  label?: string;
-  variant?: 'primary' | 'ghost' | 'link';
+  label?: DynamicBindingValue;
+  variant?: DynamicBindingValue;
   bindingId?: string;
-  href?: string;
+  href?: DynamicBindingValue;
 }>;
 
 type HeadingProps = StyleableProps<{
-  content?: string;
-  size?: string;
+  content?: DynamicBindingValue;
+  size?: DynamicBindingValue;
   bindingId?: string;
 }>;
 
 type ParagraphProps = StyleableProps<{
-  content?: string;
+  content?: DynamicBindingValue;
   bindingId?: string;
 }>;
 
 type SpacerProps = StyleableProps<{
-  height?: string;
+  height?: DynamicBindingValue;
 }>;
 
 const COMPONENT_ORDER = [
@@ -123,13 +128,15 @@ const getColumnsTemplate = (layout: ColumnsLayout): string => {
   }
 };
 
-const styleableFields = (fields: Record<string, Field>) => withStyleFields(fields);
-
-const headingFields = (bindingOptions: BindingOption[]) =>
-  styleableFields({
-    content: { type: 'textarea', label: 'Content', placeholder: 'Add heading text' },
-    size: {
-      type: 'select',
+const headingFields = (
+  bindingOptions: BindingOption[],
+  enhance: (fields: Record<string, Field>) => Record<string, Field>
+) =>
+  enhance({
+    content: createDynamicTextareaField({ fieldKey: 'content', bindingOptions, label: 'Content', placeholder: 'Add heading text' }),
+    size: createDynamicSelectField({
+      fieldKey: 'size',
+      bindingOptions,
       label: 'Heading level',
       options: [
         { label: 'H1', value: 'h1' },
@@ -137,37 +144,48 @@ const headingFields = (bindingOptions: BindingOption[]) =>
         { label: 'H3', value: 'h3' },
         { label: 'H4', value: 'h4' }
       ]
-    },
-    bindingId: { type: 'select', label: 'Dynamic value', options: bindingOptions }
+    })
   });
 
-const paragraphFields = (bindingOptions: BindingOption[]) =>
-  styleableFields({
-    content: { type: 'textarea', label: 'Content', placeholder: 'Add supporting copy' },
-    bindingId: { type: 'select', label: 'Dynamic value', options: bindingOptions }
+const paragraphFields = (
+  bindingOptions: BindingOption[],
+  enhance: (fields: Record<string, Field>) => Record<string, Field>
+) =>
+  enhance({
+    content: createDynamicTextareaField({ fieldKey: 'content', bindingOptions, label: 'Content', placeholder: 'Add supporting copy' })
   });
 
-const buttonFields = (bindingOptions: BindingOption[]) =>
-  styleableFields({
-    label: { type: 'text', label: 'Label', placeholder: 'Get started' },
-    bindingId: { type: 'select', label: 'Dynamic value', options: bindingOptions },
-    variant: {
-      type: 'select',
+const buttonFields = (
+  bindingOptions: BindingOption[],
+  enhance: (fields: Record<string, Field>) => Record<string, Field>
+) =>
+  enhance({
+    label: createDynamicTextField({ fieldKey: 'label', bindingOptions, label: 'Label', placeholder: 'Get started' }),
+    variant: createDynamicSelectField({
+      fieldKey: 'variant',
+      bindingOptions,
       label: 'Variant',
       options: [
         { label: 'Primary', value: 'primary' },
         { label: 'Ghost', value: 'ghost' },
         { label: 'Link', value: 'link' }
       ]
-    },
-    href: { type: 'text', label: 'Href', placeholder: 'https://example.com' }
+    }),
+    href: createDynamicTextField({ fieldKey: 'href', bindingOptions, label: 'Href', placeholder: 'https://example.com' })
   });
 
 export const createPageBuilderConfig = ({ bindingOptions, resolveBinding }: BuilderConfigParams): Config => {
+  const enhanceFields = (fields: Record<string, Field>) => withStyleFields(fields, bindingOptions);
+  const resolveFieldValue = (
+    value: DynamicBindingValue | string | undefined,
+    legacyBindingId?: string
+  ): string => resolveDynamicBindingValue(value as DynamicBindingValue, resolveBinding, legacyBindingId);
+  const resolveStyleValue = (value: DynamicBindingValue | undefined) => resolveDynamicBindingValue(value, resolveBinding);
+
   const components: Config['components'] = {
     Heading: {
       label: 'Heading',
-      fields: headingFields(bindingOptions),
+      fields: headingFields(bindingOptions, enhanceFields),
       defaultProps: {
         content: 'Design with confidence',
         size: 'h2',
@@ -177,12 +195,15 @@ export const createPageBuilderConfig = ({ bindingOptions, resolveBinding }: Buil
       render: (props) => {
         const { styleProps, rest } = splitStyleProps(props);
         const { content, size = 'h2', bindingId, customAttributes, customCss, id } = rest as HeadingProps;
-        const Tag = (size as keyof JSX.IntrinsicElements) || 'h2';
-        const resolvedContent = resolveBinding(content, bindingId);
+        const resolvedContent = resolveFieldValue(content, bindingId);
+        const resolvedSize = resolveFieldValue(size);
+        const allowedHeadingTags = new Set(['h1', 'h2', 'h3', 'h4']);
+        const tagName = allowedHeadingTags.has(resolvedSize) ? resolvedSize : 'h2';
+        const Tag = (tagName as keyof JSX.IntrinsicElements) || 'h2';
         const attributeProps = attachNodeIdentity(id, buildAttributeProps(customAttributes));
         return (
           <>
-            <Tag style={createInlineStyle(styleProps)} className="text-bw-ink" {...attributeProps}>
+            <Tag style={createInlineStyle(styleProps, resolveStyleValue)} className="text-bw-ink" {...attributeProps}>
               {resolvedContent}
             </Tag>
             {renderScopedCss(id, customCss)}
@@ -192,7 +213,7 @@ export const createPageBuilderConfig = ({ bindingOptions, resolveBinding }: Buil
     },
     Paragraph: {
       label: 'Paragraph',
-      fields: paragraphFields(bindingOptions),
+      fields: paragraphFields(bindingOptions, enhanceFields),
       defaultProps: {
         content: 'Craft modern apps visually and let BuildWeaver handle the scaffolding.',
         textColor: '#4B5563'
@@ -203,8 +224,8 @@ export const createPageBuilderConfig = ({ bindingOptions, resolveBinding }: Buil
         const attributeProps = attachNodeIdentity(id, buildAttributeProps(customAttributes));
         return (
           <>
-            <p style={createInlineStyle(styleProps)} className="text-base leading-relaxed" {...attributeProps}>
-              {resolveBinding(content, bindingId)}
+            <p style={createInlineStyle(styleProps, resolveStyleValue)} className="text-base leading-relaxed" {...attributeProps}>
+              {resolveFieldValue(content, bindingId)}
             </p>
             {renderScopedCss(id, customCss)}
           </>
@@ -213,7 +234,7 @@ export const createPageBuilderConfig = ({ bindingOptions, resolveBinding }: Buil
     },
     Button: {
       label: 'Button',
-      fields: buttonFields(bindingOptions),
+      fields: buttonFields(bindingOptions, enhanceFields),
       defaultProps: {
         label: 'Primary action',
         variant: 'primary',
@@ -224,23 +245,28 @@ export const createPageBuilderConfig = ({ bindingOptions, resolveBinding }: Buil
       render: (props) => {
         const { styleProps, rest } = splitStyleProps(props);
         const { label, variant = 'primary', bindingId, href, customAttributes, customCss, id } = rest as ButtonProps;
-        const content = resolveBinding(label, bindingId);
-        const baseStyle = createInlineStyle(styleProps);
+        const content = resolveFieldValue(label, bindingId);
+        const resolvedVariant = resolveFieldValue(variant);
+        const nextVariant = ['ghost', 'link', 'primary'].includes(resolvedVariant)
+          ? (resolvedVariant as 'ghost' | 'link' | 'primary')
+          : 'primary';
+        const resolvedHref = resolveFieldValue(href);
+        const baseStyle = createInlineStyle(styleProps, resolveStyleValue);
         const attributeProps = attachNodeIdentity(id, buildAttributeProps(customAttributes));
         const className =
-          variant === 'ghost'
+          nextVariant === 'ghost'
             ? 'border border-gray-300 bg-transparent text-gray-800'
-            : variant === 'link'
+            : nextVariant === 'link'
               ? 'bg-transparent text-bw-amber underline'
               : 'bg-bw-sand text-bw-ink shadow-sm';
-        const Element = href ? 'a' : 'button';
+        const Element = resolvedHref ? 'a' : 'button';
         return (
           <>
             <Element
               className={`inline-flex items-center justify-center font-semibold transition hover:opacity-90 ${className}`}
               style={baseStyle}
-              href={href}
-              role={href ? 'button' : undefined}
+              href={resolvedHref}
+              role={resolvedHref ? 'button' : undefined}
               {...attributeProps}
             >
               {content}
@@ -258,12 +284,12 @@ export const createPageBuilderConfig = ({ bindingOptions, resolveBinding }: Buil
         backgroundColor: '#FFFFFF',
         gap: '24px'
       },
-      fields: styleableFields({
-        eyebrow: { type: 'text', label: 'Eyebrow', placeholder: 'Product update' },
-        heading: { type: 'text', label: 'Heading', placeholder: 'Hero title' },
-        subheading: { type: 'textarea', label: 'Subheading', placeholder: 'Supportive copy' },
-        description: { type: 'textarea', label: 'Description' },
-        backgroundImage: { type: 'text', label: 'Background image URL' },
+      fields: enhanceFields({
+        eyebrow: createDynamicTextField({ fieldKey: 'eyebrow', bindingOptions, label: 'Eyebrow', placeholder: 'Product update' }),
+        heading: createDynamicTextField({ fieldKey: 'heading', bindingOptions, label: 'Heading', placeholder: 'Hero title' }),
+        subheading: createDynamicTextareaField({ fieldKey: 'subheading', bindingOptions, label: 'Subheading', placeholder: 'Supportive copy' }),
+        description: createDynamicTextareaField({ fieldKey: 'description', bindingOptions, label: 'Description' }),
+        backgroundImage: createDynamicTextField({ fieldKey: 'backgroundImage', bindingOptions, label: 'Background image URL' }),
         contentSlot: {
           type: 'slot',
           label: 'Nested components',
@@ -283,21 +309,26 @@ export const createPageBuilderConfig = ({ bindingOptions, resolveBinding }: Buil
           customCss,
           id
         } = rest as SectionProps;
+        const resolvedEyebrow = resolveFieldValue(eyebrow);
+        const resolvedHeading = resolveFieldValue(heading);
+        const resolvedSubheading = resolveFieldValue(subheading);
+        const resolvedDescription = resolveFieldValue(description);
+        const resolvedBackground = resolveFieldValue(backgroundImage);
         const inlineStyle = {
-          ...createInlineStyle(styleProps),
-          backgroundImage: backgroundImage ? `url(${backgroundImage})` : undefined,
-          backgroundSize: backgroundImage ? 'cover' : undefined,
-          backgroundPosition: backgroundImage ? 'center' : undefined
+          ...createInlineStyle(styleProps, resolveStyleValue),
+          backgroundImage: resolvedBackground ? `url(${resolvedBackground})` : undefined,
+          backgroundSize: resolvedBackground ? 'cover' : undefined,
+          backgroundPosition: resolvedBackground ? 'center' : undefined
         };
         const attributeProps = attachNodeIdentity(id, buildAttributeProps(customAttributes));
         return (
           <>
             <section style={inlineStyle} className="relative w-full overflow-hidden border border-gray-100 shadow-sm" {...attributeProps}>
               <div className="space-y-3">
-                {eyebrow && <p className="text-xs uppercase tracking-[0.2em] text-bw-amber">{eyebrow}</p>}
-                {heading && <h2 className="text-3xl font-semibold text-bw-ink">{heading}</h2>}
-                {subheading && <p className="text-lg text-gray-600">{subheading}</p>}
-                {description && <p className="text-base text-gray-500">{description}</p>}
+                {resolvedEyebrow && <p className="text-xs uppercase tracking-[0.2em] text-bw-amber">{resolvedEyebrow}</p>}
+                {resolvedHeading && <h2 className="text-3xl font-semibold text-bw-ink">{resolvedHeading}</h2>}
+                {resolvedSubheading && <p className="text-lg text-gray-600">{resolvedSubheading}</p>}
+                {resolvedDescription && <p className="text-base text-gray-500">{resolvedDescription}</p>}
               </div>
               <div className="mt-6">{renderSlot(contentSlot, 'Add components into this section', 120)}</div>
             </section>
@@ -314,35 +345,44 @@ export const createPageBuilderConfig = ({ bindingOptions, resolveBinding }: Buil
         layoutDisplay: 'grid',
         gap: '24px'
       },
-      fields: styleableFields({
-        layout: {
-          type: 'select',
+      fields: enhanceFields({
+        layout: createDynamicSelectField({
+          fieldKey: 'layout',
+          bindingOptions,
           label: 'Column ratio',
           options: [
             { label: '50 / 50', value: 'equal' },
             { label: '40 / 60', value: 'wideRight' },
             { label: '60 / 40', value: 'wideLeft' }
           ]
-        },
-        stackAt: {
-          type: 'select',
+        }),
+        stackAt: createDynamicSelectField({
+          fieldKey: 'stackAt',
+          bindingOptions,
           label: 'Stack breakpoint',
           options: [
             { label: 'Never', value: 'never' },
             { label: 'Medium screens', value: 'md' },
             { label: 'Large screens', value: 'lg' }
           ]
-        },
+        }),
         left: { type: 'slot', label: 'Left column', allow: allowAllComponents },
         right: { type: 'slot', label: 'Right column', allow: allowAllComponents }
       }),
       render: (props) => {
         const { styleProps, rest } = splitStyleProps(props);
         const { layout = 'equal', stackAt = 'md', left, right, customAttributes, customCss, id } = rest as ColumnsProps;
-        const inlineStyle = createInlineStyle(styleProps);
-        const template = getColumnsTemplate(layout);
-        const responsiveClass = stackAt === 'never' ? '' : stackAt === 'md' ? 'md:grid-cols-2' : 'lg:grid-cols-2';
-        const gridClass = stackAt === 'never' ? 'grid-cols-2' : `grid-cols-1 ${responsiveClass}`.trim();
+        const rawLayout = resolveFieldValue(layout);
+        const resolvedLayout: ColumnsLayout = ['wideLeft', 'wideRight', 'equal'].includes(rawLayout as string)
+          ? ((rawLayout as ColumnsLayout) ?? 'equal')
+          : 'equal';
+        const rawStackAt = resolveFieldValue(stackAt);
+        const resolvedStackAt: 'never' | 'md' | 'lg' =
+          rawStackAt === 'never' || rawStackAt === 'lg' || rawStackAt === 'md' ? (rawStackAt as 'never' | 'md' | 'lg') : 'md';
+        const inlineStyle = createInlineStyle(styleProps, resolveStyleValue);
+        const template = getColumnsTemplate(resolvedLayout);
+        const responsiveClass = resolvedStackAt === 'never' ? '' : resolvedStackAt === 'md' ? 'md:grid-cols-2' : 'lg:grid-cols-2';
+        const gridClass = resolvedStackAt === 'never' ? 'grid-cols-2' : `grid-cols-1 ${responsiveClass}`.trim();
         const attributeProps = attachNodeIdentity(id, buildAttributeProps(customAttributes));
         return (
           <>
@@ -350,7 +390,7 @@ export const createPageBuilderConfig = ({ bindingOptions, resolveBinding }: Buil
               style={{
                 ...inlineStyle,
                 display: 'grid',
-                gridTemplateColumns: stackAt === 'never' ? template : undefined
+                gridTemplateColumns: resolvedStackAt === 'never' ? template : undefined
               }}
               className={`grid gap-6 ${gridClass}`}
               {...attributeProps}
@@ -369,21 +409,23 @@ export const createPageBuilderConfig = ({ bindingOptions, resolveBinding }: Buil
         src: 'https://placehold.co/800x500/FFF7E0/2B2B2B?text=Image',
         borderRadius: '12px'
       },
-      fields: styleableFields({
-        src: { type: 'text', label: 'Source URL', placeholder: 'https://...' },
-        alt: { type: 'text', label: 'Alt text' },
-        caption: { type: 'text', label: 'Caption' },
-        objectFit: {
-          type: 'select',
+      fields: enhanceFields({
+        src: createDynamicTextField({ fieldKey: 'src', bindingOptions, label: 'Source URL', placeholder: 'https://...' }),
+        alt: createDynamicTextField({ fieldKey: 'alt', bindingOptions, label: 'Alt text' }),
+        caption: createDynamicTextField({ fieldKey: 'caption', bindingOptions, label: 'Caption' }),
+        objectFit: createDynamicSelectField({
+          fieldKey: 'objectFit',
+          bindingOptions,
           label: 'Object fit',
           options: [
             { label: 'Cover', value: 'cover' },
             { label: 'Contain', value: 'contain' },
             { label: 'Fill', value: 'fill' }
           ]
-        },
-        aspectRatio: {
-          type: 'select',
+        }),
+        aspectRatio: createDynamicSelectField({
+          fieldKey: 'aspectRatio',
+          bindingOptions,
           label: 'Aspect ratio',
           options: [
             { label: 'Auto', value: '' },
@@ -391,30 +433,35 @@ export const createPageBuilderConfig = ({ bindingOptions, resolveBinding }: Buil
             { label: '4 : 3', value: '4 / 3' },
             { label: 'Square', value: '1 / 1' }
           ]
-        }
+        })
       }),
       render: (props) => {
         const { styleProps, rest } = splitStyleProps(props);
         const { src, alt, caption, objectFit = 'cover', aspectRatio, customAttributes, customCss, id } = rest as ImageProps;
-        const inlineStyle = createInlineStyle(styleProps);
+        const resolvedSrc = resolveFieldValue(src);
+        const resolvedAlt = resolveFieldValue(alt);
+        const resolvedCaption = resolveFieldValue(caption);
+        const resolvedObjectFit = (resolveFieldValue(objectFit) as CSSProperties['objectFit']) || 'cover';
+        const resolvedAspectRatio = resolveFieldValue(aspectRatio);
+        const inlineStyle = createInlineStyle(styleProps, resolveStyleValue);
         const attributeProps = attachNodeIdentity(id, buildAttributeProps(customAttributes));
         return (
           <>
             <figure style={inlineStyle} className="space-y-2" {...attributeProps}>
               <div className="w-full overflow-hidden rounded-xl bg-gray-100">
                 <img
-                  src={src}
-                  alt={alt}
+                  src={resolvedSrc}
+                  alt={resolvedAlt}
                   style={{
                     width: '100%',
                     height: '100%',
-                    objectFit: (objectFit as CSSProperties['objectFit']) ?? 'cover',
-                    aspectRatio: aspectRatio || undefined
+                    objectFit: resolvedObjectFit,
+                    aspectRatio: resolvedAspectRatio || undefined
                   }}
                   className="block"
                 />
               </div>
-              {caption && <figcaption className="text-sm text-gray-500">{caption}</figcaption>}
+              {resolvedCaption && <figcaption className="text-sm text-gray-500">{resolvedCaption}</figcaption>}
             </figure>
             {renderScopedCss(id, customCss)}
           </>
@@ -429,33 +476,39 @@ export const createPageBuilderConfig = ({ bindingOptions, resolveBinding }: Buil
         backgroundColor: '#FFFFFF',
         boxShadow: '0 20px 45px rgba(15, 23, 42, 0.08)'
       },
-      fields: styleableFields({
-        eyebrow: { type: 'text', label: 'Eyebrow' },
-        heading: { type: 'text', label: 'Heading' },
-        content: { type: 'textarea', label: 'Body' },
-        imageUrl: { type: 'text', label: 'Image URL' },
-        actionLabel: { type: 'text', label: 'Action label' },
-        actionHref: { type: 'text', label: 'Action link' }
+      fields: enhanceFields({
+        eyebrow: createDynamicTextField({ fieldKey: 'eyebrow', bindingOptions, label: 'Eyebrow' }),
+        heading: createDynamicTextField({ fieldKey: 'heading', bindingOptions, label: 'Heading' }),
+        content: createDynamicTextareaField({ fieldKey: 'content', bindingOptions, label: 'Body' }),
+        imageUrl: createDynamicTextField({ fieldKey: 'imageUrl', bindingOptions, label: 'Image URL' }),
+        actionLabel: createDynamicTextField({ fieldKey: 'actionLabel', bindingOptions, label: 'Action label' }),
+        actionHref: createDynamicTextField({ fieldKey: 'actionHref', bindingOptions, label: 'Action link' })
       }),
       render: (props) => {
         const { styleProps, rest } = splitStyleProps(props);
         const { eyebrow, heading, content, imageUrl, actionHref, actionLabel, customAttributes, customCss, id } = rest as CardProps;
-        const inlineStyle = createInlineStyle(styleProps);
+        const inlineStyle = createInlineStyle(styleProps, resolveStyleValue);
         const attributeProps = attachNodeIdentity(id, buildAttributeProps(customAttributes));
+        const resolvedEyebrow = resolveFieldValue(eyebrow);
+        const resolvedHeading = resolveFieldValue(heading);
+        const resolvedContent = resolveFieldValue(content);
+        const resolvedImage = resolveFieldValue(imageUrl);
+        const resolvedActionLabel = resolveFieldValue(actionLabel);
+        const resolvedActionHref = resolveFieldValue(actionHref);
         return (
           <>
             <article style={inlineStyle} className="flex flex-col gap-4 border border-gray-100" {...attributeProps}>
-              {imageUrl && (
-                <img src={imageUrl} alt={heading ?? ''} className="h-48 w-full rounded-xl object-cover" />
+              {resolvedImage && (
+                <img src={resolvedImage} alt={resolvedHeading ?? ''} className="h-48 w-full rounded-xl object-cover" />
               )}
               <div className="space-y-2">
-                {eyebrow && <p className="text-xs uppercase tracking-[0.2em] text-bw-amber">{eyebrow}</p>}
-                {heading && <h3 className="text-xl font-semibold text-bw-ink">{heading}</h3>}
-                {content && <p className="text-base text-gray-600">{content}</p>}
+                {resolvedEyebrow && <p className="text-xs uppercase tracking-[0.2em] text-bw-amber">{resolvedEyebrow}</p>}
+                {resolvedHeading && <h3 className="text-xl font-semibold text-bw-ink">{resolvedHeading}</h3>}
+                {resolvedContent && <p className="text-base text-gray-600">{resolvedContent}</p>}
               </div>
-              {actionLabel && (
-                <a href={actionHref} className="text-sm font-semibold text-bw-amber">
-                  {actionLabel}
+              {resolvedActionLabel && (
+                <a href={resolvedActionHref} className="text-sm font-semibold text-bw-amber">
+                  {resolvedActionLabel}
                 </a>
               )}
             </article>
@@ -470,53 +523,64 @@ export const createPageBuilderConfig = ({ bindingOptions, resolveBinding }: Buil
         variant: 'bullet',
         gap: '12px'
       },
-      fields: styleableFields({
-        variant: {
-          type: 'select',
+      fields: enhanceFields({
+        variant: createDynamicSelectField({
+          fieldKey: 'variant',
+          bindingOptions,
           label: 'Variant',
           options: [
             { label: 'Bulleted', value: 'bullet' },
             { label: 'Numbered', value: 'numbered' },
             { label: 'Plain', value: 'plain' }
           ]
-        },
+        }),
         items: {
           type: 'array',
           label: 'Items',
           arrayFields: {
-            text: { type: 'text', label: 'Text' },
-            description: { type: 'textarea', label: 'Description' },
-            icon: { type: 'text', label: 'Leading icon' }
+            text: createDynamicTextField({ fieldKey: 'text', bindingOptions, label: 'Text' }),
+            description: createDynamicTextareaField({ fieldKey: 'description', bindingOptions, label: 'Description' }),
+            icon: createDynamicTextField({ fieldKey: 'icon', bindingOptions, label: 'Leading icon' })
           },
           defaultItemProps: { text: 'List item' },
-          getItemSummary: (item: ListItem, index?: number) => item.text || `Item ${String(index ?? 0 + 1)}`
+          getItemSummary: (item: ListItem, index?: number) =>
+            resolveFieldValue(item.text) || `Item ${String((index ?? 0) + 1)}`
         }
       }),
       render: (props) => {
         const { styleProps, rest } = splitStyleProps(props);
         const { items = [], variant = 'bullet', customAttributes, customCss, id } = rest as ListProps;
-        const inlineStyle = createInlineStyle(styleProps);
+        const inlineStyle = createInlineStyle(styleProps, resolveStyleValue);
         const attributeProps = attachNodeIdentity(id, buildAttributeProps(customAttributes));
+        const resolvedVariantRaw = resolveFieldValue(variant);
+        const resolvedVariant = ['bullet', 'numbered', 'plain'].includes(resolvedVariantRaw)
+          ? (resolvedVariantRaw as 'bullet' | 'numbered' | 'plain')
+          : 'bullet';
+        const resolvedItems = items.map((item) => ({
+          text: resolveFieldValue(item.text),
+          description: resolveFieldValue(item.description),
+          icon: resolveFieldValue(item.icon)
+        }));
         const listClass =
-          variant === 'numbered'
+          resolvedVariant === 'numbered'
             ? 'list-decimal pl-6'
-            : variant === 'bullet'
+            : resolvedVariant === 'bullet'
               ? 'list-disc pl-6'
               : 'space-y-3';
-        const renderItem = (item: ListItem, index: number) => (
-          <li key={`${item.text}-${index}`} className="space-y-1 text-gray-700">
-            <div className="font-medium text-bw-ink">{item.text || `Item ${index + 1}`}</div>
-            {item.description && <p className="text-sm text-gray-500">{item.description}</p>}
+        const renderItem = (item: { text?: string | null; description?: string | null }, index: number) => (
+          <li key={`${item?.text ?? index}-${index}`} className="space-y-1 text-gray-700">
+            <div className="font-medium text-bw-ink">{item?.text || `Item ${index + 1}`}</div>
+            {item?.description && <p className="text-sm text-gray-500">{item?.description}</p>}
           </li>
         );
-        if (variant === 'plain') {
+        if (resolvedVariant === 'plain') {
           return (
             <>
               <div style={inlineStyle} className="space-y-3" {...attributeProps}>
-                {items.map((item, index) => (
-                  <div key={`${item.text}-${index}`} className="border-l-2 border-bw-amber/30 pl-4 text-gray-700">
-                    <div className="font-medium text-bw-ink">{item.text || `Item ${index + 1}`}</div>
-                    {item.description && <p className="text-sm text-gray-500">{item.description}</p>}
+                {resolvedItems.map((item, index) => (
+                  <div key={`${item?.text ?? index}-${index}`} className="border-l-2 border-bw-amber/30 pl-4 text-gray-700">
+                    <div className="font-medium text-bw-ink">{item?.text || `Item ${index + 1}`}</div>
+                    {item?.description && <p className="text-sm text-gray-500">{item?.description}</p>}
                   </div>
                 ))}
               </div>
@@ -527,7 +591,7 @@ export const createPageBuilderConfig = ({ bindingOptions, resolveBinding }: Buil
         return (
           <>
             <ul style={inlineStyle} className={listClass} {...attributeProps}>
-              {items.map((item, index) => renderItem(item, index))}
+              {resolvedItems.map((item, index) => renderItem(item, index))}
             </ul>
             {renderScopedCss(id, customCss)}
           </>
@@ -541,14 +605,14 @@ export const createPageBuilderConfig = ({ bindingOptions, resolveBinding }: Buil
         borderColor: 'rgba(15, 23, 42, 0.08)',
         borderWidth: '1px'
       },
-      fields: styleableFields({}),
+      fields: enhanceFields({}),
       render: (props) => {
         const { styleProps, rest } = splitStyleProps(props);
         const { customAttributes, customCss, id } = rest as StyleableProps<Record<string, never>>;
         const attributeProps = attachNodeIdentity(id, buildAttributeProps(customAttributes));
         return (
           <>
-            <hr style={createInlineStyle(styleProps)} className="w-full" {...attributeProps} />
+            <hr style={createInlineStyle(styleProps, resolveStyleValue)} className="w-full" {...attributeProps} />
             {renderScopedCss(id, customCss)}
           </>
         );
@@ -559,9 +623,10 @@ export const createPageBuilderConfig = ({ bindingOptions, resolveBinding }: Buil
       defaultProps: {
         height: '48px'
       },
-      fields: styleableFields({
-        height: {
-          type: 'select',
+      fields: enhanceFields({
+        height: createDynamicSelectField({
+          fieldKey: 'height',
+          bindingOptions,
           label: 'Height',
           options: [
             { label: 'XS (16px)', value: '16px' },
@@ -570,16 +635,16 @@ export const createPageBuilderConfig = ({ bindingOptions, resolveBinding }: Buil
             { label: 'LG (72px)', value: '72px' },
             { label: 'XL (96px)', value: '96px' }
           ]
-        }
+        })
       }),
       render: (props) => {
         const { styleProps, rest } = splitStyleProps(props);
         const { height = '48px', customAttributes, customCss, id } = rest as SpacerProps;
-        const inlineStyle = createInlineStyle(styleProps);
+        const inlineStyle = createInlineStyle(styleProps, resolveStyleValue);
         const attributeProps = attachNodeIdentity(id, buildAttributeProps(customAttributes));
         return (
           <>
-            <div style={{ ...inlineStyle, height }} aria-hidden="true" {...attributeProps} />
+            <div style={{ ...inlineStyle, height: resolveFieldValue(height) || '48px' }} aria-hidden="true" {...attributeProps} />
             {renderScopedCss(id, customCss)}
           </>
         );

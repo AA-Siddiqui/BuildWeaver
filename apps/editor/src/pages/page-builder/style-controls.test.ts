@@ -6,11 +6,14 @@ import {
   splitStyleProps,
   withStyleFields
 } from './style-controls';
+import type { BindingOption } from './dynamic-binding';
+
+const bindingOptions: BindingOption[] = [];
 
 describe('style-controls helpers', () => {
   it('appends shared style fields without mutating source', () => {
     const original = { foo: { type: 'text', label: 'Foo' } } as const;
-    const extended = withStyleFields(original);
+    const extended = withStyleFields(original, bindingOptions);
     expect(extended.foo).toEqual(original.foo);
     expect(Object.keys(extended)).toEqual(expect.arrayContaining(['foo', 'layoutDisplay', 'padding']));
   });
@@ -54,7 +57,7 @@ describe('style-controls helpers', () => {
 
 describe('style-control custom fields', () => {
   it('emits updates when the color picker changes', () => {
-    const fields = withStyleFields({});
+    const fields = withStyleFields({}, bindingOptions);
     const colorField = fields.textColor;
     if (!colorField || colorField.type !== 'custom') {
       throw new Error('Expected textColor custom field');
@@ -69,12 +72,12 @@ describe('style-control custom fields', () => {
         onChange: handleChange
       } as Parameters<NonNullable<typeof colorField.render>>[0])
     );
-    fireEvent.change(screen.getByLabelText(/text color picker/i), { target: { value: '#ff0000' } });
+    fireEvent.change(screen.getByLabelText(/color picker/i), { target: { value: '#ff0000' } });
     expect(handleChange).toHaveBeenCalledWith('#ff0000');
   });
 
   it('allows adding custom attributes through the sidebar field', () => {
-    const fields = withStyleFields({});
+    const fields = withStyleFields({}, bindingOptions);
     const attrField = fields.customAttributes;
     if (!attrField || attrField.type !== 'custom') {
       throw new Error('Expected customAttributes custom field');
@@ -97,7 +100,7 @@ describe('style-control custom fields', () => {
   });
 
   it('lets numeric style fields toggle between presets and custom values', () => {
-    const fields = withStyleFields({});
+    const fields = withStyleFields({}, bindingOptions);
     const widthField = fields.width;
     if (!widthField || widthField.type !== 'custom') {
       throw new Error('Expected width field to be custom');
@@ -112,17 +115,17 @@ describe('style-control custom fields', () => {
         onChange: handleChange
       } as Parameters<NonNullable<typeof widthField.render>>[0])
     );
-    expect(screen.queryByLabelText(/width custom value/i)).not.toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText(/width preset options/i), { target: { value: '100%' } });
+    expect(screen.queryByLabelText(/custom value/i)).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText(/preset options/i), { target: { value: '100%' } });
     expect(handleChange).toHaveBeenCalledWith('100%');
-    fireEvent.change(screen.getByLabelText(/width preset options/i), { target: { value: '__custom__' } });
-    const customInput = screen.getByLabelText(/width custom value/i);
+    fireEvent.change(screen.getByLabelText(/preset options/i), { target: { value: '__custom__' } });
+    const customInput = screen.getByLabelText(/custom value/i);
     fireEvent.change(customInput, { target: { value: '640px' } });
     expect(handleChange).toHaveBeenLastCalledWith('640px');
   });
 
   it('captures custom CSS updates for scoped styling', () => {
-    const fields = withStyleFields({});
+    const fields = withStyleFields({}, bindingOptions);
     const cssField = fields.customCss;
     if (!cssField || cssField.type !== 'custom') {
       throw new Error('Expected customCss field to be custom');
