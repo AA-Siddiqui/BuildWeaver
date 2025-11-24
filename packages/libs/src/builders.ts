@@ -80,6 +80,8 @@ export interface ListNodeData {
   operation: ListOperation;
   primarySample?: ScalarValue[];
   secondarySample?: ScalarValue[];
+  startSample?: number | null;
+  endSample?: number | null;
   limit?: number;
   sort?: 'asc' | 'desc';
 }

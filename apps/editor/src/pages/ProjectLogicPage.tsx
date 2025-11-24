@@ -120,6 +120,8 @@ const createListData = (): ListNodeData => ({
   operation: 'append',
   primarySample: [1, 2, 3],
   secondarySample: [4, 5],
+  startSample: 0,
+  endSample: 3,
   limit: 5,
   sort: 'asc'
 });

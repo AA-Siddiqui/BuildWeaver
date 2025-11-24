@@ -137,6 +137,37 @@ describe('logic previews', () => {
     expect(preview.summary).not.toContain('7');
   });
 
+  it('uses start/end samples for list slices', () => {
+    const listNode: ListNodeData = {
+      kind: 'list',
+      label: 'List',
+      description: 'Slice',
+      operation: 'slice',
+      primarySample: [10, 11, 12, 13, 14],
+      startSample: 1,
+      endSample: 3,
+      limit: 5
+    };
+
+    const preview = evaluateListPreview(listNode);
+    expect(preview.value).toEqual([11, 12]);
+  });
+
+  it('accepts sort order overrides from bindings', () => {
+    const listNode: ListNodeData = {
+      kind: 'list',
+      label: 'List',
+      description: 'Sort',
+      operation: 'sort',
+      primarySample: [3, 1, 2],
+      limit: 5,
+      sort: 'asc'
+    };
+
+    const preview = evaluateListPreview(listNode, { order: 'desc' });
+    expect(preview.value).toEqual([3, 2, 1]);
+  });
+
   it('merges objects for preview', () => {
     const objectNode: ObjectNodeData = {
       kind: 'object',

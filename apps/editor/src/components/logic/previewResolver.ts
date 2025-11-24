@@ -20,6 +20,7 @@ import {
   formatScalar
 } from './preview';
 import { logicLogger } from '../../lib/logger';
+import { getListHandleId, normalizeSortOrderValue } from './listOperationConfig';
 
 export interface ConnectedBinding {
   handleId: string;
@@ -138,9 +139,18 @@ const evaluateNodePreview = (
     }
     case 'list': {
       const data = node.data as ListNodeData;
-      const overrides: { primarySample?: ScalarValue[]; secondarySample?: ScalarValue[] } = {};
-      const primaryBinding = getBindingValue(`list-${node.id}-primary`);
-      const secondaryBinding = getBindingValue(`list-${node.id}-secondary`);
+      const overrides: {
+        primarySample?: ScalarValue[];
+        secondarySample?: ScalarValue[];
+        start?: number | null;
+        end?: number | null;
+        order?: 'asc' | 'desc';
+      } = {};
+      const primaryBinding = getBindingValue(getListHandleId(node.id, 'primary'));
+      const secondaryBinding = getBindingValue(getListHandleId(node.id, 'secondary'));
+      const startBinding = getBindingValue(getListHandleId(node.id, 'start'));
+      const endBinding = getBindingValue(getListHandleId(node.id, 'end'));
+      const orderBinding = getBindingValue(getListHandleId(node.id, 'order'));
       if (primaryBinding) {
         const arr = ensureArray(primaryBinding.value);
         if (arr) {
@@ -151,6 +161,24 @@ const evaluateNodePreview = (
         const arr = ensureArray(secondaryBinding.value);
         if (arr) {
           overrides.secondarySample = arr;
+        }
+      }
+      if (startBinding) {
+        overrides.start = normalizeNumber(startBinding.value);
+      }
+      if (endBinding) {
+        overrides.end = normalizeNumber(endBinding.value);
+      }
+      if (orderBinding) {
+        const order = normalizeSortOrderValue(orderBinding.value);
+        if (order) {
+          overrides.order = order;
+        } else {
+          logicLogger.warn('Invalid sort order binding ignored', {
+            nodeId: node.id,
+            handleId: orderBinding.handleId,
+            value: orderBinding.value
+          });
         }
       }
       return evaluateListPreview(data, overrides);

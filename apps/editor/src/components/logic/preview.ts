@@ -247,7 +247,33 @@ export const evaluateStringPreview = (
   }
 };
 
-export type ListInputOverrides = Partial<Record<'primarySample' | 'secondarySample', ScalarValue[]>>;
+export interface ListInputOverrides {
+  primarySample?: ScalarValue[];
+  secondarySample?: ScalarValue[];
+  start?: number | null;
+  end?: number | null;
+  order?: 'asc' | 'desc';
+}
+
+const resolveIndex = (value: number | null | undefined, fallback: number): number => {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
+  return fallback;
+};
+
+const clampIndex = (value: number, max: number): number => {
+  if (!Number.isFinite(value)) {
+    return 0;
+  }
+  if (value < 0) {
+    return 0;
+  }
+  if (value > max) {
+    return max;
+  }
+  return value;
+};
 
 export const evaluateListPreview = (
   data: ListNodeData,
@@ -256,6 +282,7 @@ export const evaluateListPreview = (
   const primary = overrides.primarySample ?? data.primarySample ?? [];
   const secondary = overrides.secondarySample ?? data.secondarySample ?? [];
   const limit = Math.min(data.limit ?? 5, 5);
+  const order = overrides.order ?? data.sort ?? 'asc';
 
   try {
     switch (data.operation) {
@@ -268,8 +295,11 @@ export const evaluateListPreview = (
         return { state: 'ready', heading: 'Merge', summary: formatScalar(merged), value: merged };
       }
       case 'slice': {
-        const sliceEnd = Math.min(limit, primary.length);
-        const sliced = clampList(primary.slice(0, sliceEnd), limit);
+        const startIndex = clampIndex(resolveIndex(overrides.start ?? data.startSample, 0), primary.length);
+        const endFallback = overrides.end ?? data.endSample ?? primary.length;
+        const endIndex = clampIndex(resolveIndex(endFallback, primary.length), primary.length);
+        const normalizedEnd = Math.max(endIndex, startIndex);
+        const sliced = clampList(primary.slice(startIndex, normalizedEnd), limit);
         return { state: 'ready', heading: 'Slice', summary: formatScalar(sliced), value: sliced };
       }
       case 'unique': {
@@ -282,9 +312,9 @@ export const evaluateListPreview = (
           if (a === null) return -1;
           if (b === null) return 1;
           if (typeof a === 'number' && typeof b === 'number') {
-            return data.sort === 'desc' ? Number(b) - Number(a) : Number(a) - Number(b);
+            return order === 'desc' ? Number(b) - Number(a) : Number(a) - Number(b);
           }
-          return data.sort === 'desc'
+          return order === 'desc'
             ? String(b ?? '').localeCompare(String(a ?? ''))
             : String(a ?? '').localeCompare(String(b ?? ''));
         });

@@ -112,6 +112,85 @@ describe('previewResolver', () => {
     expect(preview.value).toEqual([1, 2, 3, 4, 5]);
   });
 
+  it('uses numeric bindings for list slice indices', () => {
+    const nodes: Node<LogicEditorNodeData>[] = [
+      {
+        id: 'dummy-list',
+        type: 'dummy',
+        position: basePosition,
+        data: {
+          kind: 'dummy',
+          label: 'List source',
+          sample: { type: 'list', value: [10, 11, 12, 13], limit: 5 }
+        } satisfies DummyNodeData
+      },
+      {
+        id: 'dummy-start',
+        type: 'dummy',
+        position: basePosition,
+        data: {
+          kind: 'dummy',
+          label: 'Start index',
+          sample: { type: 'integer', value: 1 }
+        } satisfies DummyNodeData
+      },
+      {
+        id: 'dummy-end',
+        type: 'dummy',
+        position: basePosition,
+        data: {
+          kind: 'dummy',
+          label: 'End index',
+          sample: { type: 'integer', value: 3 }
+        } satisfies DummyNodeData
+      },
+      {
+        id: 'list-slice',
+        type: 'list',
+        position: basePosition,
+        data: {
+          kind: 'list',
+          label: 'Slicer',
+          operation: 'slice',
+          primarySample: [],
+          secondarySample: [],
+          startSample: 0,
+          endSample: 0,
+          limit: 5,
+          sort: 'asc'
+        } satisfies ListNodeData
+      }
+    ];
+
+    const edges: Edge[] = [
+      {
+        id: 'edge-primary',
+        source: 'dummy-list',
+        target: 'list-slice',
+        sourceHandle: 'dummy-out',
+        targetHandle: 'list-list-slice-primary'
+      },
+      {
+        id: 'edge-start',
+        source: 'dummy-start',
+        target: 'list-slice',
+        sourceHandle: 'dummy-out',
+        targetHandle: 'list-list-slice-start'
+      },
+      {
+        id: 'edge-end',
+        source: 'dummy-end',
+        target: 'list-slice',
+        sourceHandle: 'dummy-out',
+        targetHandle: 'list-list-slice-end'
+      }
+    ];
+
+    const resolver = createPreviewResolver(nodes, edges);
+    const preview = resolver.getNodePreview('list-slice');
+    expect(preview.value).toEqual([11, 12]);
+  });
+
   it('marks target handles unavailable once a connection exists', () => {
     const resolver = createPreviewResolver([], [
       { id: 'edge-1', source: 'a', target: 'b', sourceHandle: 'out', targetHandle: 'in' }

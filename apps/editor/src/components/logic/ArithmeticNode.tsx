@@ -1,4 +1,4 @@
-import { ChangeEvent } from 'react';
+import { ChangeEvent, useEffect } from 'react';
 import { Handle, NodeProps, Position } from 'reactflow';
 import { ArithmeticNodeData } from '@buildweaver/libs';
 import { NodeChrome } from './NodeChrome';
@@ -6,16 +6,58 @@ import { useNodeDataUpdater } from './hooks/useNodeDataUpdater';
 import { logicLogger } from '../../lib/logger';
 import { usePreviewResolver } from './previewResolver';
 import { formatScalar } from './preview';
-
-const MAX_OPERANDS = 4;
-const MIN_OPERANDS = 2;
+import {
+  getArithmeticOperationConfig,
+  normalizeArithmeticOperands,
+  operandsEqual
+} from './arithmeticConfig';
 
 const generateOperandId = () => `operand-${Math.random().toString(36).slice(2, 8)}`;
+
+const createOperand = (operation: ArithmeticNodeData['operation'], index: number) => {
+  const config = getArithmeticOperationConfig(operation);
+  const label = config.labels[index] ?? `Input ${String.fromCharCode(65 + index)}`;
+  return {
+    id: generateOperandId(),
+    label,
+    sampleValue: 0
+  };
+};
 
 export const ArithmeticNode = ({ id, data }: NodeProps<ArithmeticNodeData>) => {
   const updateData = useNodeDataUpdater<ArithmeticNodeData>(id);
   const previewResolver = usePreviewResolver();
   const preview = previewResolver.getNodePreview(id);
+  const config = getArithmeticOperationConfig(data.operation);
+
+  useEffect(() => {
+    const normalized = normalizeArithmeticOperands(
+      data.operands,
+      config,
+      (index) => createOperand(data.operation, index)
+    );
+    if (operandsEqual(data.operands, normalized)) {
+      return;
+    }
+    updateData((prev) => {
+      const prevConfig = getArithmeticOperationConfig(prev.operation);
+      const nextOperands = normalizeArithmeticOperands(
+        prev.operands,
+        prevConfig,
+        (index) => createOperand(prev.operation, index)
+      );
+      if (operandsEqual(prev.operands, nextOperands)) {
+        return prev;
+      }
+      logicLogger.info('Arithmetic operands normalized', {
+        nodeId: id,
+        operation: prev.operation,
+        before: prev.operands.length,
+        after: nextOperands.length
+      });
+      return { ...prev, operands: nextOperands };
+    });
+  }, [config, data.operands, data.operation, id, updateData]);
 
   const handleOperationChange = (event: ChangeEvent<HTMLSelectElement>) => {
     const operation = event.target.value as ArithmeticNodeData['operation'];
@@ -25,7 +67,7 @@ export const ArithmeticNode = ({ id, data }: NodeProps<ArithmeticNodeData>) => {
 
   const handleOperandSampleChange = (operandId: string, event: ChangeEvent<HTMLInputElement>) => {
     const value = Number(event.target.value);
-    logicLogger.debug('Arithmetic operand sample updated', { nodeId: id, operandId, value });
+    logicLogger.debug('Arithmetic operand sample updated', { nodeId: id, operandId, value, operation: data.operation });
     updateData((prev) => ({
       ...prev,
       operands: prev.operands.map((operand) =>
@@ -35,19 +77,36 @@ export const ArithmeticNode = ({ id, data }: NodeProps<ArithmeticNodeData>) => {
   };
 
   const handleAddOperand = () => {
-    if (data.operands.length >= MAX_OPERANDS) {
+    if (data.operands.length >= config.maxOperands) {
+      logicLogger.warn('Arithmetic operand add blocked', {
+        nodeId: id,
+        operation: data.operation,
+        maxOperands: config.maxOperands
+      });
       return;
     }
-    const operandId = generateOperandId();
-    logicLogger.info('Arithmetic operand added', { nodeId: id, operandId });
-    updateData((prev) => ({
-      ...prev,
-      operands: prev.operands.concat({ id: operandId, label: `Input ${prev.operands.length + 1}`, sampleValue: 0 })
-    }));
+    updateData((prev) => {
+      const operand = createOperand(prev.operation, prev.operands.length);
+      logicLogger.info('Arithmetic operand added', {
+        nodeId: id,
+        operandId: operand.id,
+        operation: prev.operation
+      });
+      return {
+        ...prev,
+        operands: prev.operands.concat(operand)
+      };
+    });
   };
 
   const handleRemoveOperand = (operandId: string) => {
-    if (data.operands.length <= MIN_OPERANDS) {
+    if (data.operands.length <= config.minOperands) {
+      logicLogger.warn('Arithmetic operand removal blocked', {
+        nodeId: id,
+        operandId,
+        operation: data.operation,
+        minOperands: config.minOperands
+      });
       return;
     }
     logicLogger.warn('Arithmetic operand removed', { nodeId: id, operandId });
@@ -59,7 +118,7 @@ export const ArithmeticNode = ({ id, data }: NodeProps<ArithmeticNodeData>) => {
 
   const handlePrecisionChange = (event: ChangeEvent<HTMLInputElement>) => {
     const precision = Math.max(0, Math.min(5, Number(event.target.value) || 0));
-    logicLogger.debug('Arithmetic precision updated', { nodeId: id, precision });
+    logicLogger.debug('Arithmetic precision updated', { nodeId: id, precision, operation: data.operation });
     updateData((prev) => ({ ...prev, precision }));
   };
 
@@ -100,7 +159,7 @@ export const ArithmeticNode = ({ id, data }: NodeProps<ArithmeticNodeData>) => {
                   {operand.label}
                   <span className="ml-1 text-[10px] lowercase text-bw-platinum/40">#{index + 1}</span>
                 </span>
-                {data.operands.length > MIN_OPERANDS && (
+                {data.operands.length > config.minOperands && (
                   <button type="button" className="text-bw-sand" onClick={() => handleRemoveOperand(operand.id)}>
                     ×
                   </button>
@@ -123,14 +182,16 @@ export const ArithmeticNode = ({ id, data }: NodeProps<ArithmeticNodeData>) => {
               </div>
             );
           })}
-          <button
-            type="button"
-            className="w-full rounded-xl border border-dashed border-white/20 py-2 text-xs text-white/70"
-            onClick={handleAddOperand}
-            disabled={data.operands.length >= MAX_OPERANDS}
-          >
-            Add operand
-          </button>
+          {(data.operands.length < config.maxOperands) && (
+            <button
+              type="button"
+              className="w-full rounded-xl border border-dashed border-white/20 py-2 text-xs text-white/70"
+              onClick={handleAddOperand}
+              disabled={data.operands.length >= config.maxOperands}
+            >
+              Add operand
+            </button>
+          )}
         </div>
         <label className="flex flex-col text-[11px] uppercase tracking-[0.2em] text-bw-platinum/80">
           Precision
