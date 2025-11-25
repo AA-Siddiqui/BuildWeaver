@@ -4,6 +4,7 @@ import { ObjectNodeData, ScalarValue } from '@buildweaver/libs';
 import { NodeChrome } from './NodeChrome';
 import { useNodeDataUpdater } from './hooks/useNodeDataUpdater';
 import { useCursorRestorer } from './hooks/useCursorRestorer';
+import { useTextDraft } from './hooks/useTextDraft';
 import { parseKeyValuePairs, stringifyKeyValuePairs } from './valueParsers';
 import { logicLogger } from '../../lib/logger';
 import { usePreviewResolver } from './previewResolver';
@@ -25,6 +26,14 @@ const renderBinding = (binding?: { value: unknown; sourceLabel: string }) => {
 export const ObjectNode = ({ id, data }: NodeProps<ObjectNodeData>) => {
   const updateData = useNodeDataUpdater<ObjectNodeData>(id);
   const restoreCursor = useCursorRestorer();
+  const [sourceDraft, setSourceDraft] = useTextDraft(
+    stringifyKeyValuePairs(data.sourceSample ?? {}),
+    { nodeId: id, field: 'sourceSample' }
+  );
+  const [patchDraft, setPatchDraft] = useTextDraft(
+    stringifyKeyValuePairs(data.patchSample ?? {}),
+    { nodeId: id, field: 'patchSample' }
+  );
   const previewResolver = usePreviewResolver();
   const preview = previewResolver.getNodePreview(id);
   const sourceHandleId = `object-${id}-source`;
@@ -38,11 +47,16 @@ export const ObjectNode = ({ id, data }: NodeProps<ObjectNodeData>) => {
     updateData((prev) => ({ ...prev, operation }));
   };
 
-  const handleSampleChange = (key: 'sourceSample' | 'patchSample', event: ChangeEvent<HTMLTextAreaElement>) => {
-    const parsed = parseKeyValuePairs(event.target.value);
-    logicLogger.debug('Object sample updated', { nodeId: id, key, size: Object.keys(parsed).length });
+  const handleSampleChange = (key: 'sourceSample' | 'patchSample', rawValue: string, target: HTMLTextAreaElement) => {
+    const parsed = parseKeyValuePairs(rawValue);
+    logicLogger.debug('Object sample updated', {
+      nodeId: id,
+      key,
+      size: Object.keys(parsed).length,
+      rawLength: rawValue.length
+    });
     updateData((prev) => ({ ...prev, [key]: parsed }));
-    restoreCursor(event.target, { nodeId: id, field: key });
+    restoreCursor(target, { nodeId: id, field: key });
   };
 
   const handlePathChange = (event: ChangeEvent<HTMLInputElement>) => {
@@ -89,8 +103,12 @@ export const ObjectNode = ({ id, data }: NodeProps<ObjectNodeData>) => {
               <textarea
                 rows={3}
                 className="mt-1 w-full rounded-lg border border-white/10 bg-bw-ink/60 px-2 py-1 text-sm text-white"
-                value={stringifyKeyValuePairs(data.sourceSample ?? {})}
-                onChange={(event) => handleSampleChange('sourceSample', event)}
+                value={sourceDraft}
+                onChange={(event) => {
+                  const rawValue = event.target.value;
+                  setSourceDraft(rawValue);
+                  handleSampleChange('sourceSample', rawValue, event.target);
+                }}
               />
             )}
           </div>
@@ -102,8 +120,12 @@ export const ObjectNode = ({ id, data }: NodeProps<ObjectNodeData>) => {
               <textarea
                 rows={3}
                 className="mt-1 w-full rounded-lg border border-white/10 bg-bw-ink/60 px-2 py-1 text-sm text-white"
-                value={stringifyKeyValuePairs(data.patchSample ?? {})}
-                onChange={(event) => handleSampleChange('patchSample', event)}
+                value={patchDraft}
+                onChange={(event) => {
+                  const rawValue = event.target.value;
+                  setPatchDraft(rawValue);
+                  handleSampleChange('patchSample', rawValue, event.target);
+                }}
               />
             )}
           </div>

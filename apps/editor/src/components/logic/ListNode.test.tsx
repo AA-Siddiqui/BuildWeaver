@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { NodeProps, ReactFlowProvider } from 'reactflow';
 import { ListNode } from './ListNode';
 import { ListNodeData } from '@buildweaver/libs';
@@ -51,5 +51,14 @@ describe('ListNode component', () => {
   it('does not render a preview limit input anymore', () => {
     renderNode(baseData);
     expect(screen.queryByText(/Preview limit/i)).toBeNull();
+  });
+
+  it('preserves trailing newlines while editing list samples', () => {
+    renderNode(baseData);
+    const textareas = screen.getAllByRole('textbox');
+    const listTextarea = textareas[0] as HTMLTextAreaElement;
+    const nextValue = `${listTextarea.value}\n`;
+    fireEvent.change(listTextarea, { target: { value: nextValue } });
+    expect(listTextarea).toHaveValue(nextValue);
   });
 });

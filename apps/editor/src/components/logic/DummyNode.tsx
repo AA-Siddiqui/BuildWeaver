@@ -4,6 +4,7 @@ import { DummyNodeData, DummySampleValue, ScalarValue } from '@buildweaver/libs'
 import { NodeChrome } from './NodeChrome';
 import { useNodeDataUpdater } from './hooks/useNodeDataUpdater';
 import { useCursorRestorer } from './hooks/useCursorRestorer';
+import { useTextDraft } from './hooks/useTextDraft';
 import { logicLogger } from '../../lib/logger';
 import { parseScalarList, stringifyScalarList, parseKeyValuePairs, stringifyKeyValuePairs } from './valueParsers';
 import { usePreviewResolver } from './previewResolver';
@@ -22,6 +23,20 @@ export const DummyNode = ({ id, data }: NodeProps<DummyNodeData>) => {
   const restoreCursor = useCursorRestorer();
   const previewResolver = usePreviewResolver();
   const preview = previewResolver.getNodePreview(id);
+  const listSampleString = data.sample.type === 'list'
+    ? stringifyScalarList((data.sample.value as ScalarValue[]) ?? [])
+    : '';
+  const objectSampleString = data.sample.type === 'object'
+    ? stringifyKeyValuePairs((data.sample.value as Record<string, ScalarValue>) ?? {})
+    : '';
+  const [listDraft, setListDraft] = useTextDraft(listSampleString, {
+    nodeId: id,
+    field: 'dummy.listSample'
+  });
+  const [objectDraft, setObjectDraft] = useTextDraft(objectSampleString, {
+    nodeId: id,
+    field: 'dummy.objectSample'
+  });
 
   const handleSampleChange = (sample: DummySampleValue) => {
     updateData((prev) => ({ ...prev, sample }));
@@ -60,7 +75,11 @@ export const DummyNode = ({ id, data }: NodeProps<DummyNodeData>) => {
         break;
     }
 
-    logicLogger.debug('Dummy sample updated', { nodeId: id, type: nextSample.type });
+    logicLogger.debug('Dummy sample updated', {
+      nodeId: id,
+      type: nextSample.type,
+      rawLength: raw.length
+    });
     handleSampleChange(nextSample);
     restoreCursor(event.target, { nodeId: id, field: nextSample.type });
   };
@@ -100,16 +119,24 @@ export const DummyNode = ({ id, data }: NodeProps<DummyNodeData>) => {
         return (
           <textarea
             rows={3}
-            value={stringifyScalarList((data.sample.value as ScalarValue[]) ?? [])}
-            {...commonProps}
+            value={listDraft}
+            onChange={(event) => {
+              setListDraft(event.target.value);
+              handleValueChange(event);
+            }}
+            className={commonProps.className}
           />
         );
       case 'object':
         return (
           <textarea
             rows={3}
-            value={stringifyKeyValuePairs((data.sample.value as Record<string, ScalarValue>) ?? {})}
-            {...commonProps}
+            value={objectDraft}
+            onChange={(event) => {
+              setObjectDraft(event.target.value);
+              handleValueChange(event);
+            }}
+            className={commonProps.className}
           />
         );
       default:

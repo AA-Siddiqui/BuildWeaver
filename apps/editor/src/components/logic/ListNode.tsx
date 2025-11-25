@@ -4,6 +4,7 @@ import { ListNodeData, ScalarValue } from '@buildweaver/libs';
 import { NodeChrome } from './NodeChrome';
 import { useNodeDataUpdater } from './hooks/useNodeDataUpdater';
 import { useCursorRestorer } from './hooks/useCursorRestorer';
+import { useTextDraft } from './hooks/useTextDraft';
 import { parseScalarList, stringifyScalarList } from './valueParsers';
 import { logicLogger } from '../../lib/logger';
 import { usePreviewResolver } from './previewResolver';
@@ -37,6 +38,14 @@ export const ListNode = ({ id, data }: NodeProps<ListNodeData>) => {
   const previewResolver = usePreviewResolver();
   const preview = previewResolver.getNodePreview(id);
   const inputDefinitions = getListOperationInputs(data.operation);
+  const [primaryDraft, setPrimaryDraft] = useTextDraft(
+    stringifyScalarList(data.primarySample ?? []),
+    { nodeId: id, field: 'primarySample' }
+  );
+  const [secondaryDraft, setSecondaryDraft] = useTextDraft(
+    stringifyScalarList(data.secondarySample ?? []),
+    { nodeId: id, field: 'secondarySample' }
+  );
 
   const handleOperationChange = (event: ChangeEvent<HTMLSelectElement>) => {
     const operation = event.target.value as ListNodeData['operation'];
@@ -46,12 +55,19 @@ export const ListNode = ({ id, data }: NodeProps<ListNodeData>) => {
 
   const handleListSampleChange = (
     key: 'primarySample' | 'secondarySample',
-    event: ChangeEvent<HTMLTextAreaElement>
+    rawValue: string,
+    target: HTMLTextAreaElement
   ) => {
-    const parsed = parseScalarList(event.target.value);
-    logicLogger.debug('List sample updated', { nodeId: id, key, size: parsed.length, operation: data.operation });
+    const parsed = parseScalarList(rawValue);
+    logicLogger.debug('List sample updated', {
+      nodeId: id,
+      key,
+      size: parsed.length,
+      operation: data.operation,
+      rawLength: rawValue.length
+    });
     updateData((prev) => ({ ...prev, [key]: parsed }));
-    restoreCursor(event.target, { nodeId: id, field: key });
+    restoreCursor(target, { nodeId: id, field: key });
   };
 
   const handleSortChange = (event: ChangeEvent<HTMLSelectElement>) => {
@@ -85,13 +101,18 @@ export const ListNode = ({ id, data }: NodeProps<ListNodeData>) => {
 
     const renderListSample = () => {
       const sampleKey = definition.role === 'primary' ? 'primarySample' : 'secondarySample';
-      const sampleValue = sampleKey === 'primarySample' ? data.primarySample ?? [] : data.secondarySample ?? [];
+      const sampleDraft = sampleKey === 'primarySample' ? primaryDraft : secondaryDraft;
+      const setSampleDraft = sampleKey === 'primarySample' ? setPrimaryDraft : setSecondaryDraft;
       return (
         <textarea
           rows={3}
           className="mt-1 w-full rounded-lg border border-white/10 bg-bw-ink/60 px-2 py-1 text-sm text-white"
-          value={stringifyScalarList(sampleValue)}
-          onChange={(event) => handleListSampleChange(sampleKey, event)}
+          value={sampleDraft}
+          onChange={(event) => {
+            const rawValue = event.target.value;
+            setSampleDraft(rawValue);
+            handleListSampleChange(sampleKey, rawValue, event.target);
+          }}
         />
       );
     };
