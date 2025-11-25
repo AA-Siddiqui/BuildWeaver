@@ -178,4 +178,51 @@ describe('logic previews', () => {
     expect(preview.summary).toContain('done');
     expect(preview.state).toBe('ready');
   });
+
+  it('picks keys using overrides', () => {
+    const objectNode: ObjectNodeData = {
+      kind: 'object',
+      label: 'Object',
+      description: 'Pick',
+      operation: 'pick',
+      sourceSample: { a: 1, b: 2, c: 3 },
+      selectedKeys: []
+    };
+
+    const preview = evaluateObjectPreview(objectNode, { selectedKeys: ['b', 'c'] });
+    expect(preview.value).toEqual({ b: 2, c: 3 });
+  });
+
+  it('sets nested paths when provided', () => {
+    const objectNode: ObjectNodeData = {
+      kind: 'object',
+      label: 'Object',
+      description: 'Set',
+      operation: 'set',
+      sourceSample: { profile: { name: 'Ada' } },
+      valueSample: '',
+      valueSampleKind: 'string'
+    };
+
+    const preview = evaluateObjectPreview(objectNode, {
+      path: 'profile.name',
+      valueSample: 'Dana'
+    });
+
+    expect(preview.value).toEqual({ profile: { name: 'Dana' } });
+  });
+
+  it('gets nested values when path exists', () => {
+    const objectNode: ObjectNodeData = {
+      kind: 'object',
+      label: 'Object',
+      description: 'Get',
+      operation: 'get',
+      sourceSample: { a: { b: { c: 42 } } },
+      path: ''
+    };
+
+    const preview = evaluateObjectPreview(objectNode, { path: 'a.b.c' });
+    expect(preview.value).toBe(42);
+  });
 });

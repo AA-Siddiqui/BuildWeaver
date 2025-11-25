@@ -329,16 +329,57 @@ export const evaluateListPreview = (
   }
 };
 
-const resolvePath = (source: Record<string, ScalarValue>, path?: string) => {
+const resolvePath = (source: Record<string, ScalarValue>, path?: string): ScalarValue | undefined => {
   if (!path) {
     return undefined;
   }
-  return source[path];
+  const segments = path
+    .split('.')
+    .map((segment) => segment.trim())
+    .filter(Boolean);
+  if (!segments.length) {
+    return undefined;
+  }
+  let current: ScalarValue | Record<string, ScalarValue> | undefined = source;
+  for (const segment of segments) {
+    if (current && typeof current === 'object' && !Array.isArray(current)) {
+      current = (current as Record<string, ScalarValue>)[segment];
+    } else {
+      return undefined;
+    }
+  }
+  return current as ScalarValue | undefined;
 };
 
-export type ObjectInputOverrides = Partial<
-  Record<'sourceSample' | 'patchSample', Record<string, ScalarValue>>
->;
+const assignPath = (source: Record<string, ScalarValue>, path: string, value: ScalarValue): Record<string, ScalarValue> => {
+  const segments = path
+    .split('.')
+    .map((segment) => segment.trim())
+    .filter(Boolean);
+  if (!segments.length) {
+    return source;
+  }
+  const clone = JSON.parse(JSON.stringify(source)) as Record<string, ScalarValue>;
+  let cursor: Record<string, ScalarValue> = clone;
+  for (let index = 0; index < segments.length - 1; index += 1) {
+    const segment = segments[index];
+    const existing = cursor[segment];
+    if (!existing || typeof existing !== 'object' || Array.isArray(existing)) {
+      cursor[segment] = {};
+    }
+    cursor = cursor[segment] as Record<string, ScalarValue>;
+  }
+  cursor[segments[segments.length - 1]] = value;
+  return clone;
+};
+
+export interface ObjectInputOverrides {
+  sourceSample?: Record<string, ScalarValue>;
+  patchSample?: Record<string, ScalarValue>;
+  selectedKeys?: string[];
+  path?: string;
+  valueSample?: ScalarValue;
+}
 
 export const evaluateObjectPreview = (
   data: ObjectNodeData,
@@ -346,6 +387,9 @@ export const evaluateObjectPreview = (
 ): NodePreview => {
   const source = overrides.sourceSample ?? data.sourceSample ?? {};
   const patch = overrides.patchSample ?? data.patchSample ?? {};
+  const selectedKeys = overrides.selectedKeys ?? data.selectedKeys ?? [];
+  const path = overrides.path ?? data.path;
+  const valueSample = overrides.valueSample ?? data.valueSample ?? null;
 
   try {
     switch (data.operation) {
@@ -354,7 +398,7 @@ export const evaluateObjectPreview = (
         return { state: 'ready', heading: 'Merged', summary: formatScalar(merged), value: merged };
       }
       case 'pick': {
-        const picked = (data.selectedKeys ?? []).reduce<Record<string, ScalarValue>>((acc, key) => {
+        const picked = selectedKeys.reduce<Record<string, ScalarValue>>((acc, key) => {
           if (key in source) {
             acc[key] = source[key];
           }
@@ -363,22 +407,18 @@ export const evaluateObjectPreview = (
         return { state: 'ready', heading: 'Picked', summary: formatScalar(picked), value: picked };
       }
       case 'set': {
-        if (!data.path) {
+        if (!path) {
           return { state: 'unknown', heading: 'Awaiting Path', summary: 'Provide a key to preview the result.' };
         }
-        if (data.path.includes('.')) {
-          return {
-            state: 'unknown',
-            heading: 'Unsupported Path',
-            summary: 'Nested keys are not supported in preview samples.'
-          };
-        }
-        const next = { ...source } as Record<string, ScalarValue>;
-        next[data.path] = (patch as Record<string, ScalarValue>)[data.path] ?? null;
+        const valueToAssign = (valueSample ?? null) as ScalarValue;
+        const next = assignPath(source, path, valueToAssign);
         return { state: 'ready', heading: 'Set', summary: formatScalar(next), value: next };
       }
       case 'get': {
-        const resolved = resolvePath(source, data.path);
+        if (!path) {
+          return { state: 'unknown', heading: 'Awaiting Path', summary: 'Provide a key to preview the result.' };
+        }
+        const resolved = resolvePath(source, path);
         if (resolved === undefined) {
           return { state: 'unknown', heading: 'No data', summary: 'Path not found in sample.' };
         }

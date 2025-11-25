@@ -86,6 +86,8 @@ export interface ListNodeData {
 
 export type ObjectOperation = 'merge' | 'pick' | 'set' | 'get' | 'keys' | 'values';
 
+export type ObjectValueSampleKind = 'string' | 'number' | 'boolean' | 'list' | 'object';
+
 export interface ObjectNodeData {
   kind: 'object';
   label: string;
@@ -95,6 +97,8 @@ export interface ObjectNodeData {
   patchSample?: Record<string, ScalarValue>;
   selectedKeys?: string[];
   path?: string;
+  valueSample?: ScalarValue;
+  valueSampleKind?: ObjectValueSampleKind;
 }
 
 export interface PageDynamicInput {

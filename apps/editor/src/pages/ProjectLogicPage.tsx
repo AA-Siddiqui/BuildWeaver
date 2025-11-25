@@ -132,7 +132,9 @@ const createObjectData = (): ObjectNodeData => ({
   sourceSample: { status: 'idle', attempts: 0 },
   patchSample: { status: 'ready' },
   selectedKeys: [],
-  path: ''
+  path: '',
+  valueSample: '',
+  valueSampleKind: 'string'
 });
 
 const toFlowNodes = (nodes: LogicEditorNode[]): FlowNode[] =>

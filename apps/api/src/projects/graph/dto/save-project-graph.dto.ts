@@ -5,6 +5,7 @@ import {
   LogicEditorNode,
   ListOperation,
   ObjectOperation,
+  ObjectValueSampleKind,
   StringNodeInputRole,
   StringOperation
 } from '@buildweaver/libs';
@@ -199,6 +200,13 @@ class GraphNodeDataDto {
   @IsOptional()
   @IsObject()
   patchSample?: Record<string, unknown>;
+
+  @IsOptional()
+  valueSample?: unknown;
+
+  @IsOptional()
+  @IsIn(['string', 'number', 'boolean', 'list', 'object'])
+  valueSampleKind?: ObjectValueSampleKind;
 
   @IsOptional()
   @IsArray()

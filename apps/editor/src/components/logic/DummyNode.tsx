@@ -6,8 +6,9 @@ import { useNodeDataUpdater } from './hooks/useNodeDataUpdater';
 import { useCursorRestorer } from './hooks/useCursorRestorer';
 import { useTextDraft } from './hooks/useTextDraft';
 import { logicLogger } from '../../lib/logger';
-import { parseScalarList, stringifyScalarList, parseKeyValuePairs, stringifyKeyValuePairs } from './valueParsers';
+import { parseScalarList, stringifyScalarList } from './valueParsers';
 import { usePreviewResolver } from './previewResolver';
+import { ObjectAttributesEditor } from './ObjectAttributesEditor';
 
 const DEFAULT_SAMPLES: Record<DummySampleValue['type'], DummySampleValue> = {
   integer: { type: 'integer', value: 42 },
@@ -26,16 +27,9 @@ export const DummyNode = ({ id, data }: NodeProps<DummyNodeData>) => {
   const listSampleString = data.sample.type === 'list'
     ? stringifyScalarList((data.sample.value as ScalarValue[]) ?? [])
     : '';
-  const objectSampleString = data.sample.type === 'object'
-    ? stringifyKeyValuePairs((data.sample.value as Record<string, ScalarValue>) ?? {})
-    : '';
   const [listDraft, setListDraft] = useTextDraft(listSampleString, {
     nodeId: id,
     field: 'dummy.listSample'
-  });
-  const [objectDraft, setObjectDraft] = useTextDraft(objectSampleString, {
-    nodeId: id,
-    field: 'dummy.objectSample'
   });
 
   const handleSampleChange = (sample: DummySampleValue) => {
@@ -68,9 +62,6 @@ export const DummyNode = ({ id, data }: NodeProps<DummyNodeData>) => {
       case 'list':
         nextSample.value = parseScalarList(raw);
         break;
-      case 'object':
-        nextSample.value = parseKeyValuePairs(raw);
-        break;
       default:
         break;
     }
@@ -82,6 +73,11 @@ export const DummyNode = ({ id, data }: NodeProps<DummyNodeData>) => {
     });
     handleSampleChange(nextSample);
     restoreCursor(event.target, { nodeId: id, field: nextSample.type });
+  };
+
+  const handleObjectSampleChange = (value: Record<string, ScalarValue>) => {
+    logicLogger.debug('Dummy object sample updated', { nodeId: id, keys: Object.keys(value).length });
+    handleSampleChange({ type: 'object', value });
   };
 
   const renderValueInput = () => {
@@ -129,15 +125,15 @@ export const DummyNode = ({ id, data }: NodeProps<DummyNodeData>) => {
         );
       case 'object':
         return (
-          <textarea
-            rows={3}
-            value={objectDraft}
-            onChange={(event) => {
-              setObjectDraft(event.target.value);
-              handleValueChange(event);
-            }}
-            className={commonProps.className}
-          />
+          <div className="mt-2">
+            <ObjectAttributesEditor
+              nodeId={id}
+              fieldKey="dummy.sample.object"
+              value={(data.sample.value as Record<string, ScalarValue>) ?? {}}
+              onChange={handleObjectSampleChange}
+              emptyHint="Add attributes for this sample"
+            />
+          </div>
         );
       default:
         return null;

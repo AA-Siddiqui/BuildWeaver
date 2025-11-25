@@ -59,7 +59,15 @@
         { "type": "string" },
         { "type": "number" },
         { "type": "boolean" },
-        { "type": "null" }
+        { "type": "null" },
+        {
+          "type": "array",
+          "items": { "$ref": "#/definitions/ScalarValue" }
+        },
+        {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/definitions/ScalarValue" }
+        }
       ]
     },
     "StringArray": {

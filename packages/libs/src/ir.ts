@@ -1,6 +1,12 @@
 export const IR_VERSION = '2025.02.0';
 
-export type ScalarValue = string | number | boolean | null;
+export type ScalarValue =
+  | string
+  | number
+  | boolean
+  | null
+  | ScalarValue[]
+  | { [key: string]: ScalarValue };
 
 export type TargetFramework = 'react-web' | 'flutter' | 'express-api';
 

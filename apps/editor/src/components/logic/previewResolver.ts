@@ -19,8 +19,10 @@ import {
   evaluateStringPreview,
   formatScalar
 } from './preview';
+import type { ObjectInputOverrides } from './preview';
 import { logicLogger } from '../../lib/logger';
 import { getListHandleId, normalizeSortOrderValue } from './listOperationConfig';
+import { getObjectHandleId, getObjectOperationInputs, ObjectInputRole } from './objectOperationConfig';
 
 export interface ConnectedBinding {
   handleId: string;
@@ -57,8 +59,25 @@ const normalizeNumber = (value: unknown): number | null => {
   return null;
 };
 
-const ensureArray = (value: unknown): ScalarValue[] | undefined => {
+const isScalarValue = (value: unknown): value is ScalarValue => {
+  if (value === null) {
+    return true;
+  }
+  const type = typeof value;
+  if (type === 'string' || type === 'number' || type === 'boolean') {
+    return true;
+  }
   if (Array.isArray(value)) {
+    return value.every((entry) => isScalarValue(entry));
+  }
+  if (value && type === 'object') {
+    return Object.values(value as Record<string, unknown>).every((entry) => isScalarValue(entry));
+  }
+  return false;
+};
+
+const ensureArray = (value: unknown): ScalarValue[] | undefined => {
+  if (Array.isArray(value) && value.every((entry) => isScalarValue(entry))) {
     return value as ScalarValue[];
   }
   return undefined;
@@ -66,7 +85,44 @@ const ensureArray = (value: unknown): ScalarValue[] | undefined => {
 
 const ensureObject = (value: unknown): Record<string, ScalarValue> | undefined => {
   if (value && typeof value === 'object' && !Array.isArray(value)) {
-    return value as Record<string, ScalarValue>;
+    const entries = Object.entries(value as Record<string, unknown>);
+    if (entries.every(([, entry]) => isScalarValue(entry))) {
+      return value as Record<string, ScalarValue>;
+    }
+  }
+  return undefined;
+};
+
+const ensureScalar = (value: unknown): ScalarValue | undefined => {
+  if (isScalarValue(value)) {
+    return value as ScalarValue;
+  }
+  return undefined;
+};
+
+const normalizeKeysInput = (value: unknown): string[] | undefined => {
+  if (Array.isArray(value)) {
+    return value
+      .map((entry) => String(entry ?? ''))
+      .map((entry) => entry.trim())
+      .filter(Boolean);
+  }
+  if (typeof value === 'string') {
+    return value
+      .split(/\r?\n|,/)
+      .map((entry) => entry.trim())
+      .filter(Boolean);
+  }
+  return undefined;
+};
+
+const normalizePathInput = (value: unknown): string | undefined => {
+  if (typeof value === 'string') {
+    const normalized = value.trim();
+    return normalized || undefined;
+  }
+  if (typeof value === 'number' || typeof value === 'boolean') {
+    return String(value);
   }
   return undefined;
 };
@@ -185,24 +241,90 @@ const evaluateNodePreview = (
     }
     case 'object': {
       const data = node.data as ObjectNodeData;
-      const overrides: {
-        sourceSample?: Record<string, ScalarValue>;
-        patchSample?: Record<string, ScalarValue>;
-      } = {};
-      const sourceBinding = getBindingValue(`object-${node.id}-source`);
-      const patchBinding = getBindingValue(`object-${node.id}-patch`);
-      if (sourceBinding) {
-        const obj = ensureObject(sourceBinding.value);
-        if (obj) {
-          overrides.sourceSample = obj;
+      const overrides: ObjectInputOverrides = {};
+      const definitions = getObjectOperationInputs(data.operation);
+      const roleToHandle = Object.fromEntries(
+        definitions.map((definition) => [definition.role, getObjectHandleId(node.id, definition.role)])
+      ) as Partial<Record<ObjectInputRole, string>>;
+      definitions.forEach((definition) => {
+        const handleId = roleToHandle[definition.role];
+        if (!handleId) {
+          return;
         }
-      }
-      if (patchBinding) {
-        const obj = ensureObject(patchBinding.value);
-        if (obj) {
-          overrides.patchSample = obj;
+        const binding = getBindingValue(handleId);
+        if (!binding) {
+          return;
         }
-      }
+        switch (definition.role) {
+          case 'source': {
+            const obj = ensureObject(binding.value);
+            if (obj) {
+              overrides.sourceSample = obj;
+            } else {
+              logicLogger.warn('Invalid source object binding ignored', {
+                nodeId: node.id,
+                handleId,
+                value: binding.value
+              });
+            }
+            break;
+          }
+          case 'patch': {
+            const obj = ensureObject(binding.value);
+            if (obj) {
+              overrides.patchSample = obj;
+            } else {
+              logicLogger.warn('Invalid patch object binding ignored', {
+                nodeId: node.id,
+                handleId,
+                value: binding.value
+              });
+            }
+            break;
+          }
+          case 'keys': {
+            const keys = normalizeKeysInput(binding.value);
+            if (keys) {
+              overrides.selectedKeys = keys;
+            } else {
+              logicLogger.warn('Invalid keys binding ignored', {
+                nodeId: node.id,
+                handleId,
+                value: binding.value
+              });
+            }
+            break;
+          }
+          case 'key': {
+            const path = normalizePathInput(binding.value);
+            if (path) {
+              overrides.path = path;
+            } else {
+              logicLogger.warn('Invalid key path binding ignored', {
+                nodeId: node.id,
+                handleId,
+                value: binding.value
+              });
+            }
+            break;
+          }
+          case 'value': {
+            const scalar = ensureScalar(binding.value);
+            if (scalar !== undefined) {
+              overrides.valueSample = scalar;
+            } else {
+              logicLogger.warn('Invalid value binding ignored', {
+                nodeId: node.id,
+                handleId,
+                value: binding.value
+              });
+            }
+            break;
+          }
+          default:
+            break;
+        }
+      });
       return evaluateObjectPreview(data, overrides);
     }
     default:
