@@ -4,6 +4,9 @@ import {
   ArithmeticNodeData,
   ConditionalNodeData,
   DummyNodeData,
+  FunctionArgumentNodeData,
+  FunctionNodeData,
+  FunctionReturnNodeData,
   ListNodeData,
   LogicEditorNodeData,
   LogicalOperatorNodeData,
@@ -11,7 +14,8 @@ import {
   PageNodeData,
   RelationalOperatorNodeData,
   ScalarValue,
-  StringNodeData
+  StringNodeData,
+  UserDefinedFunction
 } from '@buildweaver/libs';
 import {
   NodePreview,
@@ -32,6 +36,7 @@ import { getObjectHandleId, getObjectOperationInputs, ObjectInputRole } from './
 import { getConditionalHandleId } from './conditionalHandles';
 import { getLogicalHandleId, getLogicalOperationConfig } from './logicalOperatorConfig';
 import { getRelationalHandleId } from './relationalOperatorConfig';
+import { toFlowEdges, toFlowNodes } from './graphSerialization';
 
 export interface ConnectedBinding {
   handleId: string;
@@ -50,6 +55,9 @@ export interface PreviewResolver {
 const getNodeLabel = (node: Node<LogicEditorNodeData>): string => {
   if (node.type === 'page') {
     return (node.data as PageNodeData).pageName ?? node.id;
+  }
+  if (node.type === 'function') {
+    return (node.data as FunctionNodeData).functionName ?? node.id;
   }
   if ('label' in node.data && typeof node.data.label === 'string') {
     return node.data.label;
@@ -164,6 +172,56 @@ const UNKNOWN_PREVIEW: NodePreview = {
   summary: 'Connect nodes or provide sample values.'
 };
 
+const evaluateFunctionReturnValue = (
+  definition: UserDefinedFunction,
+  context: ResolverContext,
+  argumentValues: Record<string, ScalarValue | undefined>
+): ScalarValue | undefined => {
+  const flowNodes = toFlowNodes(definition.nodes);
+  const flowEdges = toFlowEdges(definition.edges);
+  const resolver = createPreviewResolver(flowNodes, flowEdges, {
+    functionsById: context.functionsById,
+    argumentValueOverrides: argumentValues,
+    callStack: context.callStack.concat(definition.id)
+  });
+  const returnNode = definition.nodes.find((node) => node.type === 'function-return');
+  if (!returnNode) {
+    logicLogger.warn('Function evaluation skipped due to missing return node', { functionId: definition.id });
+    return undefined;
+  }
+  const data = returnNode.data as FunctionReturnNodeData;
+  const binding = resolver.getHandleBinding(returnNode.id, `function-return-${data.returnId}`);
+  return binding?.value as ScalarValue | undefined;
+};
+
+interface PreviewResolverOptions {
+  functions?: UserDefinedFunction[];
+  functionsById?: Map<string, UserDefinedFunction>;
+  argumentValueOverrides?: Record<string, ScalarValue | undefined>;
+  callStack?: string[];
+}
+
+interface ResolverContext {
+  functionsById?: Map<string, UserDefinedFunction>;
+  argumentValueOverrides?: Record<string, ScalarValue | undefined>;
+  callStack: string[];
+}
+
+const getArgumentSample = (type: FunctionArgumentNodeData['type']): ScalarValue => {
+  switch (type) {
+    case 'number':
+      return 0;
+    case 'boolean':
+      return false;
+    case 'list':
+      return [];
+    case 'object':
+      return {};
+    default:
+      return '';
+  }
+};
+
 const buildIncomingMap = (edges: Edge[]): Map<string, Edge[]> => {
   const map = new Map<string, Edge[]>();
   edges.forEach((edge) => {
@@ -193,7 +251,8 @@ const createHandleFinder = (incomingMap: Map<string, Edge[]>) => {
 
 const evaluateNodePreview = (
   node: Node<LogicEditorNodeData>,
-  getBindingValue: (handleId: string) => ConnectedBinding | undefined
+  getBindingValue: (handleId: string) => ConnectedBinding | undefined,
+  context: ResolverContext
 ): NodePreview => {
   switch (node.type) {
     case 'dummy':
@@ -260,15 +319,78 @@ const evaluateNodePreview = (
       const overrides: Record<string, string | undefined> = {};
       data.stringInputs.forEach((input) => {
         const binding = getBindingValue(`string-${input.id}`);
-        if (binding && binding.value !== undefined && binding.value !== null) {
-          if (typeof binding.value === 'string') {
-            overrides[input.id] = binding.value;
-          } else if (typeof binding.value === 'number' || typeof binding.value === 'boolean') {
-            overrides[input.id] = String(binding.value);
-          }
+        if (!binding) {
+          return;
         }
+        const scalar = ensureScalar(binding.value);
+        if (scalar === undefined) {
+          logicLogger.warn('Invalid string input binding ignored', {
+            nodeId: node.id,
+            handleId: binding.handleId,
+            value: binding.value
+          });
+          return;
+        }
+        overrides[input.id] = String(scalar);
       });
       return evaluateStringPreview(data, overrides);
+    }
+    case 'function': {
+      const data = node.data as FunctionNodeData;
+      const definition = context.functionsById?.get(data.functionId);
+      let computedValue: ScalarValue | undefined;
+      if (definition && data.mode === 'applied') {
+        if (context.callStack.includes(data.functionId)) {
+          logicLogger.error('Function preview recursion detected', {
+            functionId: data.functionId,
+            stack: context.callStack
+          });
+        } else {
+          const argumentValues: Record<string, ScalarValue | undefined> = {};
+          definition.arguments?.forEach((argument) => {
+            const binding = getBindingValue(`arg-${argument.id}`);
+            if (binding) {
+              argumentValues[argument.id] = binding.value as ScalarValue | undefined;
+            }
+          });
+          computedValue = evaluateFunctionReturnValue(definition, context, argumentValues);
+          logicLogger.debug('Function preview evaluated', {
+            functionId: data.functionId,
+            inputs: Object.keys(argumentValues).length,
+            result: computedValue
+          });
+        }
+      }
+      const emitsValue = data.mode === 'applied' && (data.returnsValue ?? definition?.returnsValue ?? true);
+      const heading = data.functionName ?? 'Function';
+      return {
+        state: 'ready',
+        heading,
+        summary:
+          data.mode === 'reference'
+            ? 'Outputs the function reference.'
+            : emitsValue
+              ? 'Executes the function and exposes its result.'
+              : 'Executes the function for side-effects.',
+        value: typeof computedValue === 'undefined' ? (emitsValue ? null : undefined) : computedValue
+      };
+    }
+    case 'function-argument': {
+      const data = node.data as FunctionArgumentNodeData;
+      const overrides = context.argumentValueOverrides;
+      const hasOverride = overrides ? Object.prototype.hasOwnProperty.call(overrides, data.argumentId) : false;
+      const value =
+        overrides === undefined
+          ? getArgumentSample(data.type)
+          : hasOverride
+            ? overrides?.[data.argumentId]
+            : undefined;
+      return {
+        state: 'ready',
+        heading: 'Argument',
+        summary: `${data.name || 'Unnamed'} (${data.type})`,
+        value
+      };
     }
     case 'logical': {
       const data = node.data as LogicalOperatorNodeData;
@@ -460,6 +582,14 @@ const evaluateNodePreview = (
       }
       return evaluateRelationalPreview(data, overrides);
     }
+    case 'function-return': {
+      const data = node.data as FunctionReturnNodeData;
+      return {
+        state: 'ready',
+        heading: 'Return',
+        summary: `Return handle ${data.returnId}`
+      };
+    }
     default:
       return UNKNOWN_PREVIEW;
   }
@@ -467,13 +597,24 @@ const evaluateNodePreview = (
 
 export const createPreviewResolver = (
   nodes: Node<LogicEditorNodeData>[],
-  edges: Edge[]
+  edges: Edge[],
+  options: PreviewResolverOptions = {}
 ): PreviewResolver => {
   const nodeMap = new Map(nodes.map((node) => [node.id, node]));
   const incomingMap = buildIncomingMap(edges);
   const bindingCache = new Map<string, ConnectedBinding>();
   const previewCache = new Map<string, NodePreview>();
   const findHandleEdge = createHandleFinder(incomingMap);
+  const functionsById = options.functionsById
+    ? options.functionsById
+    : options.functions
+      ? new Map(options.functions.map((fn) => [fn.id, fn]))
+      : undefined;
+  const context: ResolverContext = {
+    functionsById,
+    argumentValueOverrides: options.argumentValueOverrides,
+    callStack: options.callStack ?? []
+  };
 
   const resolveBinding = (nodeId: string, handleId?: string): ConnectedBinding | undefined => {
     if (!handleId) {
@@ -520,7 +661,11 @@ export const createPreviewResolver = (
       return UNKNOWN_PREVIEW;
     }
     stack.add(nodeId);
-    const preview = evaluateNodePreview(node, (handleId) => resolveBinding(nodeId, handleId));
+    const preview = evaluateNodePreview(
+      node,
+      (handleId) => resolveBinding(nodeId, handleId),
+      context
+    );
     stack.delete(nodeId);
     previewCache.set(nodeId, preview);
     return preview;

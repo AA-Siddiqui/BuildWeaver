@@ -84,7 +84,8 @@ describe('Builder surfaces (e2e)', () => {
           }
         }
       ],
-      edges: []
+      edges: [],
+      functions: []
     };
 
     const saveGraphRes = await request(app.getHttpServer())
@@ -185,13 +186,126 @@ describe('Builder surfaces (e2e)', () => {
     const saveGraphRes = await request(app.getHttpServer())
       .put(`/projects/${projectId}/graph`)
       .set('Authorization', `Bearer ${token}`)
-      .send({ nodes, edges: [] });
+      .send({ nodes, edges: [], functions: [] });
 
     expect(saveGraphRes.status).toBe(200);
     const savedNodes = saveGraphRes.body.data.graph.nodes;
     expect(savedNodes.find((node: { type: string }) => node.type === 'conditional')).toBeDefined();
     expect(savedNodes.find((node: { type: string }) => node.type === 'logical')).toBeDefined();
     expect(savedNodes.find((node: { type: string }) => node.type === 'relational')).toBeDefined();
+  });
+
+  it('persists user-defined functions and exposes them via the API', async () => {
+    if (!landingPageId) {
+      throw new Error('landingPageId not set');
+    }
+
+    const functionId = `fn-${randomUUID()}`;
+    const argumentId = `arg-${randomUUID()}`;
+    const returnId = `ret-${randomUUID()}`;
+    const argumentNodeId = `function-argument-${randomUUID()}`;
+    const returnNodeId = `function-return-${randomUUID()}`;
+
+    const graphPayload: ProjectGraphSnapshot = {
+      nodes: [
+        {
+          id: `function-node-${randomUUID()}`,
+          type: 'function',
+          position: { x: -120, y: 0 },
+          data: {
+            kind: 'function',
+            functionId,
+            functionName: 'Format hero copy',
+            mode: 'applied'
+          }
+        },
+        {
+          id: `page-${landingPageId}`,
+          type: 'page',
+          position: { x: 200, y: 0 },
+          data: {
+            kind: 'page',
+            pageId: landingPageId,
+            pageName: 'Landing',
+            routeSegment: 'landing',
+            inputs: []
+          }
+        }
+      ],
+      edges: [],
+      functions: [
+        {
+          id: functionId,
+          name: 'Format hero copy',
+          description: 'Uppercase the hero title',
+          nodes: [
+            {
+              id: argumentNodeId,
+              type: 'function-argument',
+              position: { x: -160, y: 0 },
+              data: {
+                kind: 'function-argument',
+                argumentId,
+                name: 'title',
+                type: 'string'
+              }
+            },
+            {
+              id: returnNodeId,
+              type: 'function-return',
+              position: { x: 160, y: 0 },
+              data: {
+                kind: 'function-return',
+                returnId
+              }
+            }
+          ],
+          edges: [
+            {
+              id: `edge-${randomUUID()}`,
+              source: argumentNodeId,
+              sourceHandle: `function-argument-${argumentId}`,
+              target: returnNodeId,
+              targetHandle: `function-return-${returnId}`
+            }
+          ],
+          arguments: [
+            {
+              id: argumentId,
+              name: 'title',
+              type: 'string'
+            }
+          ],
+          returnsValue: true
+        }
+      ]
+    };
+
+    const saveGraphRes = await request(app.getHttpServer())
+      .put(`/projects/${projectId}/graph`)
+      .set('Authorization', `Bearer ${token}`)
+      .send(graphPayload);
+
+    expect(saveGraphRes.status).toBe(200);
+    const savedGraph = saveGraphRes.body.data.graph;
+    expect(savedGraph.functions).toHaveLength(1);
+    const savedFunction = savedGraph.functions[0];
+    expect(savedFunction.arguments).toEqual(
+      expect.arrayContaining([expect.objectContaining({ name: 'title', type: 'string' })])
+    );
+    expect(savedFunction.returnsValue).toBe(true);
+    const savedFunctionNode = savedGraph.nodes.find(
+      (node: { type: string; data?: { functionId?: string } }) => node.type === 'function'
+    );
+    expect(savedFunctionNode).toBeDefined();
+    expect(savedFunctionNode?.data?.functionId).toBe(functionId);
+
+    const refreshed = await request(app.getHttpServer())
+      .get(`/projects/${projectId}/graph`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(refreshed.status).toBe(200);
+    expect(refreshed.body.data.graph.functions).toHaveLength(1);
+    expect(refreshed.body.data.graph.functions[0].id).toBe(functionId);
   });
 
   it('persists builder state and returns it via the API', async () => {

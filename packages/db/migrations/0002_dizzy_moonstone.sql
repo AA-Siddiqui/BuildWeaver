@@ -1,0 +1,1 @@
+ALTER TABLE "project_graphs" ALTER COLUMN "graph" SET DEFAULT '{"nodes":[],"edges":[],"functions":[]}'::jsonb;

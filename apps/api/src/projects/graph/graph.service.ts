@@ -4,11 +4,13 @@ import { DatabaseService } from '../../database/database.service';
 import { projectGraphs, projectPages, projects, ProjectPage } from '@buildweaver/db';
 import {
   DummyNodeData,
+  FunctionNodeData,
   LogicEditorEdge,
   LogicEditorNode,
   LogicEditorNodeType,
   PageNodeData,
-  ProjectGraphSnapshot
+  ProjectGraphSnapshot,
+  UserDefinedFunction
 } from '@buildweaver/libs';
 
 @Injectable()
@@ -22,7 +24,8 @@ export class ProjectGraphService {
     'object',
     'conditional',
     'logical',
-    'relational'
+    'relational',
+    'function'
   ];
 
   constructor(private readonly database: DatabaseService) {}
@@ -41,7 +44,7 @@ export class ProjectGraphService {
       .where(eq(projectGraphs.projectId, projectId))
       .limit(1);
 
-    const graph = graphRecord?.graph ?? { nodes: [], edges: [] };
+    const graph = this.withGraphDefaults(graphRecord?.graph);
     const pages = await this.db
       .select()
       .from(projectPages)
@@ -62,9 +65,14 @@ export class ProjectGraphService {
       .where(eq(projectPages.projectId, projectId));
     const pageIds = new Set(pages.map((page) => page.id));
 
+    const normalizedPayload = this.withGraphDefaults(payload);
+    const declaredFunctionIds = new Set(normalizedPayload.functions.map((fn) => fn.id).filter(Boolean));
+    const sanitizedFunctions = this.sanitizeFunctions(normalizedPayload.functions, pageIds, declaredFunctionIds);
+    const allowedFunctionIds = new Set(sanitizedFunctions.map((fn) => fn.id));
+
     const rejectedNodes: { id: string; type: string; reason: string }[] = [];
-    const sanitizedNodes = payload.nodes.filter((node) => {
-      const evaluation = this.evaluateNodeAllowance(node, pageIds);
+    const sanitizedNodes = normalizedPayload.nodes.filter((node) => {
+      const evaluation = this.evaluateNodeAllowance(node, pageIds, { allowedFunctionIds });
       if (!evaluation.allowed) {
         rejectedNodes.push({ id: node.id, type: node.type, reason: evaluation.reason ?? 'unknown' });
         return false;
@@ -73,14 +81,14 @@ export class ProjectGraphService {
     });
     const nodeIds = new Set(sanitizedNodes.map((node) => node.id));
     const rejectedEdges: { id: string; source: string; target: string; reason: string }[] = [];
-    const sanitizedEdges = payload.edges.filter((edge) => {
+    const sanitizedEdges = normalizedPayload.edges.filter((edge) => {
       const allowed = this.isEdgeAllowed(edge, nodeIds);
       if (!allowed) {
         rejectedEdges.push({ id: edge.id, source: edge.source, target: edge.target, reason: this.describeEdgeRejection(edge, nodeIds) });
       }
       return allowed;
     });
-    const snapshot: ProjectGraphSnapshot = { nodes: sanitizedNodes, edges: sanitizedEdges };
+    const snapshot: ProjectGraphSnapshot = { nodes: sanitizedNodes, edges: sanitizedEdges, functions: sanitizedFunctions };
     if (rejectedNodes.length) {
       this.logger.warn(
         `Rejected ${rejectedNodes.length} nodes during graph persist project=${projectId} details=${JSON.stringify(rejectedNodes)}`
@@ -92,7 +100,7 @@ export class ProjectGraphService {
       );
     }
     this.logger.debug(
-      `Sanitized logic graph nodes=${sanitizedNodes.length}/${payload.nodes.length} edges=${sanitizedEdges.length}/${payload.edges.length}`
+      `Sanitized logic graph nodes=${sanitizedNodes.length}/${normalizedPayload.nodes.length} edges=${sanitizedEdges.length}/${normalizedPayload.edges.length} functions=${sanitizedFunctions.length}/${normalizedPayload.functions.length}`
     );
 
     const existing = await this.db
@@ -108,13 +116,16 @@ export class ProjectGraphService {
     }
 
     const composed = this.composeGraph(snapshot, pages);
-    this.logger.log(`Graph persisted for project=${projectId} nodes=${composed.nodes.length} edges=${composed.edges.length}`);
+    this.logger.log(
+      `Graph persisted for project=${projectId} nodes=${composed.nodes.length} edges=${composed.edges.length} functions=${composed.functions.length}`
+    );
     return composed;
   }
 
   private evaluateNodeAllowance(
     node: LogicEditorNode,
-    allowedPageIds: Set<string>
+    allowedPageIds: Set<string>,
+    options?: { allowFunctionInternals?: boolean; allowedFunctionIds?: Set<string> }
   ): { allowed: boolean; reason?: string } {
     if (node.type === 'page') {
       const pageData = node.data as Partial<PageNodeData> | undefined;
@@ -125,6 +136,19 @@ export class ProjectGraphService {
         return { allowed: false, reason: 'page_not_found' };
       }
       return { allowed: true };
+    }
+    if (node.type === 'function') {
+      const data = node.data as Partial<FunctionNodeData> | undefined;
+      if (!data?.functionId) {
+        return { allowed: false, reason: 'missing_function_reference' };
+      }
+      if (options?.allowedFunctionIds && !options.allowedFunctionIds.has(data.functionId)) {
+        return { allowed: false, reason: 'function_not_found' };
+      }
+      return { allowed: true };
+    }
+    if (node.type === 'function-argument' || node.type === 'function-return') {
+      return options?.allowFunctionInternals ? { allowed: true } : { allowed: false, reason: 'function_scope_only' };
     }
     if (!this.allowedNonPageNodes.includes(node.type)) {
       return { allowed: false, reason: 'unsupported_type' };
@@ -151,53 +175,125 @@ export class ProjectGraphService {
     return 'unknown';
   }
 
+  private sanitizeFunctions(
+    functions: UserDefinedFunction[],
+    allowedPageIds: Set<string>,
+    declaredFunctionIds: Set<string>
+  ): UserDefinedFunction[] {
+    if (!functions?.length) {
+      return [];
+    }
+    return functions
+      .map((fn) => {
+        if (!fn?.id) {
+          this.logger.warn('Skipping function without id');
+          return null;
+        }
+        const rejectedNodes: { id: string; type: string; reason?: string }[] = [];
+        const nodes = (fn.nodes ?? []).filter((node) => {
+          const evaluation = this.evaluateNodeAllowance(node, allowedPageIds, {
+            allowFunctionInternals: true,
+            allowedFunctionIds: declaredFunctionIds
+          });
+          if (!evaluation.allowed) {
+            rejectedNodes.push({ id: node.id, type: node.type, reason: evaluation.reason });
+          }
+          return evaluation.allowed;
+        });
+        if (rejectedNodes.length) {
+          this.logger.warn(
+            `Rejected ${rejectedNodes.length} nodes while sanitizing function=${fn.id}: ${JSON.stringify(rejectedNodes)}`
+          );
+        }
+        const nodeIds = new Set(nodes.map((node) => node.id));
+        const edges = (fn.edges ?? []).filter((edge) => this.isEdgeAllowed(edge, nodeIds));
+        const args = Array.isArray(fn.arguments)
+          ? fn.arguments.filter((arg) => Boolean(arg?.id) && typeof arg.name === 'string' && typeof arg.type === 'string')
+          : [];
+        const returnsValue = nodes.some((node) => node.type === 'function-return');
+        return {
+          ...fn,
+          nodes,
+          edges,
+          arguments: args,
+          returnsValue
+        } satisfies UserDefinedFunction;
+      })
+      .filter((fn): fn is UserDefinedFunction => Boolean(fn));
+  }
+
   private composeGraph(graph: ProjectGraphSnapshot, pages: ProjectPage[]): ProjectGraphSnapshot {
     const pageMap = new Map(pages.map((page) => [page.id, page]));
     const nodes = graph.nodes
-      .map((node) => {
-        if (node.type === 'dummy') {
-          const data = node.data as Partial<DummyNodeData> & { value?: number };
-          if (data.sample) {
-            return node;
-          }
-          return {
-            ...node,
-            data: {
-              kind: 'dummy',
-              label: data.label ?? 'Dummy',
-              description: data.description,
-              sample: {
-                type: 'integer',
-                value: typeof data.value === 'number' ? data.value : 0
-              }
-            }
-          } as LogicEditorNode;
-        }
-
-        if (node.type !== 'page') {
-          return node;
-        }
-        const pageData = node.data as PageNodeData;
-        const page = pageMap.get(pageData.pageId);
-        if (!page) {
-          return null;
-        }
-        return {
-          ...node,
-          data: {
-            ...pageData,
-            pageName: page.name,
-            routeSegment: page.slug,
-            inputs: page.dynamicInputs
-          }
-        };
-      })
+      .map((node) => this.composeNode(node, pageMap))
       .filter((node): node is LogicEditorNode => Boolean(node));
 
     const nodeIds = new Set(nodes.map((node) => node.id));
     const edges = graph.edges.filter((edge) => this.isEdgeAllowed(edge, nodeIds));
+    const functions = (graph.functions ?? []).map((fn) => {
+      const fnNodes = (fn.nodes ?? [])
+        .map((node) => this.composeNode(node, pageMap))
+        .filter((node): node is LogicEditorNode => Boolean(node));
+      const fnNodeIds = new Set(fnNodes.map((node) => node.id));
+      const fnEdges = (fn.edges ?? []).filter((edge) => this.isEdgeAllowed(edge, fnNodeIds));
+      return {
+        ...fn,
+        nodes: fnNodes,
+        edges: fnEdges
+      };
+    });
 
-    return { nodes, edges };
+    return { nodes, edges, functions };
+  }
+
+  private composeNode(node: LogicEditorNode, pageMap: Map<string, ProjectPage>): LogicEditorNode | null {
+    if (node.type === 'dummy') {
+      const data = node.data as Partial<DummyNodeData> & { value?: number };
+      if (data.sample) {
+        return node;
+      }
+      return {
+        ...node,
+        data: {
+          kind: 'dummy',
+          label: data.label ?? 'Dummy',
+          description: data.description,
+          sample: {
+            type: 'integer',
+            value: typeof data.value === 'number' ? data.value : 0
+          }
+        }
+      } as LogicEditorNode;
+    }
+
+    if (node.type !== 'page') {
+      return node;
+    }
+    const pageData = node.data as PageNodeData;
+    const page = pageMap.get(pageData.pageId);
+    if (!page) {
+      return null;
+    }
+    return {
+      ...node,
+      data: {
+        ...pageData,
+        pageName: page.name,
+        routeSegment: page.slug,
+        inputs: page.dynamicInputs
+      }
+    };
+  }
+
+  private withGraphDefaults(graph?: ProjectGraphSnapshot | null): ProjectGraphSnapshot {
+    if (!graph) {
+      return { nodes: [], edges: [], functions: [] };
+    }
+    return {
+      nodes: graph.nodes ?? [],
+      edges: graph.edges ?? [],
+      functions: graph.functions ?? []
+    };
   }
 
   private async assertProjectOwner(ownerId: string, projectId: string) {

@@ -76,4 +76,9 @@
   [class*='_ActionBar-action_rvadt_'] {
     color: inherit;
   }
+
+  .react-flow__connectionline path {
+    stroke: #f9e7b2 !important;
+    stroke-width: 2 !important;
+  }
 }

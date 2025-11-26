@@ -11,7 +11,10 @@ export type LogicEditorNodeType =
   | 'object'
   | 'conditional'
   | 'logical'
-  | 'relational';
+  | 'relational'
+  | 'function'
+  | 'function-argument'
+  | 'function-return';
 
 export interface LogicEditorNodePosition {
   x: number;
@@ -147,6 +150,31 @@ export interface RelationalOperatorNodeData {
   rightSampleKind?: ScalarSampleKind;
 }
 
+export type FunctionArgumentType = ScalarSampleKind;
+
+export type FunctionNodeMode = 'applied' | 'reference';
+
+export interface FunctionNodeData {
+  kind: 'function';
+  functionId: string;
+  functionName: string;
+  description?: string;
+  mode: FunctionNodeMode;
+  returnsValue?: boolean;
+}
+
+export interface FunctionArgumentNodeData {
+  kind: 'function-argument';
+  argumentId: string;
+  name: string;
+  type: FunctionArgumentType;
+}
+
+export interface FunctionReturnNodeData {
+  kind: 'function-return';
+  returnId: string;
+}
+
 export interface PageDynamicInput {
   id: string;
   label: string;
@@ -171,7 +199,10 @@ export type LogicEditorNodeData =
   | ObjectNodeData
   | ConditionalNodeData
   | LogicalOperatorNodeData
-  | RelationalOperatorNodeData;
+  | RelationalOperatorNodeData
+  | FunctionNodeData
+  | FunctionArgumentNodeData
+  | FunctionReturnNodeData;
 
 export interface LogicEditorNode {
   id: string;
@@ -189,9 +220,27 @@ export interface LogicEditorEdge {
   label?: string;
 }
 
+export interface UserFunctionArgument {
+  id: string;
+  name: string;
+  type: FunctionArgumentType;
+}
+
+export interface UserDefinedFunction {
+  id: string;
+  name: string;
+  description?: string;
+  nodes: LogicEditorNode[];
+  edges: LogicEditorEdge[];
+  arguments: UserFunctionArgument[];
+  returnsValue: boolean;
+  updatedAt?: string;
+}
+
 export interface ProjectGraphSnapshot {
   nodes: LogicEditorNode[];
   edges: LogicEditorEdge[];
+  functions: UserDefinedFunction[];
 }
 
 export type PageBuilderState = Record<string, unknown>;

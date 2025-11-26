@@ -1,13 +1,21 @@
 import type { Edge, Node } from 'reactflow';
 import type {
   LogicEditorNodeData,
+  LogicEditorNode,
+  LogicEditorEdge,
   DummyNodeData,
   StringNodeData,
   ListNodeData,
-  ConditionalNodeData
+  ConditionalNodeData,
+  FunctionArgumentNodeData,
+  FunctionReturnNodeData,
+  FunctionNodeData,
+  LogicalOperatorNodeData,
+  UserDefinedFunction
 } from '@buildweaver/libs';
 import { createPreviewResolver } from './previewResolver';
 import { getConditionalHandleId } from './conditionalHandles';
+import { getLogicalHandleId } from './logicalOperatorConfig';
 
 describe('previewResolver', () => {
   const basePosition = { x: 0, y: 0 };
@@ -281,5 +289,191 @@ describe('previewResolver', () => {
     const resolver = createPreviewResolver(nodes, edges);
     const preview = resolver.getNodePreview(conditionalId);
     expect(preview.summary).toContain('truthy-value');
+  });
+
+  it('supplies placeholder values for function argument nodes', () => {
+    const nodes: Node<LogicEditorNodeData>[] = [
+      {
+        id: 'function-argument-1',
+        type: 'function-argument',
+        position: basePosition,
+        data: {
+          kind: 'function-argument',
+          argumentId: 'arg-1',
+          name: 'Threshold',
+          type: 'number'
+        } satisfies FunctionArgumentNodeData
+      }
+    ];
+
+    const resolver = createPreviewResolver(nodes, []);
+    expect(resolver.getNodePreview('function-argument-1').value).toBe(0);
+  });
+
+  it('omits placeholder values for arguments when executing a function call', () => {
+    const nodes: Node<LogicEditorNodeData>[] = [
+      {
+        id: 'function-argument-1',
+        type: 'function-argument',
+        position: basePosition,
+        data: {
+          kind: 'function-argument',
+          argumentId: 'arg-1',
+          name: 'Threshold',
+          type: 'number'
+        } satisfies FunctionArgumentNodeData
+      }
+    ];
+
+    const resolver = createPreviewResolver(nodes, [], { argumentValueOverrides: {} });
+    expect(resolver.getNodePreview('function-argument-1').value).toBeUndefined();
+  });
+
+  it('exposes null values for applied functions without definitions', () => {
+    const nodes: Node<LogicEditorNodeData>[] = [
+      {
+        id: 'function-1',
+        type: 'function',
+        position: basePosition,
+        data: {
+          kind: 'function',
+          functionId: 'fn-1',
+          functionName: 'Score',
+          mode: 'applied',
+          returnsValue: true
+        } satisfies FunctionNodeData
+      },
+      {
+        id: 'logic-1',
+        type: 'logical',
+        position: basePosition,
+        data: {
+          kind: 'logical',
+          label: 'Gate',
+          description: '',
+          operation: 'and',
+          primarySample: true,
+          secondarySample: false
+        } satisfies LogicalOperatorNodeData
+      }
+    ];
+
+    const edges: Edge[] = [
+      {
+        id: 'edge-connect',
+        source: 'function-1',
+        target: 'logic-1',
+        sourceHandle: 'function-result',
+        targetHandle: getLogicalHandleId('logic-1', 'primary')
+      }
+    ];
+
+    const resolver = createPreviewResolver(nodes, edges);
+    expect(resolver.getNodePreview('function-1').value).toBeNull();
+    const binding = resolver.getHandleBinding('logic-1', getLogicalHandleId('logic-1', 'primary'));
+    expect(binding?.sourceNodeId).toBe('function-1');
+    expect(binding?.value).toBeNull();
+  });
+
+  it('evaluates applied function nodes using their definitions and bindings', () => {
+    const functionDefinition: UserDefinedFunction = {
+      id: 'fn-echo',
+      name: 'Echo',
+      description: 'Returns the provided number',
+      nodes: [
+        {
+          id: 'arg-node',
+          type: 'function-argument',
+          position: basePosition,
+          data: {
+            kind: 'function-argument',
+            argumentId: 'arg-input',
+            name: 'Input',
+            type: 'number'
+          } satisfies FunctionArgumentNodeData
+        },
+        {
+          id: 'return-node',
+          type: 'function-return',
+          position: basePosition,
+          data: {
+            kind: 'function-return',
+            returnId: 'ret'
+          } satisfies FunctionReturnNodeData
+        }
+      ] satisfies LogicEditorNode[],
+      edges: [
+        {
+          id: 'edge-arg-return',
+          source: 'arg-node',
+          target: 'return-node',
+          sourceHandle: 'function-argument-arg-input',
+          targetHandle: 'function-return-ret'
+        }
+      ] satisfies LogicEditorEdge[],
+      arguments: [{ id: 'arg-input', name: 'Input', type: 'number' }],
+      returnsValue: true
+    };
+
+    const nodes: Node<LogicEditorNodeData>[] = [
+      {
+        id: 'dummy-source',
+        type: 'dummy',
+        position: basePosition,
+        data: {
+          kind: 'dummy',
+          label: 'Number source',
+          sample: { type: 'integer', value: 42 }
+        } satisfies DummyNodeData
+      },
+      {
+        id: 'function-1',
+        type: 'function',
+        position: basePosition,
+        data: {
+          kind: 'function',
+          functionId: 'fn-echo',
+          functionName: 'Echo',
+          mode: 'applied',
+          returnsValue: true
+        } satisfies FunctionNodeData
+      },
+      {
+        id: 'logic-1',
+        type: 'logical',
+        position: basePosition,
+        data: {
+          kind: 'logical',
+          label: 'Gate',
+          description: '',
+          operation: 'and',
+          primarySample: true,
+          secondarySample: true
+        } satisfies LogicalOperatorNodeData
+      }
+    ];
+
+    const edges: Edge[] = [
+      {
+        id: 'edge-arg',
+        source: 'dummy-source',
+        target: 'function-1',
+        sourceHandle: 'dummy-output',
+        targetHandle: 'arg-arg-input'
+      },
+      {
+        id: 'edge-result',
+        source: 'function-1',
+        target: 'logic-1',
+        sourceHandle: 'function-result',
+        targetHandle: getLogicalHandleId('logic-1', 'primary')
+      }
+    ];
+
+    const resolver = createPreviewResolver(nodes, edges, { functions: [functionDefinition] });
+    const preview = resolver.getNodePreview('function-1');
+    expect(preview.value).toBe(42);
+    const binding = resolver.getHandleBinding('logic-1', getLogicalHandleId('logic-1', 'primary'));
+    expect(binding?.value).toBe(42);
   });
 });

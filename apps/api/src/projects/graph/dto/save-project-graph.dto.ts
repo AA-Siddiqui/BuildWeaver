@@ -1,6 +1,8 @@
 import {
   ArithmeticOperation,
   DummySampleType,
+  FunctionArgumentType,
+  FunctionNodeMode,
   LogicEditorEdge,
   LogicEditorNode,
   ListOperation,
@@ -10,7 +12,8 @@ import {
   RelationalOperation,
   ScalarSampleKind,
   StringNodeInputRole,
-  StringOperation
+  StringOperation,
+  UserDefinedFunction
 } from '@buildweaver/libs';
 import { Type } from 'class-transformer';
 import { IsArray, IsBoolean, IsIn, IsNumber, IsObject, IsOptional, IsString, ValidateIf, ValidateNested } from 'class-validator';
@@ -137,7 +140,20 @@ class StringOptionsDto {
 }
 
 class GraphNodeDataDto {
-  @IsIn(['dummy', 'page', 'arithmetic', 'string', 'list', 'object', 'conditional', 'logical', 'relational'])
+  @IsIn([
+    'dummy',
+    'page',
+    'arithmetic',
+    'string',
+    'list',
+    'object',
+    'conditional',
+    'logical',
+    'relational',
+    'function',
+    'function-argument',
+    'function-return'
+  ])
   kind!: LogicEditorNode['type'];
 
   @IsOptional()
@@ -276,13 +292,60 @@ class GraphNodeDataDto {
   @IsOptional()
   @IsIn(['string', 'number', 'boolean', 'list', 'object'])
   rightSampleKind?: ScalarSampleKind;
+
+  @ValidateIf((node: GraphNodeDataDto) => node.kind === 'function')
+  @IsString()
+  functionId?: string;
+
+  @ValidateIf((node: GraphNodeDataDto) => node.kind === 'function')
+  @IsOptional()
+  @IsString()
+  functionName?: string;
+
+  @ValidateIf((node: GraphNodeDataDto) => node.kind === 'function')
+  @IsIn(['applied', 'reference'])
+  mode?: FunctionNodeMode;
+
+  @ValidateIf((node: GraphNodeDataDto) => node.kind === 'function')
+  @IsOptional()
+  @IsBoolean()
+  returnsValue?: boolean;
+
+  @ValidateIf((node: GraphNodeDataDto) => node.kind === 'function-argument')
+  @IsString()
+  argumentId?: string;
+
+  @ValidateIf((node: GraphNodeDataDto) => node.kind === 'function-argument')
+  @IsString()
+  name?: string;
+
+  @ValidateIf((node: GraphNodeDataDto) => node.kind === 'function-argument')
+  @IsIn(['string', 'number', 'boolean', 'list', 'object'])
+  type?: FunctionArgumentType;
+
+  @ValidateIf((node: GraphNodeDataDto) => node.kind === 'function-return')
+  @IsString()
+  returnId?: string;
 }
 
 class GraphNodeDto {
   @IsString()
   id!: string;
 
-  @IsIn(['dummy', 'page', 'arithmetic', 'string', 'list', 'object', 'conditional', 'logical', 'relational'])
+  @IsIn([
+    'dummy',
+    'page',
+    'arithmetic',
+    'string',
+    'list',
+    'object',
+    'conditional',
+    'logical',
+    'relational',
+    'function',
+    'function-argument',
+    'function-return'
+  ])
   type!: LogicEditorNode['type'];
 
   @ValidateNested()
@@ -317,6 +380,47 @@ class GraphEdgeDto {
   label?: string;
 }
 
+class FunctionArgumentDto {
+  @IsString()
+  id!: string;
+
+  @IsString()
+  name!: string;
+
+  @IsIn(['string', 'number', 'boolean', 'list', 'object'])
+  type!: FunctionArgumentType;
+}
+
+class UserFunctionDto {
+  @IsString()
+  id!: string;
+
+  @IsString()
+  name!: string;
+
+  @IsOptional()
+  @IsString()
+  description?: string;
+
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => GraphNodeDto)
+  nodes!: LogicEditorNode[];
+
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => GraphEdgeDto)
+  edges!: LogicEditorEdge[];
+
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => FunctionArgumentDto)
+  arguments!: FunctionArgumentDto[];
+
+  @IsBoolean()
+  returnsValue!: boolean;
+}
+
 export class SaveProjectGraphDto {
   @IsArray()
   @ValidateNested({ each: true })
@@ -327,4 +431,9 @@ export class SaveProjectGraphDto {
   @ValidateNested({ each: true })
   @Type(() => GraphEdgeDto)
   edges!: LogicEditorEdge[];
+
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => UserFunctionDto)
+  functions!: UserDefinedFunction[];
 }

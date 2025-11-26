@@ -5,7 +5,6 @@ import {
   Edge,
   EdgeChange,
   MiniMap,
-  Node,
   NodeChange,
   ReactFlow,
   ReactFlowProvider,
@@ -19,22 +18,13 @@ import { DragEvent, useCallback, useEffect, useMemo, useRef, useState } from 're
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useParams } from 'react-router-dom';
 import type {
-  ArithmeticNodeData,
-  ConditionalNodeData,
-  DummyNodeData,
-  ListNodeData,
-  LogicEditorEdge,
-  LogicEditorNode,
+  FunctionNodeData,
   LogicEditorNodeData,
-  LogicalOperatorNodeData,
-  ObjectNodeData,
-  PageDocument,
   ProjectGraphSnapshot,
-  RelationalOperatorNodeData,
-  StringNodeData
+  UserDefinedFunction
 } from '../types/api';
 import { projectGraphApi, projectPagesApi } from '../lib/api-client';
-import { LogicNodePalette, PaletteNodeType } from '../components/logic/LogicNodePalette';
+import { LogicNodePalette, FUNCTION_DRAG_DATA } from '../components/logic/LogicNodePalette';
 import { DummyNode } from '../components/logic/DummyNode';
 import { PageNode } from '../components/logic/PageNode';
 import { ArithmeticNode } from '../components/logic/ArithmeticNode';
@@ -49,6 +39,26 @@ import { logicLogger } from '../lib/logger';
 import { useDeleteNodesShortcut } from '../hooks/useDeleteNodesShortcut';
 import { LogicNavigationProvider } from '../components/logic/LogicNavigationContext';
 import { deriveDefaultPageName, normalizeRouteSegment } from '../lib/routes';
+import {
+  FlowEdge,
+  FlowNode,
+  serializeEdges,
+  serializeNodes,
+  toFlowEdges,
+  toFlowNodes
+} from '../components/logic/graphSerialization';
+import {
+  PaletteNodeType,
+  createFunctionReferenceNode,
+  createPageNode,
+  generateNodeId,
+  staticNodeFactory
+} from '../components/logic/nodeFactories';
+import { FunctionNode } from '../components/logic/function/FunctionNode';
+import { FunctionArgumentNode } from '../components/logic/function/FunctionArgumentNode';
+import { FunctionReturnNode } from '../components/logic/function/FunctionReturnNode';
+import { FunctionEditorModal } from '../components/logic/function/FunctionEditorModal';
+import { FunctionRegistryProvider } from '../components/logic/function/FunctionRegistryContext';
 
 const nodeTypes = {
   dummy: DummyNode,
@@ -59,11 +69,11 @@ const nodeTypes = {
   object: ObjectNode,
   conditional: ConditionalNode,
   logical: LogicalOperatorNode,
-  relational: RelationalOperatorNode
+  relational: RelationalOperatorNode,
+  function: FunctionNode,
+  'function-argument': FunctionArgumentNode,
+  'function-return': FunctionReturnNode
 };
-
-type FlowNode = Node<LogicEditorNodeData>;
-type FlowEdge = Edge;
 
 export const isTargetHandleFree = (edges: Edge[], connection: Partial<Connection>): boolean => {
   if (!connection.target || !connection.targetHandle) {
@@ -73,230 +83,14 @@ export const isTargetHandleFree = (edges: Edge[], connection: Partial<Connection
     (edge) => edge.target === connection.target && edge.targetHandle === connection.targetHandle
   );
 };
-
-const generateId = () => {
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-    return crypto.randomUUID();
-  }
-  return Math.random().toString(36).slice(2, 10);
-};
-
-const DEFAULT_DUMMY_DATA: DummyNodeData = {
-  kind: 'dummy',
-  label: 'Sample data',
-  description: 'Placeholder output',
-  sample: {
-    type: 'integer',
-    value: 42
-  }
-};
-
-const createDummyData = (): DummyNodeData => ({
-  ...DEFAULT_DUMMY_DATA,
-  sample: { ...DEFAULT_DUMMY_DATA.sample }
-});
-
-const createArithmeticData = (): ArithmeticNodeData => ({
-  kind: 'arithmetic',
-  label: 'Math block',
-  description: 'Combine numbers',
-  operation: 'add',
-  precision: 2,
-  operands: [
-    { id: `op-${generateId()}`, label: 'Input A', sampleValue: 12 },
-    { id: `op-${generateId()}`, label: 'Input B', sampleValue: 4 }
-  ]
-});
-
-const createStringData = (): StringNodeData => ({
-  kind: 'string',
-  label: 'String block',
-  description: 'Transform strings',
-  operation: 'concat',
-  stringInputs: [
-    { id: `str-${generateId()}`, label: 'Text 1', role: 'text', sampleValue: 'Hello' },
-    { id: `str-${generateId()}`, label: 'Text 2', role: 'text', sampleValue: 'World' },
-    { id: `str-${generateId()}`, label: 'Delimiter', role: 'delimiter', sampleValue: ' ' }
-  ],
-  options: { delimiter: ' ' }
-});
-
-const createListData = (): ListNodeData => ({
-  kind: 'list',
-  label: 'List block',
-  description: 'Slice, merge, count lists',
-  operation: 'append',
-  primarySample: [1, 2, 3],
-  secondarySample: [4, 5],
-  startSample: 0,
-  endSample: 3,
-  sort: 'asc'
-});
-
-const createObjectData = (): ObjectNodeData => ({
-  kind: 'object',
-  label: 'Object block',
-  description: 'Merge and pick fields',
-  operation: 'merge',
-  sourceSample: { status: 'idle', attempts: 0 },
-  patchSample: { status: 'ready' },
-  selectedKeys: [],
-  path: '',
-  valueSample: '',
-  valueSampleKind: 'string'
-});
-
-const createConditionalData = (): ConditionalNodeData => ({
-  kind: 'conditional',
-  label: 'Conditional block',
-  description: 'Branch between two values',
-  conditionSample: true,
-  trueValue: 'Enabled',
-  falseValue: 'Disabled',
-  trueValueKind: 'string',
-  falseValueKind: 'string'
-});
-
-const createLogicalData = (): LogicalOperatorNodeData => ({
-  kind: 'logical',
-  label: 'Logical block',
-  description: 'Combine boolean inputs',
-  operation: 'and',
-  primarySample: true,
-  secondarySample: false
-});
-
-const createRelationalData = (): RelationalOperatorNodeData => ({
-  kind: 'relational',
-  label: 'Relational block',
-  description: 'Compare two values',
-  operation: 'gt',
-  leftSample: 10,
-  rightSample: 5,
-  leftSampleKind: 'number',
-  rightSampleKind: 'number'
-});
-
-const toFlowNodes = (nodes: LogicEditorNode[]): FlowNode[] =>
-  nodes.map((node) => ({
-    id: node.id,
-    type: node.type,
-    data: node.data,
-    position: node.position
-  }));
-
-const toFlowEdges = (edges: LogicEditorEdge[]): FlowEdge[] =>
-  edges.map((edge) => ({
-    id: edge.id,
-    source: edge.source,
-    target: edge.target,
-    sourceHandle: edge.sourceHandle,
-    targetHandle: edge.targetHandle
-  }));
-
-const serializeNodes = (nodes: FlowNode[]): LogicEditorNode[] =>
-  nodes.map((node) => ({
-    id: node.id,
-    type: (node.type as LogicEditorNode['type']) ?? 'dummy',
-    position: node.position,
-    data: node.data
-  }));
-
-const serializeEdges = (edges: FlowEdge[]): LogicEditorEdge[] =>
-  edges.map((edge) => ({
-    id: edge.id,
-    source: edge.source,
-    target: edge.target,
-    sourceHandle: edge.sourceHandle ?? undefined,
-    targetHandle: edge.targetHandle ?? undefined
-  }));
-
-const createPageNode = (page: PageDocument, position = { x: 0, y: 0 }): FlowNode => ({
-  id: `page-${page.id}`,
-  type: 'page',
-  position,
-  data: {
-    kind: 'page',
-    pageId: page.id,
-    pageName: page.name,
-    routeSegment: page.slug,
-    inputs: page.dynamicInputs
-  }
-});
-
-const createDummyNode = (position = { x: 0, y: 0 }): FlowNode => ({
-  id: `dummy-${generateId()}`,
-  type: 'dummy',
-  position,
-  data: createDummyData()
-});
-
-const createArithmeticFlowNode = (position = { x: 0, y: 0 }): FlowNode => ({
-  id: `arithmetic-${generateId()}`,
-  type: 'arithmetic',
-  position,
-  data: createArithmeticData()
-});
-
-const createStringFlowNode = (position = { x: 0, y: 0 }): FlowNode => ({
-  id: `string-${generateId()}`,
-  type: 'string',
-  position,
-  data: createStringData()
-});
-
-const createListFlowNode = (position = { x: 0, y: 0 }): FlowNode => ({
-  id: `list-${generateId()}`,
-  type: 'list',
-  position,
-  data: createListData()
-});
-
-const createObjectFlowNode = (position = { x: 0, y: 0 }): FlowNode => ({
-  id: `object-${generateId()}`,
-  type: 'object',
-  position,
-  data: createObjectData()
-});
-
-const createConditionalFlowNode = (position = { x: 0, y: 0 }): FlowNode => ({
-  id: `conditional-${generateId()}`,
-  type: 'conditional',
-  position,
-  data: createConditionalData()
-});
-
-const createLogicalFlowNode = (position = { x: 0, y: 0 }): FlowNode => ({
-  id: `logical-${generateId()}`,
-  type: 'logical',
-  position,
-  data: createLogicalData()
-});
-
-const createRelationalFlowNode = (position = { x: 0, y: 0 }): FlowNode => ({
-  id: `relational-${generateId()}`,
-  type: 'relational',
-  position,
-  data: createRelationalData()
-});
-
-type StaticPaletteNode = Exclude<PaletteNodeType, 'page'>;
-
-const staticNodeFactory: Record<StaticPaletteNode, (position?: { x: number; y: number }) => FlowNode> = {
-  dummy: createDummyNode,
-  arithmetic: createArithmeticFlowNode,
-  string: createStringFlowNode,
-  list: createListFlowNode,
-  object: createObjectFlowNode,
-  conditional: createConditionalFlowNode,
-  logical: createLogicalFlowNode,
-  relational: createRelationalFlowNode
-};
-
 type PaletteNodeOptions = {
   name?: string;
   slug?: string;
 };
+
+type StaticPaletteNodeType = Exclude<PaletteNodeType, 'page'>;
+
+const isStaticPaletteNodeType = (value: PaletteNodeType): value is StaticPaletteNodeType => value !== 'page';
 
 const LogicEditorView = () => {
   const { projectId } = useParams<{ projectId: string }>();
@@ -306,10 +100,16 @@ const LogicEditorView = () => {
   const reactFlowInstance = useReactFlow();
   const [nodes, setNodes, onNodesChange] = useNodesState<LogicEditorNodeData>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
+  const [functions, setFunctions] = useState<UserDefinedFunction[]>([]);
+  const [activeFunction, setActiveFunction] = useState<UserDefinedFunction | null>(null);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>([]);
   const [feedback, setFeedback] = useState('');
-  const previewResolver = useMemo(() => createPreviewResolver(nodes, edges), [nodes, edges]);
+  const previewResolver = useMemo(
+    () => createPreviewResolver(nodes, edges, { functions }),
+    [nodes, edges, functions]
+  );
+  const connectionLineStyle = useMemo(() => ({ stroke: '#F9E7B2', strokeWidth: 2 }), []);
   const pendingSaveRef = useRef<Promise<unknown> | null>(null);
   const deleteElements = useCallback(
     (elements: { nodes?: FlowNode[]; edges?: FlowEdge[] }) => {
@@ -344,6 +144,20 @@ const LogicEditorView = () => {
     });
   }, [nodes]);
 
+  useEffect(() => {
+    if (!activeFunction) {
+      return;
+    }
+    const refreshed = functions.find((fn) => fn.id === activeFunction.id);
+    if (!refreshed) {
+      setActiveFunction(null);
+      return;
+    }
+    if (refreshed.updatedAt !== activeFunction.updatedAt) {
+      setActiveFunction(refreshed);
+    }
+  }, [activeFunction, functions]);
+
   const graphQuery = useQuery({
     queryKey: ['project-graph', projectId],
     queryFn: () => projectGraphApi.get(projectId!),
@@ -355,6 +169,7 @@ const LogicEditorView = () => {
     if (graphQuery.data?.graph) {
       setNodes(toFlowNodes(graphQuery.data.graph.nodes));
       setEdges(toFlowEdges(graphQuery.data.graph.edges));
+      setFunctions(graphQuery.data.graph.functions ?? []);
       setHasUnsavedChanges(false);
       setTimeout(() => {
         try {
@@ -372,6 +187,7 @@ const LogicEditorView = () => {
       logicLogger.info('Graph saved', { projectId, nodes: graph.nodes.length, edges: graph.edges.length });
       setNodes(toFlowNodes(graph.nodes));
       setEdges(toFlowEdges(graph.edges));
+      setFunctions(graph.functions ?? []);
       setHasUnsavedChanges(false);
       setFeedback('Saved');
       setTimeout(() => setFeedback(''), 2000);
@@ -444,9 +260,21 @@ const LogicEditorView = () => {
         logicLogger.debug('Skipping graph persist — no changes', { reason, projectId });
         return;
       }
+      const normalizedFunctions = functions.map((fn) => {
+        const { updatedAt, ...persistable } = fn;
+        return updatedAt ? { ...persistable } : persistable;
+      });
+      const strippedCount = functions.filter((fn) => typeof fn.updatedAt !== 'undefined').length;
+      if (strippedCount > 0) {
+        logicLogger.debug('Stripped transient metadata from functions before save', {
+          projectId,
+          stripped: strippedCount
+        });
+      }
       const payload: ProjectGraphSnapshot = {
         nodes: serializeNodes(nodes),
-        edges: serializeEdges(edges)
+        edges: serializeEdges(edges),
+        functions: normalizedFunctions
       };
 
       if (pendingSaveRef.current) {
@@ -463,7 +291,7 @@ const LogicEditorView = () => {
         pendingSaveRef.current = null;
       }
     },
-    [edges, hasUnsavedChanges, nodes, projectId, saveMutation]
+    [edges, functions, hasUnsavedChanges, nodes, projectId, saveMutation]
   );
 
   const handleSave = useCallback(() => {
@@ -476,8 +304,8 @@ const LogicEditorView = () => {
         return;
       }
 
-      if (type !== 'page') {
-        const factory = staticNodeFactory[type as StaticPaletteNode];
+      if (isStaticPaletteNodeType(type)) {
+        const factory = staticNodeFactory[type];
         if (!factory) {
           return;
         }
@@ -504,6 +332,164 @@ const LogicEditorView = () => {
     [createPageMutation, nodes, projectId, setNodes]
   );
 
+  const handleAddFunctionNode = useCallback(
+    (functionId: string, position?: { x: number; y: number }) => {
+      const target = functions.find((fn) => fn.id === functionId);
+      if (!target) {
+        setFeedback('Function not found');
+        setTimeout(() => setFeedback(''), 2000);
+        logicLogger.warn('Attempted to add missing function node', { projectId, functionId });
+        return;
+      }
+      const node = createFunctionReferenceNode(functionId, target.name, target.returnsValue ?? false, position);
+      logicLogger.info('Function node added', { projectId, functionId, nodeId: node.id });
+      setNodes((current: FlowNode[]) => current.concat(node));
+      setHasUnsavedChanges(true);
+    },
+    [functions, projectId, setNodes]
+  );
+
+  const handleCreateFunction = useCallback(() => {
+    const newFunction: UserDefinedFunction = {
+      id: `fn-${generateNodeId()}`,
+      name: `Function ${functions.length + 1}`,
+      description: '',
+      nodes: [],
+      edges: [],
+      arguments: [],
+      returnsValue: false,
+      updatedAt: new Date().toISOString()
+    };
+    logicLogger.info('User function created', { projectId, functionId: newFunction.id });
+    setFunctions((current) => current.concat(newFunction));
+    setActiveFunction(newFunction);
+    setHasUnsavedChanges(true);
+  }, [functions.length, projectId]);
+
+  const handleEditFunction = useCallback(
+    (functionId: string) => {
+      const target = functions.find((fn) => fn.id === functionId);
+      if (!target) {
+        setFeedback('Function not found');
+        setTimeout(() => setFeedback(''), 2000);
+        logicLogger.warn('Function edit requested but not found', { projectId, functionId });
+        return;
+      }
+      logicLogger.debug('Opening function editor', { projectId, functionId });
+      setActiveFunction(target);
+    },
+    [functions, projectId]
+  );
+
+  const handleDeleteFunction = useCallback(
+    (functionId: string) => {
+      setFunctions((current) =>
+        current
+          .filter((fn) => fn.id !== functionId)
+          .map((fn) => {
+            let mutated = false;
+            const filteredNodes = fn.nodes.filter((node) => {
+              if (node.type !== 'function') {
+                return true;
+              }
+              const data = node.data as FunctionNodeData;
+              if (data.functionId === functionId) {
+                mutated = true;
+                return false;
+              }
+              return true;
+            });
+            if (!mutated) {
+              return fn;
+            }
+            const nodeIds = new Set(filteredNodes.map((node) => node.id));
+            return {
+              ...fn,
+              nodes: filteredNodes,
+              edges: fn.edges.filter((edge) => nodeIds.has(edge.source) && nodeIds.has(edge.target))
+            };
+          })
+      );
+      setNodes((current: FlowNode[]) => {
+        const removedIds = new Set(
+          current
+            .filter((node) => node.type === 'function' && (node.data as FunctionNodeData).functionId === functionId)
+            .map((node) => node.id)
+        );
+        if (removedIds.size === 0) {
+          return current;
+        }
+        setEdges((edgesState) => edgesState.filter((edge) => !removedIds.has(edge.source) && !removedIds.has(edge.target)));
+        return current.filter((node) => !removedIds.has(node.id));
+      });
+      if (activeFunction?.id === functionId) {
+        setActiveFunction(null);
+      }
+      setHasUnsavedChanges(true);
+      logicLogger.warn('User function deleted', { projectId, functionId });
+    },
+    [activeFunction?.id, projectId, setEdges]
+  );
+
+  const handleFunctionSave = useCallback(
+    (updatedFunction: UserDefinedFunction) => {
+      setFunctions((current) =>
+        current.map((fn) => {
+          if (fn.id === updatedFunction.id) {
+            return updatedFunction;
+          }
+          let mutated = false;
+          const updatedNodes = fn.nodes.map((node) => {
+            if (node.type !== 'function') {
+              return node;
+            }
+            const data = node.data as FunctionNodeData;
+            if (
+              data.functionId !== updatedFunction.id ||
+              (data.functionName === updatedFunction.name && data.returnsValue === updatedFunction.returnsValue)
+            ) {
+              return node;
+            }
+            mutated = true;
+            return {
+              ...node,
+              data: { ...data, functionName: updatedFunction.name, returnsValue: updatedFunction.returnsValue }
+            };
+          });
+          if (!mutated) {
+            return fn;
+          }
+          return {
+            ...fn,
+            nodes: updatedNodes
+          };
+        })
+      );
+      setNodes((current: FlowNode[]) => {
+        let mutated = false;
+        const next = current.map((node) => {
+          if (node.type !== 'function') {
+            return node;
+          }
+          const data = node.data as FunctionNodeData;
+          if (data.functionId !== updatedFunction.id || (data.functionName === updatedFunction.name && data.returnsValue === updatedFunction.returnsValue)) {
+            return node;
+          }
+          mutated = true;
+          return {
+            ...node,
+            data: { ...data, functionName: updatedFunction.name, returnsValue: updatedFunction.returnsValue }
+          };
+        });
+        return mutated ? next : current;
+      });
+      setActiveFunction(updatedFunction);
+      setHasUnsavedChanges(true);
+      logicLogger.info('Function updated locally', { projectId, functionId: updatedFunction.id });
+    },
+    [projectId]
+  );
+
   const handlePaletteAdd = useCallback(
     (type: PaletteNodeType) => {
       void handleAddNode(type);
@@ -519,18 +505,27 @@ const LogicEditorView = () => {
   const handleDrop = useCallback(
     (event: DragEvent) => {
       event.preventDefault();
-      const type = event.dataTransfer.getData('application/reactflow') as PaletteNodeType | undefined;
-      if (!type) {
-        return;
-      }
       const bounds = reactFlowWrapper.current?.getBoundingClientRect();
       const position = reactFlowInstance.project({
         x: event.clientX - (bounds?.left ?? 0),
         y: event.clientY - (bounds?.top ?? 0)
       });
+      const type = event.dataTransfer.getData('application/reactflow') as PaletteNodeType | undefined;
+      if (!type) {
+        const functionPayload = event.dataTransfer.getData(FUNCTION_DRAG_DATA);
+        if (functionPayload) {
+          try {
+            const parsed = JSON.parse(functionPayload) as { functionId: string };
+            handleAddFunctionNode(parsed.functionId, position);
+          } catch (error) {
+            logicLogger.error('Invalid function drag payload', { error: (error as Error).message });
+          }
+        }
+        return;
+      }
       handleAddNode(type, position);
     },
-    [handleAddNode, reactFlowInstance]
+    [handleAddFunctionNode, handleAddNode, reactFlowInstance]
   );
 
   const handleSelectionChange = useCallback(({ nodes: selected }: { nodes: FlowNode[] }) => {
@@ -577,8 +572,16 @@ const LogicEditorView = () => {
   }
 
   return (
-    <div className="flex h-screen">
-      <LogicNodePalette onAddNode={handlePaletteAdd} />
+    <>
+      <div className="flex h-screen">
+      <LogicNodePalette
+        onAddNode={handlePaletteAdd}
+        userFunctions={functions.map((fn) => ({ id: fn.id, name: fn.name, returnsValue: fn.returnsValue }))}
+        onCreateFunction={handleCreateFunction}
+        onEditFunction={handleEditFunction}
+        onDeleteFunction={handleDeleteFunction}
+        onAddFunctionNode={(functionId) => handleAddFunctionNode(functionId)}
+      />
       <div className="flex flex-1 flex-col">
         <header className="flex items-center justify-between border-b border-white/5 bg-bw-ink/80 px-6 py-4 text-white">
           <div>
@@ -619,32 +622,44 @@ const LogicEditorView = () => {
           <div ref={reactFlowWrapper} className="h-full">
             <PreviewResolverProvider resolver={previewResolver}>
               <LogicNavigationProvider value={{ openPageBuilder: handleNavigateToBuilder }}>
-                <ReactFlow
-                  nodes={nodes}
-                  edges={edges}
-                  nodeTypes={nodeTypes}
-                  fitView
-                  onNodesChange={handleNodesChange}
-                  onEdgesChange={handleEdgesChange}
-                  onConnect={handleConnect}
-                  isValidConnection={isHandleAvailable}
-                  onDrop={handleDrop}
-                  onDragOver={handleDragOver}
-                  onSelectionChange={handleSelectionChange}
-                  panOnDrag
-                  panOnScroll
-                  zoomOnScroll
-                >
-                  <MiniMap pannable zoomable className="!bg-bw-ink/80" />
-                  <Controls />
-                  <Background gap={16} color="#ffffff33" />
-                </ReactFlow>
+                <FunctionRegistryProvider functions={functions}>
+                  <ReactFlow
+                    nodes={nodes}
+                    edges={edges}
+                    nodeTypes={nodeTypes}
+                    fitView
+                    onNodesChange={handleNodesChange}
+                    onEdgesChange={handleEdgesChange}
+                    onConnect={handleConnect}
+                    isValidConnection={isHandleAvailable}
+                    onDrop={handleDrop}
+                    onDragOver={handleDragOver}
+                    onSelectionChange={handleSelectionChange}
+                    panOnDrag
+                    panOnScroll
+                    zoomOnScroll
+                    connectionLineStyle={connectionLineStyle}
+                  >
+                    <MiniMap pannable zoomable className="!bg-bw-ink/80" />
+                    <Controls />
+                    <Background gap={16} color="#ffffff33" />
+                  </ReactFlow>
+                </FunctionRegistryProvider>
               </LogicNavigationProvider>
             </PreviewResolverProvider>
           </div>
         </div>
       </div>
-    </div>
+      </div>
+      {activeFunction && (
+        <FunctionEditorModal
+          functionDef={activeFunction}
+          functions={functions}
+          onSave={handleFunctionSave}
+          onClose={() => setActiveFunction(null)}
+        />
+      )}
+    </>
   );
 };
 
@@ -654,4 +669,4 @@ export const ProjectLogicPage = () => (
   </ReactFlowProvider>
 );
 
-export { createPageNode, createDummyNode, serializeNodes, serializeEdges };
+export { createPageNode, serializeNodes, serializeEdges };

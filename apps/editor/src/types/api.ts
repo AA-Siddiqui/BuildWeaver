@@ -20,6 +20,8 @@ export type {
   LogicEditorNodeData,
   LogicEditorNode,
   LogicEditorEdge,
+  FunctionNodeData,
+  UserDefinedFunction,
   DummyNodeData,
   PageNodeData,
   ArithmeticNodeData,

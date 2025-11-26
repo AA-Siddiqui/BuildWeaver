@@ -15,6 +15,13 @@
       "when": 1763721002553,
       "tag": "0001_typical_speedball",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1764165637361,
+      "tag": "0002_dizzy_moonstone",
+      "breakpoints": true
     }
   ]
 }

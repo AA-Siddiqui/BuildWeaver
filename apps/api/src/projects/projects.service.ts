@@ -153,7 +153,8 @@ export class ProjectsService {
           }
         }
       ],
-      edges: []
+      edges: [],
+      functions: []
     };
 
     const payload: NewProjectGraph = {

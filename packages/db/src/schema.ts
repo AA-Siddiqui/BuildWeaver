@@ -44,7 +44,10 @@ export const projectGraphs = pgTable(
     projectId: uuid('project_id')
       .notNull()
       .references(() => projects.id, { onDelete: 'cascade' }),
-    graph: jsonb('graph').$type<ProjectGraphSnapshot>().notNull().default(sql`'{"nodes":[],"edges":[]}'::jsonb`),
+    graph: jsonb('graph')
+      .$type<ProjectGraphSnapshot>()
+      .notNull()
+      .default(sql`'{"nodes":[],"edges":[],"functions":[]}'::jsonb`),
     createdAt: timestamp('created_at').notNull().defaultNow(),
     updatedAt: timestamp('updated_at').notNull().defaultNow().$onUpdate(() => new Date())
   },
