@@ -1,11 +1,11 @@
 import { useMemo } from 'react';
-import { ScalarValue } from '@buildweaver/libs';
+import { ScalarSampleKind, ScalarValue } from '@buildweaver/libs';
 import { ObjectAttributesEditor } from './ObjectAttributesEditor';
 import { parseScalarList, stringifyScalarList } from './valueParsers';
 import { useTextDraft } from './hooks/useTextDraft';
 import { logicLogger } from '../../lib/logger';
 
-export type ScalarValueKind = 'string' | 'number' | 'boolean' | 'list' | 'object';
+export type ScalarValueKind = ScalarSampleKind;
 
 interface ScalarValueInputProps {
   nodeId: string;

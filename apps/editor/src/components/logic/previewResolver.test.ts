@@ -1,6 +1,13 @@
 import type { Edge, Node } from 'reactflow';
-import type { LogicEditorNodeData, DummyNodeData, StringNodeData, ListNodeData } from '@buildweaver/libs';
+import type {
+  LogicEditorNodeData,
+  DummyNodeData,
+  StringNodeData,
+  ListNodeData,
+  ConditionalNodeData
+} from '@buildweaver/libs';
 import { createPreviewResolver } from './previewResolver';
+import { getConditionalHandleId } from './conditionalHandles';
 
 describe('previewResolver', () => {
   const basePosition = { x: 0, y: 0 };
@@ -196,5 +203,83 @@ describe('previewResolver', () => {
 
     expect(resolver.isHandleAvailable({ target: 'b', targetHandle: 'in' })).toBe(false);
     expect(resolver.isHandleAvailable({ target: 'b', targetHandle: 'other' })).toBe(true);
+  });
+
+  it('evaluates conditional nodes using upstream bindings', () => {
+    const conditionalId = 'conditional-node';
+    const nodes: Node<LogicEditorNodeData>[] = [
+      {
+        id: 'condition-source',
+        type: 'dummy',
+        position: basePosition,
+        data: {
+          kind: 'dummy',
+          label: 'Condition',
+          sample: { type: 'boolean', value: true }
+        } satisfies DummyNodeData
+      },
+      {
+        id: 'true-source',
+        type: 'dummy',
+        position: basePosition,
+        data: {
+          kind: 'dummy',
+          label: 'True branch',
+          sample: { type: 'string', value: 'truthy-value' }
+        } satisfies DummyNodeData
+      },
+      {
+        id: 'false-source',
+        type: 'dummy',
+        position: basePosition,
+        data: {
+          kind: 'dummy',
+          label: 'False branch',
+          sample: { type: 'string', value: 'falsy-value' }
+        } satisfies DummyNodeData
+      },
+      {
+        id: conditionalId,
+        type: 'conditional',
+        position: basePosition,
+        data: {
+          kind: 'conditional',
+          label: 'Conditional',
+          conditionSample: false,
+          trueValue: 'fallback-true',
+          falseValue: 'fallback-false',
+          trueValueKind: 'string',
+          falseValueKind: 'string'
+        } satisfies ConditionalNodeData
+      }
+    ];
+
+    const edges: Edge[] = [
+      {
+        id: 'edge-condition',
+        source: 'condition-source',
+        target: conditionalId,
+        sourceHandle: 'dummy-output',
+        targetHandle: getConditionalHandleId(conditionalId, 'condition')
+      },
+      {
+        id: 'edge-truthy',
+        source: 'true-source',
+        target: conditionalId,
+        sourceHandle: 'dummy-output',
+        targetHandle: getConditionalHandleId(conditionalId, 'truthy')
+      },
+      {
+        id: 'edge-falsy',
+        source: 'false-source',
+        target: conditionalId,
+        sourceHandle: 'dummy-output',
+        targetHandle: getConditionalHandleId(conditionalId, 'falsy')
+      }
+    ];
+
+    const resolver = createPreviewResolver(nodes, edges);
+    const preview = resolver.getNodePreview(conditionalId);
+    expect(preview.summary).toContain('truthy-value');
   });
 });

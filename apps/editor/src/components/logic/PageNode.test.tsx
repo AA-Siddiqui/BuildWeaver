@@ -77,7 +77,7 @@ describe('PageNode', () => {
 
     await waitFor(() => expect(projectPagesApi.update).toHaveBeenCalledWith('project-123', 'page-1', { name: 'Docs', slug: 'docs' }));
 
-    expect(screen.getByText('Docs')).toBeInTheDocument();
-    expect(screen.getByText('/docs')).toBeInTheDocument();
+    expect(await screen.findByText('Docs')).toBeInTheDocument();
+    expect(await screen.findByText('/docs')).toBeInTheDocument();
   });
 });

@@ -20,14 +20,17 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useParams } from 'react-router-dom';
 import type {
   ArithmeticNodeData,
+  ConditionalNodeData,
   DummyNodeData,
   ListNodeData,
   LogicEditorEdge,
   LogicEditorNode,
   LogicEditorNodeData,
+  LogicalOperatorNodeData,
   ObjectNodeData,
   PageDocument,
   ProjectGraphSnapshot,
+  RelationalOperatorNodeData,
   StringNodeData
 } from '../types/api';
 import { projectGraphApi, projectPagesApi } from '../lib/api-client';
@@ -38,6 +41,9 @@ import { ArithmeticNode } from '../components/logic/ArithmeticNode';
 import { StringNode } from '../components/logic/StringNode';
 import { ListNode } from '../components/logic/ListNode';
 import { ObjectNode } from '../components/logic/ObjectNode';
+import { ConditionalNode } from '../components/logic/ConditionalNode';
+import { LogicalOperatorNode } from '../components/logic/LogicalOperatorNode';
+import { RelationalOperatorNode } from '../components/logic/RelationalOperatorNode';
 import { PreviewResolverProvider, createPreviewResolver } from '../components/logic/previewResolver';
 import { logicLogger } from '../lib/logger';
 import { useDeleteNodesShortcut } from '../hooks/useDeleteNodesShortcut';
@@ -50,7 +56,10 @@ const nodeTypes = {
   arithmetic: ArithmeticNode,
   string: StringNode,
   list: ListNode,
-  object: ObjectNode
+  object: ObjectNode,
+  conditional: ConditionalNode,
+  logical: LogicalOperatorNode,
+  relational: RelationalOperatorNode
 };
 
 type FlowNode = Node<LogicEditorNodeData>;
@@ -137,6 +146,37 @@ const createObjectData = (): ObjectNodeData => ({
   valueSampleKind: 'string'
 });
 
+const createConditionalData = (): ConditionalNodeData => ({
+  kind: 'conditional',
+  label: 'Conditional block',
+  description: 'Branch between two values',
+  conditionSample: true,
+  trueValue: 'Enabled',
+  falseValue: 'Disabled',
+  trueValueKind: 'string',
+  falseValueKind: 'string'
+});
+
+const createLogicalData = (): LogicalOperatorNodeData => ({
+  kind: 'logical',
+  label: 'Logical block',
+  description: 'Combine boolean inputs',
+  operation: 'and',
+  primarySample: true,
+  secondarySample: false
+});
+
+const createRelationalData = (): RelationalOperatorNodeData => ({
+  kind: 'relational',
+  label: 'Relational block',
+  description: 'Compare two values',
+  operation: 'gt',
+  leftSample: 10,
+  rightSample: 5,
+  leftSampleKind: 'number',
+  rightSampleKind: 'number'
+});
+
 const toFlowNodes = (nodes: LogicEditorNode[]): FlowNode[] =>
   nodes.map((node) => ({
     id: node.id,
@@ -219,6 +259,27 @@ const createObjectFlowNode = (position = { x: 0, y: 0 }): FlowNode => ({
   data: createObjectData()
 });
 
+const createConditionalFlowNode = (position = { x: 0, y: 0 }): FlowNode => ({
+  id: `conditional-${generateId()}`,
+  type: 'conditional',
+  position,
+  data: createConditionalData()
+});
+
+const createLogicalFlowNode = (position = { x: 0, y: 0 }): FlowNode => ({
+  id: `logical-${generateId()}`,
+  type: 'logical',
+  position,
+  data: createLogicalData()
+});
+
+const createRelationalFlowNode = (position = { x: 0, y: 0 }): FlowNode => ({
+  id: `relational-${generateId()}`,
+  type: 'relational',
+  position,
+  data: createRelationalData()
+});
+
 type StaticPaletteNode = Exclude<PaletteNodeType, 'page'>;
 
 const staticNodeFactory: Record<StaticPaletteNode, (position?: { x: number; y: number }) => FlowNode> = {
@@ -226,7 +287,10 @@ const staticNodeFactory: Record<StaticPaletteNode, (position?: { x: number; y: n
   arithmetic: createArithmeticFlowNode,
   string: createStringFlowNode,
   list: createListFlowNode,
-  object: createObjectFlowNode
+  object: createObjectFlowNode,
+  conditional: createConditionalFlowNode,
+  logical: createLogicalFlowNode,
+  relational: createRelationalFlowNode
 };
 
 type PaletteNodeOptions = {
@@ -513,7 +577,7 @@ const LogicEditorView = () => {
   }
 
   return (
-    <div className="flex h-[calc(100vh-64px)]">
+    <div className="flex h-screen">
       <LogicNodePalette onAddNode={handlePaletteAdd} />
       <div className="flex flex-1 flex-col">
         <header className="flex items-center justify-between border-b border-white/5 bg-bw-ink/80 px-6 py-4 text-white">

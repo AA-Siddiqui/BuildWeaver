@@ -25,5 +25,8 @@ export type {
   ArithmeticNodeData,
   StringNodeData,
   ListNodeData,
-  ObjectNodeData
+  ObjectNodeData,
+  ConditionalNodeData,
+  LogicalOperatorNodeData,
+  RelationalOperatorNodeData
 } from '@buildweaver/libs';

@@ -1,6 +1,17 @@
 import { ScalarValue } from './ir';
 
-export type LogicEditorNodeType = 'page' | 'dummy' | 'arithmetic' | 'string' | 'list' | 'object';
+export type ScalarSampleKind = 'string' | 'number' | 'boolean' | 'list' | 'object';
+
+export type LogicEditorNodeType =
+  | 'page'
+  | 'dummy'
+  | 'arithmetic'
+  | 'string'
+  | 'list'
+  | 'object'
+  | 'conditional'
+  | 'logical'
+  | 'relational';
 
 export interface LogicEditorNodePosition {
   x: number;
@@ -86,7 +97,7 @@ export interface ListNodeData {
 
 export type ObjectOperation = 'merge' | 'pick' | 'set' | 'get' | 'keys' | 'values';
 
-export type ObjectValueSampleKind = 'string' | 'number' | 'boolean' | 'list' | 'object';
+export type ObjectValueSampleKind = ScalarSampleKind;
 
 export interface ObjectNodeData {
   kind: 'object';
@@ -99,6 +110,41 @@ export interface ObjectNodeData {
   path?: string;
   valueSample?: ScalarValue;
   valueSampleKind?: ObjectValueSampleKind;
+}
+
+export interface ConditionalNodeData {
+  kind: 'conditional';
+  label: string;
+  description?: string;
+  conditionSample?: boolean;
+  trueValue?: ScalarValue;
+  falseValue?: ScalarValue;
+  trueValueKind?: ScalarSampleKind;
+  falseValueKind?: ScalarSampleKind;
+}
+
+export type LogicalOperation = 'and' | 'or' | 'not';
+
+export interface LogicalOperatorNodeData {
+  kind: 'logical';
+  label: string;
+  description?: string;
+  operation: LogicalOperation;
+  primarySample?: boolean;
+  secondarySample?: boolean;
+}
+
+export type RelationalOperation = 'gt' | 'gte' | 'lt' | 'lte' | 'eq' | 'neq';
+
+export interface RelationalOperatorNodeData {
+  kind: 'relational';
+  label: string;
+  description?: string;
+  operation: RelationalOperation;
+  leftSample?: ScalarValue;
+  rightSample?: ScalarValue;
+  leftSampleKind?: ScalarSampleKind;
+  rightSampleKind?: ScalarSampleKind;
 }
 
 export interface PageDynamicInput {
@@ -122,7 +168,10 @@ export type LogicEditorNodeData =
   | ArithmeticNodeData
   | StringNodeData
   | ListNodeData
-  | ObjectNodeData;
+  | ObjectNodeData
+  | ConditionalNodeData
+  | LogicalOperatorNodeData
+  | RelationalOperatorNodeData;
 
 export interface LogicEditorNode {
   id: string;

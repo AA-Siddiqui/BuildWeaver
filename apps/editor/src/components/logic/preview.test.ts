@@ -1,15 +1,21 @@
 import {
   evaluateArithmeticPreview,
+  evaluateConditionalPreview,
   evaluateDummyPreview,
   evaluateListPreview,
+  evaluateLogicalOperatorPreview,
   evaluateObjectPreview,
+  evaluateRelationalPreview,
   evaluateStringPreview
 } from './preview';
 import {
   ArithmeticNodeData,
+  ConditionalNodeData,
   DummyNodeData,
   ListNodeData,
+  LogicalOperatorNodeData,
   ObjectNodeData,
+  RelationalOperatorNodeData,
   StringNodeData
 } from '@buildweaver/libs';
 
@@ -224,5 +230,56 @@ describe('logic previews', () => {
 
     const preview = evaluateObjectPreview(objectNode, { path: 'a.b.c' });
     expect(preview.value).toBe(42);
+  });
+
+  it('evaluates conditional previews with overrides', () => {
+    const conditionalNode: ConditionalNodeData = {
+      kind: 'conditional',
+      label: 'Branch',
+      description: 'Test',
+      conditionSample: false,
+      trueValue: 'yes',
+      falseValue: 'no'
+    };
+
+    const preview = evaluateConditionalPreview(conditionalNode, { condition: true, truthy: 'override' });
+    expect(preview.state).toBe('ready');
+    expect(preview.summary).toContain('override');
+  });
+
+  it('evaluates logical operator previews', () => {
+    const logicalNode: LogicalOperatorNodeData = {
+      kind: 'logical',
+      label: 'Logic',
+      description: 'Test',
+      operation: 'and',
+      primarySample: true,
+      secondarySample: true
+    };
+
+    const andPreview = evaluateLogicalOperatorPreview(logicalNode);
+    expect(andPreview.value).toBe(true);
+
+    const notPreview = evaluateLogicalOperatorPreview({ ...logicalNode, operation: 'not', primarySample: false });
+    expect(notPreview.value).toBe(true);
+  });
+
+  it('evaluates relational operator previews for numeric comparisons', () => {
+    const relationalNode: RelationalOperatorNodeData = {
+      kind: 'relational',
+      label: 'Rel',
+      description: 'Test',
+      operation: 'gt',
+      leftSample: 10,
+      rightSample: 5,
+      leftSampleKind: 'number',
+      rightSampleKind: 'number'
+    };
+
+    const preview = evaluateRelationalPreview(relationalNode);
+    expect(preview.value).toBe(true);
+
+    const eqPreview = evaluateRelationalPreview({ ...relationalNode, operation: 'eq', leftSample: 'a', rightSample: 'a' });
+    expect(eqPreview.value).toBe(true);
   });
 });

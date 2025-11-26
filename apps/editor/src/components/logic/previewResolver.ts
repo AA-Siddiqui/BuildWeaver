@@ -2,20 +2,26 @@ import { ReactNode, createContext, createElement, useContext } from 'react';
 import { Connection, Edge, Node } from 'reactflow';
 import {
   ArithmeticNodeData,
+  ConditionalNodeData,
   DummyNodeData,
   ListNodeData,
   LogicEditorNodeData,
+  LogicalOperatorNodeData,
   ObjectNodeData,
   PageNodeData,
+  RelationalOperatorNodeData,
   ScalarValue,
   StringNodeData
 } from '@buildweaver/libs';
 import {
   NodePreview,
+  evaluateConditionalPreview,
   evaluateArithmeticPreview,
   evaluateDummyPreview,
+  evaluateLogicalOperatorPreview,
   evaluateListPreview,
   evaluateObjectPreview,
+  evaluateRelationalPreview,
   evaluateStringPreview,
   formatScalar
 } from './preview';
@@ -23,6 +29,9 @@ import type { ObjectInputOverrides } from './preview';
 import { logicLogger } from '../../lib/logger';
 import { getListHandleId, normalizeSortOrderValue } from './listOperationConfig';
 import { getObjectHandleId, getObjectOperationInputs, ObjectInputRole } from './objectOperationConfig';
+import { getConditionalHandleId } from './conditionalHandles';
+import { getLogicalHandleId, getLogicalOperationConfig } from './logicalOperatorConfig';
+import { getRelationalHandleId } from './relationalOperatorConfig';
 
 export interface ConnectedBinding {
   handleId: string;
@@ -55,6 +64,28 @@ const normalizeNumber = (value: unknown): number | null => {
   if (typeof value === 'string') {
     const parsed = Number(value);
     return Number.isNaN(parsed) ? null : parsed;
+  }
+  return null;
+};
+
+const normalizeBoolean = (value: unknown): boolean | null => {
+  if (typeof value === 'boolean') {
+    return value;
+  }
+  if (typeof value === 'number') {
+    if (Number.isNaN(value)) {
+      return null;
+    }
+    return value !== 0;
+  }
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    if (['true', '1', 'yes', 'on'].includes(normalized)) {
+      return true;
+    }
+    if (['false', '0', 'no', 'off'].includes(normalized)) {
+      return false;
+    }
   }
   return null;
 };
@@ -178,6 +209,52 @@ const evaluateNodePreview = (
       });
       return evaluateArithmeticPreview(data, overrides);
     }
+    case 'conditional': {
+      const data = node.data as ConditionalNodeData;
+      const overrides: {
+        condition?: boolean;
+        truthy?: ScalarValue;
+        falsy?: ScalarValue;
+      } = {};
+      const conditionBinding = getBindingValue(getConditionalHandleId(node.id, 'condition'));
+      if (conditionBinding) {
+        const normalized = normalizeBoolean(conditionBinding.value);
+        if (normalized === null) {
+          logicLogger.warn('Invalid conditional condition binding ignored', {
+            nodeId: node.id,
+            handleId: conditionBinding.handleId,
+            value: conditionBinding.value
+          });
+        } else {
+          overrides.condition = normalized;
+        }
+      }
+      const truthyBinding = getBindingValue(getConditionalHandleId(node.id, 'truthy'));
+      if (truthyBinding) {
+        const scalar = ensureScalar(truthyBinding.value);
+        if (scalar === undefined) {
+          logicLogger.warn('Invalid truthy binding ignored', {
+            nodeId: node.id,
+            handleId: truthyBinding.handleId
+          });
+        } else {
+          overrides.truthy = scalar;
+        }
+      }
+      const falsyBinding = getBindingValue(getConditionalHandleId(node.id, 'falsy'));
+      if (falsyBinding) {
+        const scalar = ensureScalar(falsyBinding.value);
+        if (scalar === undefined) {
+          logicLogger.warn('Invalid falsy binding ignored', {
+            nodeId: node.id,
+            handleId: falsyBinding.handleId
+          });
+        } else {
+          overrides.falsy = scalar;
+        }
+      }
+      return evaluateConditionalPreview(data, overrides);
+    }
     case 'string': {
       const data = node.data as StringNodeData;
       const overrides: Record<string, string | undefined> = {};
@@ -192,6 +269,33 @@ const evaluateNodePreview = (
         }
       });
       return evaluateStringPreview(data, overrides);
+    }
+    case 'logical': {
+      const data = node.data as LogicalOperatorNodeData;
+      const config = getLogicalOperationConfig(data.operation);
+      const overrides: { primary?: boolean; secondary?: boolean } = {};
+      config.roles.forEach((role) => {
+        const handleId = getLogicalHandleId(node.id, role);
+        const binding = getBindingValue(handleId);
+        if (!binding) {
+          return;
+        }
+        const normalized = normalizeBoolean(binding.value);
+        if (normalized === null) {
+          logicLogger.warn('Invalid logical binding ignored', {
+            nodeId: node.id,
+            handleId,
+            value: binding.value
+          });
+          return;
+        }
+        if (role === 'primary') {
+          overrides.primary = normalized;
+        } else {
+          overrides.secondary = normalized;
+        }
+      });
+      return evaluateLogicalOperatorPreview(data, overrides);
     }
     case 'list': {
       const data = node.data as ListNodeData;
@@ -326,6 +430,35 @@ const evaluateNodePreview = (
         }
       });
       return evaluateObjectPreview(data, overrides);
+    }
+    case 'relational': {
+      const data = node.data as RelationalOperatorNodeData;
+      const overrides: { left?: ScalarValue; right?: ScalarValue } = {};
+      const leftBinding = getBindingValue(getRelationalHandleId(node.id, 'left'));
+      if (leftBinding) {
+        const scalar = ensureScalar(leftBinding.value);
+        if (scalar === undefined) {
+          logicLogger.warn('Invalid relational left binding ignored', {
+            nodeId: node.id,
+            handleId: leftBinding.handleId
+          });
+        } else {
+          overrides.left = scalar;
+        }
+      }
+      const rightBinding = getBindingValue(getRelationalHandleId(node.id, 'right'));
+      if (rightBinding) {
+        const scalar = ensureScalar(rightBinding.value);
+        if (scalar === undefined) {
+          logicLogger.warn('Invalid relational right binding ignored', {
+            nodeId: node.id,
+            handleId: rightBinding.handleId
+          });
+        } else {
+          overrides.right = scalar;
+        }
+      }
+      return evaluateRelationalPreview(data, overrides);
     }
     default:
       return UNKNOWN_PREVIEW;

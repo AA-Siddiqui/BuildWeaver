@@ -1,8 +1,11 @@
 import {
   ArithmeticNodeData,
+  ConditionalNodeData,
   DummyNodeData,
   ListNodeData,
+  LogicalOperatorNodeData,
   ObjectNodeData,
+  RelationalOperatorNodeData,
   ScalarValue,
   StringNodeData,
   StringNodeInputRole
@@ -36,6 +39,39 @@ export const formatScalar = (
   return String(value);
 };
 
+const coerceNumberValue = (value: ScalarValue | undefined): number | undefined => {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === 'string') {
+    const parsed = Number(value);
+    return Number.isNaN(parsed) ? undefined : parsed;
+  }
+  if (typeof value === 'boolean') {
+    return value ? 1 : 0;
+  }
+  return undefined;
+};
+
+const areScalarValuesEqual = (left: ScalarValue | undefined, right: ScalarValue | undefined): boolean => {
+  if (left === right) {
+    return true;
+  }
+  if (typeof left !== typeof right) {
+    return false;
+  }
+  try {
+    return JSON.stringify(left) === JSON.stringify(right);
+  } catch (error) {
+    logicLogger.warn('Failed to compare scalar values', {
+      leftType: typeof left,
+      rightType: typeof right,
+      message: (error as Error).message
+    });
+    return false;
+  }
+};
+
 const requireSamples = <T>(values: (T | null | undefined)[]): values is T[] => {
   const allProvided = values.every((value) => value !== null && value !== undefined);
   return allProvided;
@@ -47,6 +83,45 @@ export const evaluateDummyPreview = (data: DummyNodeData): NodePreview => {
     heading: `${data.sample.type} sample`,
     summary: formatScalar(data.sample.value as ScalarValue | ScalarValue[] | Record<string, ScalarValue>),
     value: data.sample.value
+  };
+};
+
+export interface ConditionalInputOverrides {
+  condition?: boolean;
+  truthy?: ScalarValue;
+  falsy?: ScalarValue;
+}
+
+export const evaluateConditionalPreview = (
+  data: ConditionalNodeData,
+  overrides: ConditionalInputOverrides = {}
+): NodePreview<ScalarValue | undefined> => {
+  const condition = overrides.condition ?? data.conditionSample;
+  if (condition === undefined) {
+    return {
+      state: 'unknown',
+      heading: 'Awaiting condition',
+      summary: 'Provide a boolean sample or connect a condition input.'
+    };
+  }
+
+  const truthyValue = overrides.truthy ?? data.trueValue;
+  const falsyValue = overrides.falsy ?? data.falseValue;
+  const selectedValue = condition ? truthyValue : falsyValue;
+
+  if (selectedValue === undefined) {
+    return {
+      state: 'unknown',
+      heading: condition ? 'Missing true branch' : 'Missing false branch',
+      summary: 'Add a sample value or connect another node.'
+    };
+  }
+
+  return {
+    state: 'ready',
+    heading: condition ? 'True branch' : 'False branch',
+    summary: formatScalar(selectedValue as ScalarValue),
+    value: selectedValue
   };
 };
 
@@ -118,6 +193,59 @@ export const evaluateArithmeticPreview = (
       summary: 'Unable to evaluate with provided samples.'
     };
   }
+};
+
+export interface LogicalInputOverrides {
+  primary?: boolean;
+  secondary?: boolean;
+}
+
+export const evaluateLogicalOperatorPreview = (
+  data: LogicalOperatorNodeData,
+  overrides: LogicalInputOverrides = {}
+): NodePreview<boolean> => {
+  const primary = overrides.primary ?? data.primarySample;
+  if (primary === undefined) {
+    return {
+      state: 'unknown',
+      heading: 'Awaiting primary input',
+      summary: 'Connect or sample the first boolean input.'
+    };
+  }
+
+  if (data.operation === 'not') {
+    return {
+      state: 'ready',
+      heading: 'NOT',
+      summary: (!primary).toString(),
+      value: !primary
+    };
+  }
+
+  const secondary = overrides.secondary ?? data.secondarySample;
+  if (secondary === undefined) {
+    return {
+      state: 'unknown',
+      heading: 'Awaiting secondary input',
+      summary: 'Connect or sample the second boolean input.'
+    };
+  }
+
+  let value = false;
+  if (data.operation === 'and') {
+    value = Boolean(primary && secondary);
+  } else if (data.operation === 'or') {
+    value = Boolean(primary || secondary);
+  } else {
+    logicLogger.warn('Unknown logical operator encountered', { operation: data.operation });
+  }
+
+  return {
+    state: 'ready',
+    heading: data.operation.toUpperCase(),
+    summary: value.toString(),
+    value
+  };
 };
 
 export type StringInputOverrides = Record<string, string | undefined>;
@@ -327,6 +455,85 @@ export const evaluateListPreview = (
     logicLogger.error('Failed to generate list preview', { error: (error as Error).message });
     return { state: 'error', heading: 'Error', summary: 'Unable to evaluate list operation.' };
   }
+};
+
+export interface RelationalInputOverrides {
+  left?: ScalarValue;
+  right?: ScalarValue;
+}
+
+export const evaluateRelationalPreview = (
+  data: RelationalOperatorNodeData,
+  overrides: RelationalInputOverrides = {}
+): NodePreview<boolean> => {
+  const left = overrides.left ?? data.leftSample;
+  const right = overrides.right ?? data.rightSample;
+
+  if (left === undefined || right === undefined) {
+    return {
+      state: 'unknown',
+      heading: 'Awaiting operands',
+      summary: 'Connect both operands or enter sample values.'
+    };
+  }
+
+  const leftNumber = coerceNumberValue(left);
+  const rightNumber = coerceNumberValue(right);
+
+  let result = false;
+  if (leftNumber !== undefined && rightNumber !== undefined) {
+    switch (data.operation) {
+      case 'gt':
+        result = leftNumber > rightNumber;
+        break;
+      case 'gte':
+        result = leftNumber >= rightNumber;
+        break;
+      case 'lt':
+        result = leftNumber < rightNumber;
+        break;
+      case 'lte':
+        result = leftNumber <= rightNumber;
+        break;
+      case 'eq':
+        result = leftNumber === rightNumber;
+        break;
+      case 'neq':
+        result = leftNumber !== rightNumber;
+        break;
+      default:
+        result = false;
+    }
+  } else if (data.operation === 'eq' || data.operation === 'neq') {
+    const equality = areScalarValuesEqual(left as ScalarValue, right as ScalarValue);
+    result = data.operation === 'eq' ? equality : !equality;
+  } else {
+    const leftString = formatScalar(left as ScalarValue);
+    const rightString = formatScalar(right as ScalarValue);
+    switch (data.operation) {
+      case 'gt':
+        result = leftString > rightString;
+        break;
+      case 'gte':
+        result = leftString >= rightString;
+        break;
+      case 'lt':
+        result = leftString < rightString;
+        break;
+      case 'lte':
+        result = leftString <= rightString;
+        break;
+      default:
+        result = false;
+    }
+  }
+
+  return {
+    state: 'ready',
+    heading: data.operation.toUpperCase(),
+    summary: result.toString(),
+    value: result
+  };
 };
 
 const resolvePath = (source: Record<string, ScalarValue>, path?: string): ScalarValue | undefined => {

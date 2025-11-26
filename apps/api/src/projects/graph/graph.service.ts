@@ -14,7 +14,16 @@ import {
 @Injectable()
 export class ProjectGraphService {
   private readonly logger = new Logger(ProjectGraphService.name);
-  private readonly allowedNonPageNodes: LogicEditorNodeType[] = ['dummy', 'arithmetic', 'string', 'list', 'object'];
+  private readonly allowedNonPageNodes: LogicEditorNodeType[] = [
+    'dummy',
+    'arithmetic',
+    'string',
+    'list',
+    'object',
+    'conditional',
+    'logical',
+    'relational'
+  ];
 
   constructor(private readonly database: DatabaseService) {}
 
