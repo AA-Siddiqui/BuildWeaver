@@ -10,7 +10,8 @@ const queryClient = new QueryClient();
 
 const bootstrapEnv = () => {
   if (typeof window !== 'undefined') {
-    window.__APP_API_BASE_URL__ = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:3000';
+    const apiUrl = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:3000';
+    window.__APP_API_BASE_URL__ = apiUrl;
   }
 };
 
