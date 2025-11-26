@@ -62,10 +62,35 @@ export class ProjectGraphService {
       .where(eq(projectPages.projectId, projectId));
     const pageIds = new Set(pages.map((page) => page.id));
 
-    const sanitizedNodes = payload.nodes.filter((node) => this.isNodeAllowed(node, pageIds));
+    const rejectedNodes: { id: string; type: string; reason: string }[] = [];
+    const sanitizedNodes = payload.nodes.filter((node) => {
+      const evaluation = this.evaluateNodeAllowance(node, pageIds);
+      if (!evaluation.allowed) {
+        rejectedNodes.push({ id: node.id, type: node.type, reason: evaluation.reason ?? 'unknown' });
+        return false;
+      }
+      return true;
+    });
     const nodeIds = new Set(sanitizedNodes.map((node) => node.id));
-    const sanitizedEdges = payload.edges.filter((edge) => this.isEdgeAllowed(edge, nodeIds));
+    const rejectedEdges: { id: string; source: string; target: string; reason: string }[] = [];
+    const sanitizedEdges = payload.edges.filter((edge) => {
+      const allowed = this.isEdgeAllowed(edge, nodeIds);
+      if (!allowed) {
+        rejectedEdges.push({ id: edge.id, source: edge.source, target: edge.target, reason: this.describeEdgeRejection(edge, nodeIds) });
+      }
+      return allowed;
+    });
     const snapshot: ProjectGraphSnapshot = { nodes: sanitizedNodes, edges: sanitizedEdges };
+    if (rejectedNodes.length) {
+      this.logger.warn(
+        `Rejected ${rejectedNodes.length} nodes during graph persist project=${projectId} details=${JSON.stringify(rejectedNodes)}`
+      );
+    }
+    if (rejectedEdges.length) {
+      this.logger.warn(
+        `Rejected ${rejectedEdges.length} edges during graph persist project=${projectId} details=${JSON.stringify(rejectedEdges)}`
+      );
+    }
     this.logger.debug(
       `Sanitized logic graph nodes=${sanitizedNodes.length}/${payload.nodes.length} edges=${sanitizedEdges.length}/${payload.edges.length}`
     );
@@ -87,15 +112,43 @@ export class ProjectGraphService {
     return composed;
   }
 
-  private isNodeAllowed(node: LogicEditorNode, allowedPageIds: Set<string>): boolean {
+  private evaluateNodeAllowance(
+    node: LogicEditorNode,
+    allowedPageIds: Set<string>
+  ): { allowed: boolean; reason?: string } {
     if (node.type === 'page') {
-      return Boolean(node.data && 'pageId' in node.data && allowedPageIds.has(node.data.pageId));
+      const pageData = node.data as Partial<PageNodeData> | undefined;
+      if (!pageData || !pageData.pageId) {
+        return { allowed: false, reason: 'missing_page_reference' };
+      }
+      if (!allowedPageIds.has(pageData.pageId)) {
+        return { allowed: false, reason: 'page_not_found' };
+      }
+      return { allowed: true };
     }
-    return this.allowedNonPageNodes.includes(node.type);
+    if (!this.allowedNonPageNodes.includes(node.type)) {
+      return { allowed: false, reason: 'unsupported_type' };
+    }
+    return { allowed: true };
   }
 
   private isEdgeAllowed(edge: LogicEditorEdge, allowedNodeIds: Set<string>): boolean {
     return allowedNodeIds.has(edge.source) && allowedNodeIds.has(edge.target);
+  }
+
+  private describeEdgeRejection(edge: LogicEditorEdge, allowedNodeIds: Set<string>): string {
+    const missingSource = !allowedNodeIds.has(edge.source);
+    const missingTarget = !allowedNodeIds.has(edge.target);
+    if (missingSource && missingTarget) {
+      return 'source_and_target_missing';
+    }
+    if (missingSource) {
+      return 'missing_source';
+    }
+    if (missingTarget) {
+      return 'missing_target';
+    }
+    return 'unknown';
   }
 
   private composeGraph(graph: ProjectGraphSnapshot, pages: ProjectPage[]): ProjectGraphSnapshot {

@@ -4,13 +4,16 @@ import {
   LogicEditorEdge,
   LogicEditorNode,
   ListOperation,
+  LogicalOperation,
   ObjectOperation,
   ObjectValueSampleKind,
+  RelationalOperation,
+  ScalarSampleKind,
   StringNodeInputRole,
   StringOperation
 } from '@buildweaver/libs';
 import { Type } from 'class-transformer';
-import { IsArray, IsIn, IsNumber, IsObject, IsOptional, IsString, ValidateNested } from 'class-validator';
+import { IsArray, IsBoolean, IsIn, IsNumber, IsObject, IsOptional, IsString, ValidateIf, ValidateNested } from 'class-validator';
 
 const LOGIC_OPERATIONS = [
   'add',
@@ -36,7 +39,16 @@ const LOGIC_OPERATIONS = [
   'get',
   'keys',
   'values',
-  'pick'
+  'pick',
+  'and',
+  'or',
+  'not',
+  'gt',
+  'gte',
+  'lt',
+  'lte',
+  'eq',
+  'neq'
 ] as const;
 
 class GraphNodePositionDto {
@@ -125,7 +137,7 @@ class StringOptionsDto {
 }
 
 class GraphNodeDataDto {
-  @IsIn(['dummy', 'page', 'arithmetic', 'string', 'list', 'object'])
+  @IsIn(['dummy', 'page', 'arithmetic', 'string', 'list', 'object', 'conditional', 'logical', 'relational'])
   kind!: LogicEditorNode['type'];
 
   @IsOptional()
@@ -160,7 +172,13 @@ class GraphNodeDataDto {
 
   @IsOptional()
   @IsIn(LOGIC_OPERATIONS)
-  operation?: ArithmeticOperation | StringOperation | ListOperation | ObjectOperation;
+  operation?:
+    | ArithmeticOperation
+    | StringOperation
+    | ListOperation
+    | ObjectOperation
+    | LogicalOperation
+    | RelationalOperation;
 
   @IsOptional()
   @IsNumber()
@@ -186,12 +204,22 @@ class GraphNodeDataDto {
   sort?: 'asc' | 'desc';
 
   @IsOptional()
+  @ValidateIf((_, value) => Array.isArray(value))
   @IsArray()
-  primarySample?: Array<string | number | boolean | null>;
+  primarySample?: Array<string | number | boolean | null> | boolean;
 
   @IsOptional()
+  @ValidateIf((_, value) => Array.isArray(value))
   @IsArray()
-  secondarySample?: Array<string | number | boolean | null>;
+  secondarySample?: Array<string | number | boolean | null> | boolean;
+
+  @IsOptional()
+  @IsNumber()
+  startSample?: number | null;
+
+  @IsOptional()
+  @IsNumber()
+  endSample?: number | null;
 
   @IsOptional()
   @IsObject()
@@ -216,13 +244,45 @@ class GraphNodeDataDto {
   @IsOptional()
   @IsString()
   path?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  conditionSample?: boolean;
+
+  @IsOptional()
+  trueValue?: unknown;
+
+  @IsOptional()
+  falseValue?: unknown;
+
+  @IsOptional()
+  @IsIn(['string', 'number', 'boolean', 'list', 'object'])
+  trueValueKind?: ScalarSampleKind;
+
+  @IsOptional()
+  @IsIn(['string', 'number', 'boolean', 'list', 'object'])
+  falseValueKind?: ScalarSampleKind;
+
+  @IsOptional()
+  leftSample?: unknown;
+
+  @IsOptional()
+  rightSample?: unknown;
+
+  @IsOptional()
+  @IsIn(['string', 'number', 'boolean', 'list', 'object'])
+  leftSampleKind?: ScalarSampleKind;
+
+  @IsOptional()
+  @IsIn(['string', 'number', 'boolean', 'list', 'object'])
+  rightSampleKind?: ScalarSampleKind;
 }
 
 class GraphNodeDto {
   @IsString()
   id!: string;
 
-  @IsIn(['dummy', 'page', 'arithmetic', 'string', 'list', 'object'])
+  @IsIn(['dummy', 'page', 'arithmetic', 'string', 'list', 'object', 'conditional', 'logical', 'relational'])
   type!: LogicEditorNode['type'];
 
   @ValidateNested()

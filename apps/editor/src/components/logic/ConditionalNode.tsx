@@ -49,10 +49,21 @@ export const ConditionalNode = ({ id, data }: NodeProps<ConditionalNodeData>) =>
     updateData((prev) => ({ ...prev, conditionSample: value }));
   };
 
+  const logValueKindChange = (key: ValueKey, kind: ScalarSampleKind) => {
+    logicLogger.info('Conditional sample kind changed', { nodeId: id, key, kind });
+  };
+
   const handleValueKindChange = (key: ValueKey, kind: ScalarSampleKind) => {
     const field = VALUE_KIND_KEYS[key];
-    logicLogger.info('Conditional sample kind changed', { nodeId: id, key, kind });
+    logValueKindChange(key, kind);
     updateData((prev) => ({ ...prev, [field]: kind }));
+  };
+
+  const handleValueKindCommit = (key: ValueKey, kind: ScalarSampleKind, value: ScalarValue) => {
+    const field = VALUE_KIND_KEYS[key];
+    logValueKindChange(key, kind);
+    logicLogger.debug('Conditional sample reset for kind change', { nodeId: id, key });
+    updateData((prev) => ({ ...prev, [field]: kind, [key]: value }));
   };
 
   const handleValueChange = (key: ValueKey, value: ScalarValue) => {
@@ -88,6 +99,7 @@ export const ConditionalNode = ({ id, data }: NodeProps<ConditionalNodeData>) =>
           valueKind={getValueKind(data[VALUE_KIND_KEYS[key]])}
           onValueKindChange={(kind) => handleValueKindChange(key, kind)}
           onValueChange={(value) => handleValueChange(key, value)}
+          onValueKindCommit={({ kind, value }) => handleValueKindCommit(key, kind, value)}
         />
       </div>
     );

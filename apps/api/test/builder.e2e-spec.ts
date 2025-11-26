@@ -126,6 +126,74 @@ describe('Builder surfaces (e2e)', () => {
     expect(refreshedPageNode.data.inputs[0].label).toBe('Hero Title');
   });
 
+  it('persists conditional, logical, and relational nodes in the graph', async () => {
+    expect(landingPageId).toBeDefined();
+    const nodes: ProjectGraphSnapshot['nodes'] = [
+      {
+        id: `page-${landingPageId}`,
+        type: 'page',
+        position: { x: 100, y: 0 },
+        data: {
+          kind: 'page',
+          pageId: landingPageId,
+          pageName: 'Landing',
+          inputs: []
+        }
+      },
+      {
+        id: `conditional-${randomUUID()}`,
+        type: 'conditional',
+        position: { x: -150, y: -50 },
+        data: {
+          kind: 'conditional',
+          label: 'Gate',
+          conditionSample: true,
+          trueValue: 'Enabled',
+          falseValue: 'Disabled',
+          trueValueKind: 'string',
+          falseValueKind: 'string'
+        }
+      },
+      {
+        id: `logical-${randomUUID()}`,
+        type: 'logical',
+        position: { x: -150, y: 50 },
+        data: {
+          kind: 'logical',
+          label: 'All Good',
+          operation: 'and',
+          primarySample: true,
+          secondarySample: false
+        }
+      },
+      {
+        id: `relational-${randomUUID()}`,
+        type: 'relational',
+        position: { x: -150, y: 150 },
+        data: {
+          kind: 'relational',
+          label: 'Compare',
+          operation: 'gt',
+          leftSample: 10,
+          rightSample: 4,
+          leftSampleKind: 'number',
+          rightSampleKind: 'number'
+        }
+      }
+    ];
+
+    const saveGraphRes = await request(app.getHttpServer())
+      .put(`/projects/${projectId}/graph`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ nodes, edges: [] });
+
+    expect(saveGraphRes.status).toBe(200);
+    const savedNodes = saveGraphRes.body.data.graph.nodes;
+    expect(savedNodes.find((node: { type: string }) => node.type === 'conditional')).toBeDefined();
+    expect(savedNodes.find((node: { type: string }) => node.type === 'logical')).toBeDefined();
+    expect(savedNodes.find((node: { type: string }) => node.type === 'relational')).toBeDefined();
+  });
+
   it('persists builder state and returns it via the API', async () => {
     expect(landingPageId).toBeDefined();
     const builderState = {

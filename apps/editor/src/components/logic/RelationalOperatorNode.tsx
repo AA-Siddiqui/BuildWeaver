@@ -51,10 +51,22 @@ export const RelationalOperatorNode = ({ id, data }: NodeProps<RelationalOperato
     updateData((prev) => ({ ...prev, operation }));
   };
 
+  const logOperandKindChange = (role: RelationalInputRole, kind: ScalarSampleKind) => {
+    logicLogger.info('Relational operand kind changed', { nodeId: id, role, kind });
+  };
+
   const handleValueKindChange = (role: RelationalInputRole, kind: ScalarSampleKind) => {
     const key = ROLE_TO_KIND_KEY[role];
-    logicLogger.info('Relational operand kind changed', { nodeId: id, role, kind });
+    logOperandKindChange(role, kind);
     updateData((prev) => ({ ...prev, [key]: kind }));
+  };
+
+  const handleValueKindCommit = (role: RelationalInputRole, kind: ScalarSampleKind, value: ScalarValue) => {
+    const kindKey = ROLE_TO_KIND_KEY[role];
+    const valueKey = ROLE_TO_SAMPLE_KEY[role];
+    logOperandKindChange(role, kind);
+    logicLogger.debug('Relational operand sample reset for kind change', { nodeId: id, role });
+    updateData((prev) => ({ ...prev, [kindKey]: kind, [valueKey]: value }));
   };
 
   const handleValueChange = (role: RelationalInputRole, value: ScalarValue) => {
@@ -95,6 +107,7 @@ export const RelationalOperatorNode = ({ id, data }: NodeProps<RelationalOperato
               valueKind={ensureKind(data[kindKey])}
               onValueKindChange={(kind) => handleValueKindChange(role, kind)}
               onValueChange={(value) => handleValueChange(role, value)}
+              onValueKindCommit={({ kind, value }) => handleValueKindCommit(role, kind, value)}
             />
           </div>
         )}

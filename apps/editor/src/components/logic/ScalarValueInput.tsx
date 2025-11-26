@@ -14,6 +14,7 @@ interface ScalarValueInputProps {
   value?: ScalarValue;
   onValueKindChange: (next: ScalarValueKind) => void;
   onValueChange: (next: ScalarValue) => void;
+  onValueKindCommit?: (next: { kind: ScalarValueKind; value: ScalarValue }) => void;
 }
 
 const DEFAULT_VALUES: Record<ScalarValueKind, ScalarValue> = {
@@ -65,7 +66,8 @@ export const ScalarValueInput = ({
   valueKind,
   value,
   onValueKindChange,
-  onValueChange
+  onValueChange,
+  onValueKindCommit
 }: ScalarValueInputProps) => {
   const normalizedKind = valueKind ?? 'string';
   const coercedValue = useMemo(() => coerceValue(value, normalizedKind), [value, normalizedKind]);
@@ -77,18 +79,41 @@ export const ScalarValueInput = ({
     return stringifyScalarList(listValue);
   }, [coercedValue, normalizedKind]);
 
+  const numberSampleString = useMemo(() => {
+    if (normalizedKind !== 'number') {
+      return '';
+    }
+    return typeof coercedValue === 'number' && Number.isFinite(coercedValue)
+      ? String(coercedValue)
+      : '';
+  }, [coercedValue, normalizedKind]);
+
   const [listDraft, setListDraft] = useTextDraft(listSampleString, {
     nodeId,
     field: `${fieldKey}.list` as const
   });
+
+  const [numberDraft, setNumberDraft] = useTextDraft(
+    numberSampleString,
+    {
+      nodeId,
+      field: `${fieldKey}.number` as const
+    },
+    { preserveLocalEdits: true }
+  );
 
   const handleTypeChange = (nextKind: ScalarValueKind) => {
     if (nextKind === normalizedKind) {
       return;
     }
     logicLogger.info('Scalar value kind changed', { nodeId, fieldKey, kind: nextKind });
+    const nextValue = ensureScalarClone(DEFAULT_VALUES[nextKind]);
+    if (onValueKindCommit) {
+      onValueKindCommit({ kind: nextKind, value: nextValue });
+      return;
+    }
     onValueKindChange(nextKind);
-    onValueChange(ensureScalarClone(DEFAULT_VALUES[nextKind]));
+    onValueChange(nextValue);
   };
 
   const handleStringChange = (next: string) => {
@@ -97,6 +122,7 @@ export const ScalarValueInput = ({
   };
 
   const handleNumberChange = (next: string) => {
+    setNumberDraft(next);
     const parsed = next === '' ? null : Number(next);
     const resolved = parsed === null || Number.isNaN(parsed) ? null : parsed;
     logicLogger.debug('Scalar number updated', { nodeId, fieldKey, value: resolved });
@@ -122,10 +148,11 @@ export const ScalarValueInput = ({
         return (
           <input
             aria-label="Numeric value"
-            type="number"
+            type="text"
+            inputMode="decimal"
             step="any"
             className="w-full min-w-0 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-white"
-            value={typeof coercedValue === 'number' ? coercedValue : ''}
+            value={numberDraft}
             onChange={(event) => handleNumberChange(event.target.value)}
           />
         );
