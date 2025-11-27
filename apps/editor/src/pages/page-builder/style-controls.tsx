@@ -6,11 +6,19 @@ import { isDynamicBindingValue } from './dynamic-binding';
 import { DynamicFieldControl, createDynamicSelectField, type StaticControlRendererProps } from './dynamic-field-control';
 
 const STYLE_LOG_PREFIX = '[PageBuilder:StyleControls]';
-const HEX_COLOR_PATTERN = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/;
 const ATTRIBUTE_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_.:-]*$/;
 const DEFAULT_COLOR_FALLBACK = '#111827';
 const GRADIENT_PREFIXES = ['linear-gradient', 'radial-gradient'] as const;
 const MIN_GRADIENT_STOPS = 2;
+const HEX_SHORT_PATTERN = /^#[0-9a-fA-F]{3}$/;
+const HEX_LONG_PATTERN = /^#[0-9a-fA-F]{6}$/;
+const HEX_WITH_ALPHA_PATTERN = /^#[0-9a-fA-F]{8}$/;
+const RGB_FUNCTION_PATTERN = /^rgba?\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})(?:\s*,\s*(0|1|0?\.\d+))?\s*\)$/i;
+
+type NormalizedColor = {
+  hex: string;
+  alpha: number;
+};
 
 export type GradientType = (typeof GRADIENT_PREFIXES)[number] extends `${infer Prefix}-gradient` ? Prefix : never;
 export type GradientStop = {
@@ -64,8 +72,6 @@ const safeRandomId = () => {
   return Math.random().toString(36).slice(2, 9);
 };
 
-const isValidHexColor = (value?: string): value is string => HEX_COLOR_PATTERN.test(value ?? '');
-
 const clamp = (value: number, min: number, max: number) => {
   if (Number.isNaN(value)) {
     return min;
@@ -73,8 +79,100 @@ const clamp = (value: number, min: number, max: number) => {
   return Math.min(Math.max(value, min), max);
 };
 
+const clampChannel = (value: number) => {
+  if (Number.isNaN(value)) {
+    return 0;
+  }
+  return Math.min(Math.max(value, 0), 255);
+};
+
+const clampAlpha = (value: number) => clamp(value, 0, 1);
 const clampAngle = (value: number) => clamp(value, 0, 360);
 const clampStopPosition = (value: number) => clamp(value, 0, 1);
+
+const expandShortHex = (value: string) => `#${value[1]}${value[1]}${value[2]}${value[2]}${value[3]}${value[3]}`;
+
+const normalizeHex = (value: string) => {
+  if (HEX_SHORT_PATTERN.test(value)) {
+    return expandShortHex(value).toLowerCase();
+  }
+  if (HEX_LONG_PATTERN.test(value)) {
+    return value.toLowerCase();
+  }
+  return value.toLowerCase();
+};
+
+const hexToRgb = (hex: string) => {
+  const normalized = normalizeHex(hex);
+  return {
+    r: parseInt(normalized.slice(1, 3), 16),
+    g: parseInt(normalized.slice(3, 5), 16),
+    b: parseInt(normalized.slice(5, 7), 16)
+  };
+};
+
+const rgbToHex = (r: number, g: number, b: number) =>
+  `#${[r, g, b]
+    .map((channel) => clampChannel(channel).toString(16).padStart(2, '0'))
+    .join('')}` as const;
+
+const parseHexColor = (value: string): NormalizedColor | null => {
+  if (HEX_SHORT_PATTERN.test(value) || HEX_LONG_PATTERN.test(value)) {
+    return { hex: normalizeHex(value), alpha: 1 };
+  }
+  if (HEX_WITH_ALPHA_PATTERN.test(value)) {
+    const normalized = value.toLowerCase();
+    const hex = normalizeHex(`#${normalized.slice(1, 7)}`);
+    const alpha = clampAlpha(parseInt(normalized.slice(7, 9), 16) / 255);
+    return { hex, alpha };
+  }
+  return null;
+};
+
+const parseRgbFunction = (value: string): NormalizedColor | null => {
+  const match = value.match(RGB_FUNCTION_PATTERN);
+  if (!match) {
+    return null;
+  }
+  const [, rString, gString, bString, alphaString] = match;
+  const r = clampChannel(parseInt(rString ?? '0', 10));
+  const g = clampChannel(parseInt(gString ?? '0', 10));
+  const b = clampChannel(parseInt(bString ?? '0', 10));
+  const alpha = alphaString === undefined ? 1 : clampAlpha(parseFloat(alphaString));
+  return {
+    hex: rgbToHex(r, g, b),
+    alpha
+  };
+};
+
+const parseSolidColor = (value?: string): NormalizedColor | null => {
+  if (!value) {
+    return null;
+  }
+  const trimmed = value.trim();
+  return parseHexColor(trimmed) ?? parseRgbFunction(trimmed);
+};
+
+const formatColorWithAlpha = (hex: string, alpha: number) => {
+  const normalizedHex = normalizeHex(hex);
+  const normalizedAlpha = clampAlpha(alpha);
+  if (normalizedAlpha >= 1) {
+    return normalizedHex;
+  }
+  const { r, g, b } = hexToRgb(normalizedHex);
+  const roundedAlpha = Math.round(normalizedAlpha * 100) / 100;
+  return `rgba(${r}, ${g}, ${b}, ${roundedAlpha})`;
+};
+
+const resolveColorValue = (value?: string, fallback = DEFAULT_COLOR_FALLBACK) => {
+  const parsed = parseSolidColor(value) ?? parseSolidColor(fallback);
+  if (!parsed) {
+    return DEFAULT_COLOR_FALLBACK;
+  }
+  return formatColorWithAlpha(parsed.hex, parsed.alpha);
+};
+
+const readColorAlpha = (value?: string) => parseSolidColor(value)?.alpha ?? 1;
 
 const splitGradientArgs = (input: string): string[] => {
   const segments: string[] = [];
@@ -106,7 +204,7 @@ const normalizeStops = (stops: GradientStop[]): GradientStop[] => {
   const normalized = stops
     .map((stop) => ({
       ...stop,
-      color: isValidHexColor(stop.color) ? stop.color : DEFAULT_COLOR_FALLBACK,
+      color: resolveColorValue(stop.color, DEFAULT_COLOR_FALLBACK),
       position: clampStopPosition(stop.position)
     }))
     .sort((a, b) => a.position - b.position);
@@ -149,7 +247,7 @@ export const createDefaultGradientConfig = (seedColor?: string): GradientConfig 
     type: 'linear',
     angle: 90,
     stops: [
-      { id: safeRandomId(), color: seedColor && isValidHexColor(seedColor) ? seedColor : DEFAULT_COLOR_FALLBACK, position: 0 },
+      { id: safeRandomId(), color: resolveColorValue(seedColor, DEFAULT_COLOR_FALLBACK), position: 0 },
       { id: safeRandomId(), color: '#F9E7B2', position: 1 }
     ]
   });
@@ -159,7 +257,8 @@ const formatStopPosition = (position: number) => {
   return percent % 1 === 0 ? `${percent}%` : `${percent.toFixed(2)}%`;
 };
 
-const GRADIENT_STOP_PATTERN = /(#[0-9a-fA-F]{3,6})\s+([0-9]*\.?[0-9]+)%$/;
+const RGB_FUNCTION_STOP_SOURCE = 'rgba?\\(\\s*(?:\\d{1,3}\\s*,\\s*){2}\\d{1,3}(?:\\s*,\\s*(?:0|1|0?\\.\\d+))?\\s*\\)';
+const GRADIENT_STOP_PATTERN = new RegExp(`(#[0-9a-fA-F]{3,8}|${RGB_FUNCTION_STOP_SOURCE})\\s+([0-9]*\\.?[0-9]+)%$`, 'i');
 
 export const isGradientValue = (value?: string): boolean => {
   if (!value) {
@@ -198,9 +297,13 @@ export const parseGradientValue = (value?: string): GradientConfig | null => {
         if (!match) {
           return null;
         }
+        const parsedColor = parseSolidColor(match[1]);
+        if (!parsedColor) {
+          return null;
+        }
         return {
           id: safeRandomId(),
-          color: match[1],
+          color: formatColorWithAlpha(parsedColor.hex, parsedColor.alpha),
           position: clampStopPosition(parseFloat(match[2]) / 100)
         };
       })
@@ -226,9 +329,13 @@ export const parseGradientValue = (value?: string): GradientConfig | null => {
         if (!match) {
           return null;
         }
+        const parsedColor = parseSolidColor(match[1]);
+        if (!parsedColor) {
+          return null;
+        }
         return {
           id: safeRandomId(),
-          color: match[1],
+          color: formatColorWithAlpha(parsedColor.hex, parsedColor.alpha),
           position: clampStopPosition(parseFloat(match[2]) / 100)
         };
       })
@@ -257,8 +364,13 @@ export const stringifyGradientConfig = (config: GradientConfig): string => {
   return `linear-gradient(${normalized.angle}deg, ${stops})`;
 };
 
-export const deriveColorPickerValue = (value?: string, fallback = DEFAULT_COLOR_FALLBACK) =>
-  isValidHexColor(value) ? value : fallback;
+export const deriveColorPickerValue = (value?: string, fallback = DEFAULT_COLOR_FALLBACK) => {
+  const parsed = parseSolidColor(value) ?? parseSolidColor(fallback);
+  if (!parsed) {
+    return DEFAULT_COLOR_FALLBACK;
+  }
+  return parsed.hex;
+};
 
 const createColorPickerField = ({ label, placeholder, fieldKey }: ColorPickerFieldConfig, bindingOptions: BindingOption[]): Field => ({
   type: 'custom',
@@ -978,14 +1090,36 @@ const GradientBuilder = ({
     if (readOnly) {
       return;
     }
-    if (!isValidHexColor(nextColor)) {
+    const parsed = parseSolidColor(nextColor);
+    if (!parsed) {
       logStyleControlEvent('Gradient stop color rejected', { fieldKey, stopId, value: nextColor });
       return;
     }
-    logStyleControlEvent('Gradient stop color changed', { fieldKey, stopId, value: nextColor });
+    const currentStop = config.stops.find((stop) => stop.id === stopId);
+    const existingAlpha = readColorAlpha(currentStop?.color);
+    const formatted = formatColorWithAlpha(parsed.hex, existingAlpha);
+    logStyleControlEvent('Gradient stop color changed', { fieldKey, stopId, value: formatted, alpha: existingAlpha });
     onConfigChange((prev) => ({
       ...prev,
-      stops: prev.stops.map((stop) => (stop.id === stopId ? { ...stop, color: nextColor } : stop))
+      stops: prev.stops.map((stop) => (stop.id === stopId ? { ...stop, color: formatted } : stop))
+    }));
+  };
+
+  const handleStopAlphaChange = (stopId: string, nextAlphaPercent: number) => {
+    if (readOnly) {
+      return;
+    }
+    const normalizedAlpha = clampAlpha(nextAlphaPercent / 100);
+    logStyleControlEvent('Gradient stop alpha changed', { fieldKey, stopId, alpha: normalizedAlpha });
+    onConfigChange((prev) => ({
+      ...prev,
+      stops: prev.stops.map((stop) => {
+        if (stop.id !== stopId) {
+          return stop;
+        }
+        const baseHex = deriveColorPickerValue(stop.color);
+        return { ...stop, color: formatColorWithAlpha(baseHex, normalizedAlpha) };
+      })
     }));
   };
 
@@ -1072,13 +1206,16 @@ const GradientBuilder = ({
           </button>
         </div>
         <div className="space-y-2">
-          {orderedStops.map((stop, index) => (
-            <div key={stop.id} className="max-w-full min-w-full flex flex-col gap-2 rounded-lg border border-gray-200 p-3">
-              <div className="w-full flex items-center gap-3">
+          {orderedStops.map((stop, index) => {
+            const alphaPercent = Math.round(readColorAlpha(stop.color) * 100);
+            const alphaInputId = `${fieldKey}-gradient-stop-${stop.id}-alpha`;
+            return (
+              <div key={stop.id} className="max-w-full min-w-full flex flex-col gap-3 rounded-lg border border-gray-200 p-3">
+                <div className="w-full flex flex-wrap items-center gap-3">
                 <input
                   type="color"
                   className="h-9 aspect-square cursor-pointer rounded border border-gray-300 bg-white p-0 disabled:cursor-not-allowed"
-                  value={stop.color}
+                  value={deriveColorPickerValue(stop.color)}
                   onChange={(event) => handleStopColorChange(stop.id, event.target.value)}
                   aria-label={`Color stop ${index + 1} color`}
                   disabled={readOnly}
@@ -1103,8 +1240,29 @@ const GradientBuilder = ({
                   Remove
                 </button>
               </div>
-            </div>
-          ))}
+                <div className="flex flex-col gap-1">
+                  <label
+                    htmlFor={alphaInputId}
+                    className="text-[0.6rem] uppercase tracking-[0.3em] text-gray-400"
+                  >
+                    Alpha stop {index + 1} ({alphaPercent}%)
+                  </label>
+                  <input
+                    id={alphaInputId}
+                    type="range"
+                    min={0}
+                    max={100}
+                    step={1}
+                    className="w-full"
+                    value={alphaPercent}
+                    onChange={(event) => handleStopAlphaChange(stop.id, parseFloat(event.target.value))}
+                    aria-label={`Alpha stop ${index + 1}`}
+                    disabled={readOnly}
+                  />
+                </div>
+              </div>
+            );
+          })}
         </div>
       </div>
       <div className="space-y-1">
@@ -1135,10 +1293,16 @@ const ColorPickerStaticControl = ({
   const colorInputId = `${inputId}-color`;
   const textInputId = `${inputId}-text`;
   const modeSelectId = `${inputId}-mode`;
+  const alphaInputId = `${inputId}-alpha`;
   const [colorMode, setColorMode] = useState<'solid' | 'gradient'>(() => (isGradientValue(value) ? 'gradient' : 'solid'));
-  const [gradientConfig, setGradientConfig] = useState<GradientConfig>(() =>
-    parseGradientValue(value) ?? createDefaultGradientConfig(value && isValidHexColor(value) ? value : undefined)
-  );
+  const [gradientConfig, setGradientConfig] = useState<GradientConfig>(() => {
+    const parsedGradient = parseGradientValue(value);
+    if (parsedGradient) {
+      return parsedGradient;
+    }
+    const seedColor = parseSolidColor(value) ? value : undefined;
+    return createDefaultGradientConfig(seedColor);
+  });
   const colorPickerValue = deriveColorPickerValue(value);
 
   useEffect(() => {
@@ -1164,9 +1328,11 @@ const ColorPickerStaticControl = ({
   };
 
   const handleColorChange = (event: ChangeEvent<HTMLInputElement>) => {
-    const next = event.target.value;
-    logStyleControlEvent('Color picker used', { fieldKey, value: next });
-    onChange(next);
+    const nextHex = event.target.value;
+    const currentAlpha = readColorAlpha(value);
+    const formatted = formatColorWithAlpha(nextHex, currentAlpha);
+    logStyleControlEvent('Color picker used', { fieldKey, value: formatted, alpha: currentAlpha });
+    onChange(formatted);
   };
 
   const handleTextChange = (event: ChangeEvent<HTMLInputElement>) => {
@@ -1195,10 +1361,13 @@ const ColorPickerStaticControl = ({
     setColorMode(nextMode);
     if (nextMode === 'gradient') {
       let nextConfig = gradientConfig;
-      if (isValidHexColor(value)) {
+      const parsedSolid = parseSolidColor(value);
+      if (parsedSolid) {
         nextConfig = normalizeGradientConfig({
           ...gradientConfig,
-          stops: gradientConfig.stops.map((stop, index) => (index === 0 ? { ...stop, color: value } : stop))
+          stops: gradientConfig.stops.map((stop, index) =>
+            index === 0 ? { ...stop, color: formatColorWithAlpha(parsedSolid.hex, parsedSolid.alpha) } : stop
+          )
         });
         setGradientConfig(nextConfig);
       }
@@ -1210,6 +1379,16 @@ const ColorPickerStaticControl = ({
     logStyleControlEvent('Color mode switched to solid', { fieldKey });
     onChange('');
   };
+
+  const handleAlphaChange = (event: ChangeEvent<HTMLInputElement>) => {
+    const percent = parseFloat(event.target.value);
+    const normalizedAlpha = clampAlpha(percent / 100);
+    const formatted = formatColorWithAlpha(colorPickerValue, normalizedAlpha);
+    logStyleControlEvent('Color alpha changed', { fieldKey, alpha: normalizedAlpha });
+    onChange(formatted);
+  };
+
+  const alphaPercent = Math.round(readColorAlpha(value) * 100);
 
   return (
     <div className="space-y-3">
@@ -1234,25 +1413,47 @@ const ColorPickerStaticControl = ({
         ) : null}
       </div>
       {colorMode === 'solid' ? (
-        <div className="flex items-center gap-3">
-          <input
-            id={colorInputId}
-            type="color"
-            className="h-9 w-10 cursor-pointer rounded border border-gray-300 bg-white p-0 disabled:cursor-not-allowed"
-            aria-label="Color picker"
-            value={colorPickerValue}
-            onChange={handleColorChange}
-            disabled={readOnly}
-          />
-          <input
-            id={textInputId}
-            type="text"
-            className="flex-1 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:border-bw-amber focus:outline-none"
-            value={value ?? ''}
-            onChange={handleTextChange}
-            placeholder={placeholder}
-            disabled={readOnly}
-          />
+        <div className="space-y-3">
+          <div className="flex items-center gap-3">
+            <input
+              id={colorInputId}
+              type="color"
+              className="h-9 w-10 cursor-pointer rounded border border-gray-300 bg-white p-0 disabled:cursor-not-allowed"
+              aria-label="Color picker"
+              value={colorPickerValue}
+              onChange={handleColorChange}
+              disabled={readOnly}
+            />
+            <input
+              id={textInputId}
+              type="text"
+              className="flex-1 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:border-bw-amber focus:outline-none"
+              value={value ?? ''}
+              onChange={handleTextChange}
+              placeholder={placeholder}
+              disabled={readOnly}
+            />
+          </div>
+          <div className="flex flex-col gap-1">
+            <label
+              htmlFor={alphaInputId}
+              className="text-[0.6rem] uppercase tracking-[0.3em] text-gray-400"
+            >
+              Alpha ({alphaPercent}%)
+            </label>
+            <input
+              id={alphaInputId}
+              type="range"
+              min={0}
+              max={100}
+              step={1}
+              className="w-full"
+              value={alphaPercent}
+              onChange={handleAlphaChange}
+              aria-label="Alpha"
+              disabled={readOnly}
+            />
+          </div>
         </div>
       ) : (
         <GradientBuilder

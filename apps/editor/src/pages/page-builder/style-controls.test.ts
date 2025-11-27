@@ -45,8 +45,9 @@ describe('style-controls helpers', () => {
   });
 
   it('normalizes invalid colors before hitting the native picker', () => {
-    expect(deriveColorPickerValue('#FFAA00')).toBe('#FFAA00');
-    expect(deriveColorPickerValue('rgba(0,0,0,0.2)')).toBe('#111827');
+    expect(deriveColorPickerValue('#FFAA00')).toBe('#ffaa00');
+    expect(deriveColorPickerValue('rgba(0,0,0,0.2)')).toBe('#000000');
+    expect(deriveColorPickerValue('#11182780')).toBe('#111827');
   });
 
   it('builds safe DOM attribute props from user input', () => {
@@ -79,6 +80,13 @@ describe('style-controls helpers', () => {
     expect(style.borderImageSource).toBe(gradient);
     expect(style.borderImageSlice).toBe(1);
   });
+
+  it('parses gradients that mix rgba color stops', () => {
+    const gradient = 'linear-gradient(45deg, rgba(17, 24, 39, 0.5) 0%, rgba(249, 231, 178, 0.8) 100%)';
+    const parsed = parseGradientValue(gradient);
+    expect(parsed).not.toBeNull();
+    expect(parsed?.stops[0]?.color).toContain('rgba(17, 24, 39, 0.5)');
+  });
 });
 
 describe('style-control custom fields', () => {
@@ -100,6 +108,27 @@ describe('style-control custom fields', () => {
     );
     fireEvent.change(screen.getByLabelText(/color picker/i), { target: { value: '#ff0000' } });
     expect(handleChange).toHaveBeenCalledWith('#ff0000');
+  });
+
+  it('allows adjusting alpha for solid colors', () => {
+    const fields = withStyleFields({}, bindingOptions);
+    const colorField = fields.textColor;
+    if (!colorField || colorField.type !== 'custom') {
+      throw new Error('Expected textColor custom field');
+    }
+    const handleChange = jest.fn();
+    render(
+      colorField.render({
+        field: colorField,
+        value: '#111111',
+        id: 'color-field-alpha',
+        name: 'textColor',
+        onChange: handleChange
+      } as Parameters<NonNullable<typeof colorField.render>>[0])
+    );
+    const alphaSlider = screen.getByLabelText(/^alpha/i);
+    fireEvent.change(alphaSlider, { target: { value: '40' } });
+    expect(handleChange).toHaveBeenLastCalledWith('rgba(17, 17, 17, 0.4)');
   });
 
   it('allows adding custom attributes through the sidebar field', () => {
@@ -198,5 +227,27 @@ describe('style-control custom fields', () => {
     const stopPositionInput = screen.getAllByLabelText(/position/i)[0];
     fireEvent.change(stopPositionInput, { target: { value: '0.25' } });
     expect(handleChange).toHaveBeenLastCalledWith(expect.stringMatching(/25%/));
+  });
+
+  it('captures gradient stop alpha adjustments', () => {
+    const fields = withStyleFields({}, bindingOptions);
+    const colorField = fields.backgroundColor;
+    if (!colorField || colorField.type !== 'custom') {
+      throw new Error('Expected backgroundColor custom field');
+    }
+    const handleChange = jest.fn();
+    render(
+      colorField.render({
+        field: colorField,
+        value: '#111827',
+        id: 'bg-color-alpha-field',
+        name: 'backgroundColor',
+        onChange: handleChange
+      } as Parameters<NonNullable<typeof colorField.render>>[0])
+    );
+    fireEvent.change(screen.getByLabelText(/mode/i), { target: { value: 'gradient' } });
+    const alphaSliders = screen.getAllByLabelText(/alpha stop/i);
+    fireEvent.change(alphaSliders[0], { target: { value: '25' } });
+    expect(handleChange).toHaveBeenLastCalledWith(expect.stringContaining('rgba(17, 24, 39, 0.25)'));
   });
 });
