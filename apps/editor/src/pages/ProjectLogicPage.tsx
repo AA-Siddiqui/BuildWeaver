@@ -15,7 +15,7 @@ import {
   useReactFlow
 } from 'reactflow';
 import 'reactflow/dist/style.css';
-import { DragEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { DragEvent, useCallback, useEffect, useMemo, useRef, useState, useLayoutEffect } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useParams } from 'react-router-dom';
 import type {
@@ -38,6 +38,8 @@ import { RelationalOperatorNode } from '../components/logic/RelationalOperatorNo
 import { PreviewResolverProvider, createPreviewResolver } from '../components/logic/previewResolver';
 import { SeverableEdge } from '../components/logic/SeverableEdge';
 import { logicLogger } from '../lib/logger';
+import { SnapshotHistory } from '../lib/snapshotHistory';
+import { processEditorShortcut } from '../lib/editorShortcuts';
 import { useDeleteNodesShortcut } from '../hooks/useDeleteNodesShortcut';
 import { LogicNavigationProvider } from '../components/logic/LogicNavigationContext';
 import { deriveDefaultPageName, normalizeRouteSegment } from '../lib/routes';
@@ -87,6 +89,20 @@ const nodeTypes = {
 const edgeTypes = {
   severable: SeverableEdge
 };
+
+const GRAPH_HISTORY_LIMIT = 150;
+
+type GraphSnapshot = {
+  nodes: FlowNode[];
+  edges: FlowEdge[];
+  functions: UserDefinedFunction[];
+};
+
+const cloneGraphSnapshot = (snapshot: GraphSnapshot): GraphSnapshot => ({
+  nodes: JSON.parse(JSON.stringify(snapshot.nodes)) as FlowNode[],
+  edges: JSON.parse(JSON.stringify(snapshot.edges)) as FlowEdge[],
+  functions: JSON.parse(JSON.stringify(snapshot.functions)) as UserDefinedFunction[]
+});
 
 export const isTargetHandleFree = (edges: Edge[], connection: Partial<Connection>): boolean => {
   if (!connection.target || !connection.targetHandle) {
@@ -152,11 +168,38 @@ const LogicEditorView = () => {
   const edgeCutGestureRef = useRef<GestureState | null>(null);
   const marqueeGestureRef = useRef<GestureState | null>(null);
   const edgesRef = useRef<FlowEdge[]>(edges);
+  const graphHistoryRef = useRef(
+    new SnapshotHistory<GraphSnapshot>({
+      clone: cloneGraphSnapshot,
+      limit: GRAPH_HISTORY_LIMIT,
+      logger: (message, meta) => logicLogger.debug(message, meta)
+    })
+  );
+
   const deleteElements = useCallback(
     (elements: { nodes?: FlowNode[]; edges?: FlowEdge[] }) => {
       reactFlowInstance.deleteElements(elements);
     },
     [reactFlowInstance]
+  );
+
+  useLayoutEffect(() => {
+    graphHistoryRef.current.observe(
+      { nodes, edges, functions },
+      {
+        projectId,
+        nodes: nodes.length,
+        edges: edges.length,
+        functions: functions.length
+      }
+    );
+  }, [edges, functions, nodes, projectId]);
+
+  const resetGraphHistory = useCallback(
+    (snapshot: GraphSnapshot, context: string) => {
+      graphHistoryRef.current.reset(snapshot, { projectId, context });
+    },
+    [projectId]
   );
 
   const deleteSelection = useDeleteNodesShortcut({
@@ -239,10 +282,14 @@ const LogicEditorView = () => {
 
   useEffect(() => {
     if (graphQuery.data?.graph) {
-      setNodes(toFlowNodes(graphQuery.data.graph.nodes));
-      setEdges(ensureSeverableEdges(toFlowEdges(graphQuery.data.graph.edges)));
-      setFunctions(graphQuery.data.graph.functions ?? []);
+      const hydratedNodes = toFlowNodes(graphQuery.data.graph.nodes);
+      const hydratedEdges = ensureSeverableEdges(toFlowEdges(graphQuery.data.graph.edges));
+      const hydratedFunctions = graphQuery.data.graph.functions ?? [];
+      setNodes(hydratedNodes);
+      setEdges(hydratedEdges);
+      setFunctions(hydratedFunctions);
       setHasUnsavedChanges(false);
+      resetGraphHistory({ nodes: hydratedNodes, edges: hydratedEdges, functions: hydratedFunctions }, 'hydrate');
       setTimeout(() => {
         try {
           reactFlowInstance.fitView({ padding: 0.4 });
@@ -251,7 +298,7 @@ const LogicEditorView = () => {
         }
       }, 50);
     }
-  }, [graphQuery.data?.graph, reactFlowInstance, setEdges, setNodes]);
+  }, [graphQuery.data?.graph, reactFlowInstance, resetGraphHistory, setEdges, setNodes, setFunctions]);
 
   const saveMutation = useMutation({
     mutationFn: (payload: ProjectGraphSnapshot) => projectGraphApi.save(projectId!, payload),
@@ -376,6 +423,44 @@ const LogicEditorView = () => {
   const handleSave = useCallback(() => {
     void persistGraph({ reason: 'manual', force: true });
   }, [persistGraph]);
+
+  const restoreGraphSnapshot = useCallback(
+    (snapshot: GraphSnapshot, action: 'undo' | 'redo') => {
+      graphHistoryRef.current.suppressNextDiff();
+      setNodes(snapshot.nodes);
+      setEdges(snapshot.edges);
+      setFunctions(snapshot.functions);
+      setHasUnsavedChanges(true);
+      setFeedback(action === 'undo' ? 'Undid change' : 'Redid change');
+      setTimeout(() => setFeedback(''), 2000);
+      logicLogger.info(`Graph ${action} applied`, {
+        projectId,
+        undoDepth: graphHistoryRef.current.getUndoDepth(),
+        redoDepth: graphHistoryRef.current.getRedoDepth(),
+        nodes: snapshot.nodes.length,
+        edges: snapshot.edges.length
+      });
+    },
+    [projectId, setEdges, setFunctions, setNodes]
+  );
+
+  const handleUndoAction = useCallback(() => {
+    const snapshot = graphHistoryRef.current.undo({ nodes, edges, functions });
+    if (!snapshot) {
+      logicLogger.debug('Undo ignored — no history', { projectId });
+      return;
+    }
+    restoreGraphSnapshot(snapshot, 'undo');
+  }, [edges, functions, nodes, projectId, restoreGraphSnapshot]);
+
+  const handleRedoAction = useCallback(() => {
+    const snapshot = graphHistoryRef.current.redo({ nodes, edges, functions });
+    if (!snapshot) {
+      logicLogger.debug('Redo ignored — no future history', { projectId });
+      return;
+    }
+    restoreGraphSnapshot(snapshot, 'redo');
+  }, [edges, functions, nodes, projectId, restoreGraphSnapshot]);
 
   const handleAddNode = useCallback(
     async (type: PaletteNodeType, position?: { x: number; y: number }, options?: PaletteNodeOptions) => {
@@ -606,6 +691,27 @@ const LogicEditorView = () => {
     },
     [handleAddFunctionNode, handleAddNode, reactFlowInstance]
   );
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return undefined;
+    }
+    const handleKeyDown = (event: KeyboardEvent) => {
+      processEditorShortcut(event, {
+        onSave: handleSave,
+        onUndo: handleUndoAction,
+        onRedo: handleRedoAction,
+        allowInputTargets: true,
+        logger: (message, meta) =>
+          logicLogger.info(message, {
+            ...meta,
+            projectId
+          })
+      });
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [handleRedoAction, handleSave, handleUndoAction, projectId]);
 
   const handleSelectionChange = useCallback(({ nodes: selected }: { nodes: FlowNode[] }) => {
     setSelectedNodeIds(selected.map((node) => node.id));

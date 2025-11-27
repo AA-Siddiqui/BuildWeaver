@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useLayoutEffect } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Puck } from '@measured/puck';
@@ -6,6 +6,8 @@ import type { ComponentData, Content, Data } from '@measured/puck';
 import '@measured/puck/puck.css';
 import type { PageBuilderState, PageDocument, PageDynamicInput } from '../types/api';
 import { projectPagesApi } from '../lib/api-client';
+import { SnapshotHistory } from '../lib/snapshotHistory';
+import { processEditorShortcut } from '../lib/editorShortcuts';
 import { createPageBuilderConfig } from './page-builder/builder-config';
 import { clearBuilderDraft, loadBuilderDraft, persistBuilderDraft } from './page-builder/draft-storage';
 
@@ -21,6 +23,8 @@ const logPageBuilderEvent = (message: string, details?: Record<string, unknown>)
     console.info(`[PageBuilder] ${message}`, details ?? '');
   }
 };
+
+const BUILDER_HISTORY_LIMIT = 100;
 
 const buildDefaultSection = (): ComponentData => ({
   type: 'Section',
@@ -123,6 +127,21 @@ export const normalizeBuilderStateForSave = (state: Data): PageBuilderState => {
   return result;
 };
 
+const cloneBuilderSnapshot = (state: Data): Data => {
+  const normalized = normalizeBuilderStateForSave(state) as Data;
+  return JSON.parse(JSON.stringify(normalized)) as Data;
+};
+
+type BuilderSnapshot = {
+  state: Data;
+  inputs: PageDynamicInput[];
+};
+
+const cloneBuilderHistoryEntry = (snapshot: BuilderSnapshot): BuilderSnapshot => ({
+  state: cloneBuilderSnapshot(snapshot.state),
+  inputs: JSON.parse(JSON.stringify(snapshot.inputs)) as PageDynamicInput[]
+});
+
 export const PageBuilderPage = () => {
   const { projectId, pageId } = useParams<{ projectId: string; pageId: string }>();
   const navigate = useNavigate();
@@ -138,7 +157,18 @@ export const PageBuilderPage = () => {
   const draftStatusRef = useRef<{ restored: boolean; savedAt?: number }>({ restored: false });
   const draftPersistHandle = useRef<number | null>(null);
   const pendingSaveRef = useRef<Promise<unknown> | null>(null);
+  const builderHistoryRef = useRef(
+    new SnapshotHistory<BuilderSnapshot>({
+      clone: cloneBuilderHistoryEntry,
+      limit: BUILDER_HISTORY_LIMIT,
+      logger: (message, meta) => logPageBuilderEvent(message, meta)
+    })
+  );
   const draftStorageKey = useMemo(() => deriveDraftStorageKey(projectId, pageId), [projectId, pageId]);
+  const getCurrentBuilderSnapshot = useCallback<() => BuilderSnapshot>(
+    () => ({ state: builderState, inputs: dynamicInputs }),
+    [builderState, dynamicInputs]
+  );
   const updateDraftStatus = useCallback((next: Partial<{ restored: boolean; savedAt?: number }>) => {
     draftStatusRef.current = { ...draftStatusRef.current, ...next };
   }, []);
@@ -160,6 +190,10 @@ export const PageBuilderPage = () => {
       setDynamicInputs(incomingPage.dynamicInputs);
       setHasUnsavedChanges(false);
       setPuckSessionKey(derivePuckSessionKey(incomingPage, pageId));
+      builderHistoryRef.current.reset(
+        { state: hydratedState, inputs: incomingPage.dynamicInputs },
+        { pageId: incomingPage.id, reason: 'hydrate' }
+      );
     },
     [pageId]
   );
@@ -190,10 +224,15 @@ export const PageBuilderPage = () => {
         sessionKey: draftStorageKey,
         savedAt: draft.savedAt
       });
-      setBuilderState(toPuckValue(draft.state));
+      const restoredState = toPuckValue(draft.state);
+      setBuilderState(restoredState);
       setDynamicInputs(draft.dynamicInputs);
       setHasUnsavedChanges(true);
       updateDraftStatus({ restored: true, savedAt: draft.savedAt });
+      builderHistoryRef.current.reset(
+        { state: restoredState, inputs: draft.dynamicInputs },
+        { sessionKey: draftStorageKey, reason: 'draft-restore' }
+      );
       return;
     }
     updateDraftStatus({ restored: false, savedAt: undefined });
@@ -241,6 +280,15 @@ export const PageBuilderPage = () => {
       }),
     [bindingOptions, dynamicLabelMap]
   );
+
+  useLayoutEffect(() => {
+    builderHistoryRef.current.observe(getCurrentBuilderSnapshot(), {
+      pageId,
+      projectId,
+      ...summarizeBuilderData(builderState),
+      inputs: dynamicInputs.length
+    });
+  }, [builderState, dynamicInputs, getCurrentBuilderSnapshot, pageId, projectId]);
 
   const scheduleDraftPersist = useCallback(
     (nextState: Data, nextInputs?: PageDynamicInput[]) => {
@@ -344,8 +392,8 @@ export const PageBuilderPage = () => {
       pageId,
       summary: summarizeBuilderData(value)
     });
-    scheduleDraftPersist(value);
-  }, [pageId, scheduleDraftPersist]);
+    scheduleDraftPersist(value, dynamicInputs);
+  }, [dynamicInputs, pageId, scheduleDraftPersist]);
 
   const handleDynamicInputChange = useCallback(
     (inputId: string, updates: Partial<PageDynamicInput>) => {
@@ -394,6 +442,43 @@ export const PageBuilderPage = () => {
     void persistBuilderChanges({ reason: 'manual', force: true });
   }, [hasUnsavedChanges, pageId, persistBuilderChanges, projectId]);
 
+  const applyBuilderSnapshot = useCallback(
+    (snapshot: BuilderSnapshot, action: 'undo' | 'redo') => {
+      builderHistoryRef.current.suppressNextDiff();
+      setBuilderState(snapshot.state);
+      setDynamicInputs(snapshot.inputs);
+      setHasUnsavedChanges(true);
+      scheduleDraftPersist(snapshot.state, snapshot.inputs);
+      setFeedback(action === 'undo' ? 'Undid change' : 'Redid change');
+      setTimeout(() => setFeedback(''), 2000);
+      logPageBuilderEvent(`Builder ${action} applied`, {
+        pageId,
+        projectId,
+        remainingUndo: builderHistoryRef.current.getUndoDepth(),
+        redoDepth: builderHistoryRef.current.getRedoDepth()
+      });
+    },
+    [pageId, projectId, scheduleDraftPersist]
+  );
+
+  const handleUndo = useCallback(() => {
+    const snapshot = builderHistoryRef.current.undo(getCurrentBuilderSnapshot());
+    if (!snapshot) {
+      logPageBuilderEvent('Undo ignored — no history', { pageId, projectId });
+      return;
+    }
+    applyBuilderSnapshot(snapshot, 'undo');
+  }, [applyBuilderSnapshot, getCurrentBuilderSnapshot, pageId, projectId]);
+
+  const handleRedo = useCallback(() => {
+    const snapshot = builderHistoryRef.current.redo(getCurrentBuilderSnapshot());
+    if (!snapshot) {
+      logPageBuilderEvent('Redo ignored — no future history', { pageId, projectId });
+      return;
+    }
+    applyBuilderSnapshot(snapshot, 'redo');
+  }, [applyBuilderSnapshot, getCurrentBuilderSnapshot, pageId, projectId]);
+
   const handleNavigateBack = useCallback(async () => {
     if (!projectId) {
       return;
@@ -430,6 +515,28 @@ export const PageBuilderPage = () => {
     // focus the close button when opening for accessibility
     sheetCloseButtonRef.current?.focus();
   }, [isSidebarOpen]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return undefined;
+    }
+    const handleKeyDown = (event: KeyboardEvent) => {
+      processEditorShortcut(event, {
+        onSave: handleSave,
+        onUndo: handleUndo,
+        onRedo: handleRedo,
+        allowInputTargets: true,
+        logger: (message, meta) =>
+          logPageBuilderEvent(message, {
+            ...meta,
+            pageId,
+            projectId
+          })
+      });
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [handleRedo, handleSave, handleUndo, pageId, projectId]);
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
