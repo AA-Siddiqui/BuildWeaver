@@ -41,7 +41,18 @@ describe('style-controls helpers', () => {
     expect(style.marginRight).toBe('16px');
     expect(style.paddingTop).toBe('24px');
     expect(style.paddingBottom).toBe('24px');
-    expect(style.backgroundColor).toBe('#FFFFFF');
+    expect(style.backgroundColor).toBe('#ffffff');
+  });
+
+  it('collapses zero-alpha colors to transparent inline styles', () => {
+    const style = createInlineStyle({
+      backgroundColor: 'rgba(255, 255, 255, 0)',
+      borderColor: 'rgba(17, 17, 17, 0)',
+      textColor: 'rgba(0, 0, 0, 0)'
+    });
+    expect(style.backgroundColor).toBe('transparent');
+    expect(style.borderColor).toBe('transparent');
+    expect(style.color).toBe('transparent');
   });
 
   it('normalizes invalid colors before hitting the native picker', () => {

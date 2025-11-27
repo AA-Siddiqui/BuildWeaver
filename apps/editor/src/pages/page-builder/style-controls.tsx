@@ -10,6 +10,7 @@ const ATTRIBUTE_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_.:-]*$/;
 const DEFAULT_COLOR_FALLBACK = '#111827';
 const GRADIENT_PREFIXES = ['linear-gradient', 'radial-gradient'] as const;
 const MIN_GRADIENT_STOPS = 2;
+const ZERO_ALPHA_EPSILON = 0.001;
 const HEX_SHORT_PATTERN = /^#[0-9a-fA-F]{3}$/;
 const HEX_LONG_PATTERN = /^#[0-9a-fA-F]{6}$/;
 const HEX_WITH_ALPHA_PATTERN = /^#[0-9a-fA-F]{8}$/;
@@ -173,6 +174,29 @@ const resolveColorValue = (value?: string, fallback = DEFAULT_COLOR_FALLBACK) =>
 };
 
 const readColorAlpha = (value?: string) => parseSolidColor(value)?.alpha ?? 1;
+
+const toRenderableColor = (value?: string, options?: { fieldKey?: string; log?: boolean }): string => {
+  if (!value) {
+    return '';
+  }
+  const parsed = parseSolidColor(value);
+  if (!parsed) {
+    return value;
+  }
+  if (parsed.alpha <= ZERO_ALPHA_EPSILON) {
+    if (options?.log) {
+      logStyleControlEvent('Collapsed zero-alpha color to transparent', {
+        fieldKey: options.fieldKey,
+        source: value
+      });
+    }
+    return 'transparent';
+  }
+  if (parsed.alpha >= 1) {
+    return parsed.hex;
+  }
+  return formatColorWithAlpha(parsed.hex, parsed.alpha);
+};
 
 const splitGradientArgs = (input: string): string[] => {
   const segments: string[] = [];
@@ -778,12 +802,13 @@ export const createInlineStyle = (
   assign('fontSize', read('fontSize') as CSSProperties['fontSize']);
   assign('fontWeight', read('fontWeight') as CSSProperties['fontWeight']);
   assign('lineHeight', read('lineHeight') as CSSProperties['lineHeight']);
-  assign('color', read('textColor'));
+  const textColor = read('textColor');
+  assign('color', toRenderableColor(textColor, { fieldKey: 'textColor' }));
   const backgroundValue = read('backgroundColor');
   if (isGradientValue(backgroundValue)) {
     assign('backgroundImage', backgroundValue as CSSProperties['backgroundImage']);
   } else {
-    assign('backgroundColor', backgroundValue);
+    assign('backgroundColor', toRenderableColor(backgroundValue, { fieldKey: 'backgroundColor', log: true }));
   }
   assign('width', read('width'));
   assign('maxWidth', read('maxWidth'));
@@ -798,7 +823,7 @@ export const createInlineStyle = (
     assign('borderImageSlice', 1 as CSSProperties['borderImageSlice']);
     assign('borderImageSource', borderColorValue as CSSProperties['borderImageSource']);
   } else {
-    assign('borderColor', borderColorValue);
+    assign('borderColor', toRenderableColor(borderColorValue, { fieldKey: 'borderColor', log: true }));
   }
   assign('boxShadow', read('boxShadow'));
   assign('opacity', read('opacity') as CSSProperties['opacity']);
