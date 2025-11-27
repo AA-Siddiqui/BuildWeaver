@@ -2,6 +2,7 @@ import {
   ArithmeticNodeData,
   ConditionalNodeData,
   DummyNodeData,
+  FunctionReferenceValue,
   ListNodeData,
   LogicalOperatorNodeData,
   ObjectNodeData,
@@ -70,6 +71,23 @@ const areScalarValuesEqual = (left: ScalarValue | undefined, right: ScalarValue 
     });
     return false;
   }
+};
+
+const isScalarValue = (value: unknown): value is ScalarValue => {
+  if (value === null) {
+    return true;
+  }
+  const valueType = typeof value;
+  if (valueType === 'string' || valueType === 'number' || valueType === 'boolean') {
+    return true;
+  }
+  if (Array.isArray(value)) {
+    return value.every((entry) => isScalarValue(entry));
+  }
+  if (valueType === 'object') {
+    return Object.values(value as Record<string, unknown>).every((entry) => isScalarValue(entry));
+  }
+  return false;
 };
 
 const requireSamples = <T>(values: (T | null | undefined)[]): values is T[] => {
@@ -374,11 +392,28 @@ export const evaluateStringPreview = (
 };
 
 export interface ListInputOverrides {
+  nodeId?: string;
   primarySample?: ScalarValue[];
   secondarySample?: ScalarValue[];
   start?: number | null;
   end?: number | null;
   order?: 'asc' | 'desc';
+  callbackRef?: FunctionReferenceValue;
+  initialValue?: ScalarValue;
+}
+
+export interface ListCallbackInvocation {
+  reference: FunctionReferenceValue;
+  args: ScalarValue[];
+  metadata: {
+    operation: ListNodeData['operation'];
+    phase: 'map' | 'filter' | 'reduce' | 'sort-comparator';
+    index: number;
+  };
+}
+
+export interface ListEvaluationHooks {
+  invokeCallback?: (invocation: ListCallbackInvocation) => ScalarValue | undefined;
 }
 
 const resolveIndex = (value: number | null | undefined, fallback: number): number => {
@@ -401,13 +436,72 @@ const clampIndex = (value: number, max: number): number => {
   return value;
 };
 
+const compareSortValues = (left: ScalarValue | undefined, right: ScalarValue | undefined): number => {
+  if (left === right) {
+    return 0;
+  }
+  if (left === null || typeof left === 'undefined') {
+    return -1;
+  }
+  if (right === null || typeof right === 'undefined') {
+    return 1;
+  }
+  if (typeof left === 'number' && typeof right === 'number') {
+    return left - right;
+  }
+  return String(left as ScalarValue).localeCompare(String(right as ScalarValue));
+};
+
 export const evaluateListPreview = (
   data: ListNodeData,
-  overrides: ListInputOverrides = {}
-): NodePreview<ScalarValue[] | number> => {
+  overrides: ListInputOverrides = {},
+  hooks: ListEvaluationHooks = {}
+): NodePreview<ScalarValue[] | number | ScalarValue> => {
   const primary = overrides.primarySample ?? data.primarySample ?? [];
   const secondary = overrides.secondarySample ?? data.secondarySample ?? [];
   const order = overrides.order ?? data.sort ?? 'asc';
+  const callbackRef = overrides.callbackRef;
+  const invokeCallback = hooks.invokeCallback;
+  const nodeId = overrides.nodeId ?? 'list-node';
+
+  const callbackUnavailable = (
+    heading: string,
+    summary: string
+  ): NodePreview<ScalarValue[] | number | ScalarValue> => ({
+    state: 'unknown',
+    heading,
+    summary
+  });
+
+  const executeCallback = (
+    phase: ListCallbackInvocation['metadata']['phase'],
+    index: number,
+    args: ScalarValue[]
+  ): ScalarValue | undefined => {
+    if (!callbackRef || !invokeCallback) {
+      return undefined;
+    }
+    try {
+      return invokeCallback({
+        reference: callbackRef,
+        args,
+        metadata: {
+          operation: data.operation,
+          phase,
+          index
+        }
+      });
+    } catch (error) {
+      logicLogger.error('Callback execution failed', {
+        nodeId,
+        operation: data.operation,
+        phase,
+        index,
+        message: (error as Error).message
+      });
+      return undefined;
+    }
+  };
 
   try {
     switch (data.operation) {
@@ -431,18 +525,116 @@ export const evaluateListPreview = (
         const unique = Array.from(new Set(primary));
         return { state: 'ready', heading: 'Unique', summary: formatScalar(unique), value: unique };
       }
-      case 'sort': {
-        const sorted = [...primary].sort((a, b) => {
-          if (a === b) return 0;
-          if (a === null) return -1;
-          if (b === null) return 1;
-          if (typeof a === 'number' && typeof b === 'number') {
-            return order === 'desc' ? Number(b) - Number(a) : Number(a) - Number(b);
+      case 'map': {
+        if (!callbackRef || !invokeCallback) {
+          logicLogger.warn('Map preview skipped due to missing callback', { nodeId, operation: data.operation });
+          return callbackUnavailable('Callback required', 'Connect a function reference to map list items.');
+        }
+        const mapped = primary.map((item, index) => {
+          const result = executeCallback('map', index, [item, index]);
+          if (!isScalarValue(result)) {
+            logicLogger.warn('Map callback returned invalid value', { nodeId, index, operation: data.operation });
+            return null;
           }
-          return order === 'desc'
-            ? String(b ?? '').localeCompare(String(a ?? ''))
-            : String(a ?? '').localeCompare(String(b ?? ''));
+          return result as ScalarValue;
         });
+        return { state: 'ready', heading: 'Mapped', summary: formatScalar(mapped), value: mapped };
+      }
+      case 'filter': {
+        if (!callbackRef || !invokeCallback) {
+          logicLogger.warn('Filter preview skipped due to missing callback', { nodeId, operation: data.operation });
+          return callbackUnavailable('Callback required', 'Connect a function reference to filter list items.');
+        }
+        const filtered = primary.filter((item, index) => {
+          const result = executeCallback('filter', index, [item, index]);
+          const keep = Boolean(result);
+          logicLogger.debug('Filter callback evaluated', { nodeId, index, keep, operation: data.operation });
+          return keep;
+        });
+        return { state: 'ready', heading: 'Filtered', summary: formatScalar(filtered), value: filtered };
+      }
+      case 'reduce': {
+        if (!callbackRef || !invokeCallback) {
+          logicLogger.warn('Reduce preview skipped due to missing callback', { nodeId, operation: data.operation });
+          return callbackUnavailable('Callback required', 'Connect a reducer function reference.');
+        }
+        const initialProvided = overrides.initialValue ?? data.reducerInitialSample;
+        if (typeof initialProvided === 'undefined') {
+          logicLogger.warn('Reduce preview missing initial value', { nodeId, operation: data.operation });
+          return {
+            state: 'unknown',
+            heading: 'Initial value required',
+            summary: 'Provide an initial value sample or bind one.'
+          };
+        }
+        let accumulator = initialProvided as ScalarValue;
+        primary.forEach((item, index) => {
+          const result = executeCallback('reduce', index, [accumulator, item, index]);
+          if (isScalarValue(result)) {
+            accumulator = result as ScalarValue;
+          } else {
+            logicLogger.warn('Reducer callback returned invalid value', { nodeId, index, operation: data.operation });
+          }
+        });
+        return { state: 'ready', heading: 'Reduce', summary: formatScalar(accumulator), value: accumulator };
+      }
+      case 'sort': {
+        let comparatorCalls = 0;
+        const indexed = primary.map((value, index) => ({ value, index }));
+        const sortedEntries = indexed.sort((left, right) => {
+          if (callbackRef && invokeCallback) {
+            const result = executeCallback('sort-comparator', comparatorCalls, [left.value as ScalarValue, right.value as ScalarValue]);
+            comparatorCalls += 1;
+            if (typeof result === 'number' && Number.isFinite(result)) {
+              const normalized = order === 'desc' ? result * -1 : result;
+              if (normalized === 0) {
+                const valueFallback = compareSortValues(left.value as ScalarValue, right.value as ScalarValue);
+                if (valueFallback !== 0) {
+                  const resolved = order === 'desc' ? valueFallback * -1 : valueFallback;
+                  logicLogger.debug('Sort comparator tie resolved via value comparison', {
+                    nodeId,
+                    call: comparatorCalls,
+                    comparatorResult: result,
+                    valueFallback,
+                    resolved
+                  });
+                  return resolved;
+                }
+                const stable = left.index - right.index;
+                if (stable !== 0) {
+                  logicLogger.debug('Sort comparator tie resolved via stable ordering', {
+                    nodeId,
+                    call: comparatorCalls,
+                    comparatorResult: result,
+                    leftIndex: left.index,
+                    rightIndex: right.index
+                  });
+                  return stable;
+                }
+              } else {
+                logicLogger.debug('Sort comparator value applied', {
+                  nodeId,
+                  call: comparatorCalls,
+                  comparatorResult: result,
+                  normalizedResult: normalized
+                });
+                return normalized;
+              }
+            } else {
+              logicLogger.warn('Invalid sort comparator result, falling back to default comparison', {
+                nodeId,
+                result,
+                call: comparatorCalls
+              });
+            }
+          }
+          const fallback = compareSortValues(left.value as ScalarValue, right.value as ScalarValue);
+          if (fallback !== 0) {
+            return order === 'desc' ? fallback * -1 : fallback;
+          }
+          return left.index - right.index;
+        });
+        const sorted = sortedEntries.map((entry) => entry.value as ScalarValue);
         return { state: 'ready', heading: 'Sorted', summary: formatScalar(sorted), value: sorted };
       }
       case 'length': {
@@ -452,7 +644,11 @@ export const evaluateListPreview = (
         return { state: 'unknown', heading: 'No preview', summary: 'Operation not recognized.' };
     }
   } catch (error) {
-    logicLogger.error('Failed to generate list preview', { error: (error as Error).message });
+    logicLogger.error('Failed to generate list preview', {
+      error: (error as Error).message,
+      nodeId,
+      operation: data.operation
+    });
     return { state: 'error', heading: 'Error', summary: 'Unable to evaluate list operation.' };
   }
 };

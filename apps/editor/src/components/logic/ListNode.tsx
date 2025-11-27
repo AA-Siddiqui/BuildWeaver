@@ -1,6 +1,6 @@
 import { ChangeEvent } from 'react';
 import { Handle, NodeProps, Position } from 'reactflow';
-import { ListNodeData, ScalarValue } from '@buildweaver/libs';
+import { FunctionReferenceValue, ListNodeData, ScalarSampleKind, ScalarValue } from '@buildweaver/libs';
 import { NodeChrome } from './NodeChrome';
 import { useNodeDataUpdater } from './hooks/useNodeDataUpdater';
 import { useCursorRestorer } from './hooks/useCursorRestorer';
@@ -10,6 +10,16 @@ import { logicLogger } from '../../lib/logger';
 import { usePreviewResolver } from './previewResolver';
 import { formatScalar } from './preview';
 import { getListHandleId, getListOperationInputs, ListInputDefinition } from './listOperationConfig';
+import { ScalarValueInput } from './ScalarValueInput';
+
+const isFunctionReferenceValue = (value: unknown): value is FunctionReferenceValue => {
+  return Boolean(
+    value &&
+      typeof value === 'object' &&
+      (value as { kind?: string }).kind === 'function-reference' &&
+      typeof (value as { functionId?: unknown }).functionId === 'string'
+  );
+};
 
 const renderBindingPreview = (
   binding?: { value: unknown; sourceLabel: string },
@@ -30,6 +40,10 @@ const renderBindingPreview = (
       <p className="text-[10px] text-bw-platinum/60">{binding.sourceLabel}</p>
     </div>
   );
+};
+
+const describeFunctionReference = (reference: FunctionReferenceValue): string => {
+  return reference.functionName ?? reference.functionId;
 };
 
 export const ListNode = ({ id, data }: NodeProps<ListNodeData>) => {
@@ -92,12 +106,28 @@ export const ListNode = ({ id, data }: NodeProps<ListNodeData>) => {
     restoreCursor(event.target, { nodeId: id, field: key });
   };
 
+  const handleReducerInitialKindChange = (kind: ScalarSampleKind) => {
+    logicLogger.info('Reducer initial value kind changed', { nodeId: id, kind, operation: data.operation });
+    updateData((prev) => ({ ...prev, reducerInitialSampleKind: kind }));
+  };
+
+  const handleReducerInitialValueChange = (value: ScalarValue) => {
+    logicLogger.debug('Reducer initial sample updated', {
+      nodeId: id,
+      operation: data.operation,
+      valueType: typeof value
+    });
+    updateData((prev) => ({ ...prev, reducerInitialSample: value }));
+  };
+
   const renderInputBody = (definition: ListInputDefinition) => {
     const handleId = getListHandleId(id, definition.role);
     const binding = previewResolver.getHandleBinding(id, handleId);
     const showListInput = definition.kind === 'list';
     const showNumericInput = definition.kind === 'number';
     const showOrderInput = definition.kind === 'order';
+    const showScalarInput = definition.kind === 'scalar';
+    const showCallbackHint = definition.kind === 'function';
 
     const renderListSample = () => {
       const sampleKey = definition.role === 'primary' ? 'primarySample' : 'secondarySample';
@@ -149,8 +179,30 @@ export const ListNode = ({ id, data }: NodeProps<ListNodeData>) => {
         const value = typeof binding.value === 'string' ? binding.value : formatScalar(binding.value as ScalarValue);
         return value.toString();
       }
+      if (definition.kind === 'function' && isFunctionReferenceValue(binding.value)) {
+        return describeFunctionReference(binding.value);
+      }
       return undefined;
     };
+
+    const renderCallbackHint = () => (
+      <p className="mt-1 rounded-lg border border-dashed border-white/15 bg-white/5 px-3 py-2 text-xs text-bw-platinum/70">
+        Connect a function node in reference mode to provide the callback.
+      </p>
+    );
+
+    const renderScalarSample = () => (
+      <div className="mt-2">
+        <ScalarValueInput
+          nodeId={id}
+          fieldKey="reducerInitial"
+          valueKind={data.reducerInitialSampleKind ?? 'string'}
+          value={data.reducerInitialSample}
+          onValueKindChange={handleReducerInitialKindChange}
+          onValueChange={handleReducerInitialValueChange}
+        />
+      </div>
+    );
 
     return (
       <div key={definition.role} className="relative rounded-xl border border-white/10 bg-white/5 px-3 py-2">
@@ -165,6 +217,8 @@ export const ListNode = ({ id, data }: NodeProps<ListNodeData>) => {
         {!binding && showListInput && renderListSample()}
         {!binding && showNumericInput && renderIndexSample()}
         {!binding && showOrderInput && renderOrderSample()}
+        {!binding && showCallbackHint && renderCallbackHint()}
+        {!binding && showScalarInput && renderScalarSample()}
       </div>
     );
   };
@@ -185,6 +239,9 @@ export const ListNode = ({ id, data }: NodeProps<ListNodeData>) => {
             <option value="unique">Unique</option>
             <option value="sort">Sort</option>
             <option value="length">Length</option>
+            <option value="map">Map</option>
+            <option value="filter">Filter</option>
+            <option value="reduce">Reduce</option>
           </select>
         </label>
         <div className="space-y-2">{inputDefinitions.map((definition) => renderInputBody(definition))}</div>

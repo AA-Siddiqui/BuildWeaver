@@ -14,7 +14,9 @@ describe('ListNode component', () => {
     secondarySample: [4, 5],
     startSample: 0,
     endSample: 2,
-    sort: 'asc'
+    sort: 'asc',
+    reducerInitialSample: 0,
+    reducerInitialSampleKind: 'number'
   };
 
   const renderNode = (data: ListNodeData) => {
@@ -60,5 +62,17 @@ describe('ListNode component', () => {
     const nextValue = `${listTextarea.value}\n`;
     fireEvent.change(listTextarea, { target: { value: nextValue } });
     expect(listTextarea).toHaveValue(nextValue);
+  });
+
+  it('renders callback hint for map operations', () => {
+    renderNode({ ...baseData, operation: 'map' });
+    expect(screen.getByText(/Callback function/i)).toBeInTheDocument();
+    expect(screen.getByText(/Connect a function node/i)).toBeInTheDocument();
+  });
+
+  it('renders scalar input for reduce initial value', () => {
+    renderNode({ ...baseData, operation: 'reduce' });
+    expect(screen.getByText(/Initial value/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/Value type/i)).toBeInTheDocument();
   });
 });

@@ -38,6 +38,9 @@ const LOGIC_OPERATIONS = [
   'merge',
   'unique',
   'sort',
+  'map',
+  'filter',
+  'reduce',
   'set',
   'get',
   'keys',
@@ -218,6 +221,13 @@ class GraphNodeDataDto {
   @IsOptional()
   @IsIn(['asc', 'desc'])
   sort?: 'asc' | 'desc';
+
+  @IsOptional()
+  reducerInitialSample?: unknown;
+
+  @IsOptional()
+  @IsIn(['string', 'number', 'boolean', 'list', 'object'])
+  reducerInitialSampleKind?: ScalarSampleKind;
 
   @IsOptional()
   @ValidateIf((_, value) => Array.isArray(value))

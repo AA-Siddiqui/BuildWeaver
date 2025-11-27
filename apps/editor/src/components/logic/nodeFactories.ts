@@ -91,7 +91,9 @@ export const createListData = (): ListNodeData => ({
   secondarySample: [4, 5],
   startSample: 0,
   endSample: 3,
-  sort: 'asc'
+  sort: 'asc',
+  reducerInitialSample: 0,
+  reducerInitialSampleKind: 'number'
 });
 
 export const createObjectData = (): ObjectNodeData => ({

@@ -84,7 +84,7 @@ export interface StringNodeData {
   options?: StringNodeOptions;
 }
 
-export type ListOperation = 'append' | 'merge' | 'slice' | 'unique' | 'sort' | 'length';
+export type ListOperation = 'append' | 'merge' | 'slice' | 'unique' | 'sort' | 'length' | 'map' | 'filter' | 'reduce';
 
 export interface ListNodeData {
   kind: 'list';
@@ -96,6 +96,8 @@ export interface ListNodeData {
   startSample?: number | null;
   endSample?: number | null;
   sort?: 'asc' | 'desc';
+  reducerInitialSample?: ScalarValue;
+  reducerInitialSampleKind?: ScalarSampleKind;
 }
 
 export type ObjectOperation = 'merge' | 'pick' | 'set' | 'get' | 'keys' | 'values';
@@ -161,6 +163,15 @@ export interface FunctionNodeData {
   description?: string;
   mode: FunctionNodeMode;
   returnsValue?: boolean;
+}
+
+export interface FunctionReferenceValue {
+  kind: 'function-reference';
+  functionId: string;
+  functionName?: string;
+  argumentTypes?: FunctionArgumentType[];
+  returnsValue?: boolean;
+  [key: string]: ScalarValue | undefined;
 }
 
 export interface FunctionArgumentNodeData {

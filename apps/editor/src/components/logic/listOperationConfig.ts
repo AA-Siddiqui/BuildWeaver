@@ -1,8 +1,8 @@
 import { ListNodeData } from '@buildweaver/libs';
 
-export type ListInputRole = 'primary' | 'secondary' | 'start' | 'end' | 'order';
+export type ListInputRole = 'primary' | 'secondary' | 'start' | 'end' | 'order' | 'callback' | 'initial';
 
-type ListInputKind = 'list' | 'number' | 'order';
+type ListInputKind = 'list' | 'number' | 'order' | 'function' | 'scalar';
 
 export interface ListInputDefinition {
   role: ListInputRole;
@@ -16,7 +16,9 @@ const INPUT_DEFINITIONS: Record<ListInputRole, ListInputDefinition> = {
   secondary: { role: 'secondary', label: 'Additional input', handleSuffix: 'secondary', kind: 'list' },
   start: { role: 'start', label: 'Start index', handleSuffix: 'start', kind: 'number' },
   end: { role: 'end', label: 'End index', handleSuffix: 'end', kind: 'number' },
-  order: { role: 'order', label: 'Sort order', handleSuffix: 'order', kind: 'order' }
+  order: { role: 'order', label: 'Sort order', handleSuffix: 'order', kind: 'order' },
+  callback: { role: 'callback', label: 'Callback function', handleSuffix: 'callback', kind: 'function' },
+  initial: { role: 'initial', label: 'Initial value', handleSuffix: 'initial', kind: 'scalar' }
 };
 
 const LIST_OPERATION_INPUTS: Record<ListNodeData['operation'], ListInputRole[]> = {
@@ -25,7 +27,10 @@ const LIST_OPERATION_INPUTS: Record<ListNodeData['operation'], ListInputRole[]> 
   slice: ['primary', 'start', 'end'],
   unique: ['primary'],
   length: ['primary'],
-  sort: ['primary', 'order']
+  sort: ['primary', 'order', 'callback'],
+  map: ['primary', 'callback'],
+  filter: ['primary', 'callback'],
+  reduce: ['primary', 'callback', 'initial']
 };
 
 const DEFAULT_ROLES: ListInputRole[] = ['primary'];

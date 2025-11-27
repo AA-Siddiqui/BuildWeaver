@@ -7,6 +7,7 @@ import {
   FunctionArgumentNodeData,
   FunctionNodeData,
   FunctionReturnNodeData,
+  FunctionReferenceValue,
   ListNodeData,
   LogicEditorNodeData,
   LogicalOperatorNodeData,
@@ -27,7 +28,9 @@ import {
   evaluateObjectPreview,
   evaluateRelationalPreview,
   evaluateStringPreview,
-  formatScalar
+  formatScalar,
+  ListCallbackInvocation,
+  ListInputOverrides
 } from './preview';
 import type { ObjectInputOverrides } from './preview';
 import { logicLogger } from '../../lib/logger';
@@ -137,6 +140,53 @@ const ensureScalar = (value: unknown): ScalarValue | undefined => {
     return value as ScalarValue;
   }
   return undefined;
+};
+
+const isFunctionReferenceValue = (value: unknown): value is FunctionReferenceValue => {
+  return Boolean(
+    value &&
+      typeof value === 'object' &&
+      (value as { kind?: string }).kind === 'function-reference' &&
+      typeof (value as { functionId?: unknown }).functionId === 'string'
+  );
+};
+
+const buildFunctionReferenceValue = (
+  data: FunctionNodeData,
+  definition?: UserDefinedFunction
+): FunctionReferenceValue => ({
+  kind: 'function-reference',
+  functionId: data.functionId,
+  functionName: data.functionName,
+  argumentTypes: definition?.arguments?.map((argument) => argument.type),
+  returnsValue: definition?.returnsValue ?? data.returnsValue
+});
+
+const invokeFunctionReference = (
+  invocation: ListCallbackInvocation,
+  context: ResolverContext,
+  sourceNodeId: string
+): ScalarValue | undefined => {
+  const definition = context.functionsById?.get(invocation.reference.functionId);
+  if (!definition) {
+    logicLogger.error('Referenced function missing for callback', {
+      nodeId: sourceNodeId,
+      functionId: invocation.reference.functionId,
+      phase: invocation.metadata.phase
+    });
+    return undefined;
+  }
+  const argumentValues: Record<string, ScalarValue | undefined> = {};
+  definition.arguments?.forEach((argument, index) => {
+    argumentValues[argument.id] = invocation.args[index] as ScalarValue | undefined;
+  });
+  logicLogger.debug('Executing function reference callback', {
+    nodeId: sourceNodeId,
+    functionId: invocation.reference.functionId,
+    phase: invocation.metadata.phase,
+    index: invocation.metadata.index
+  });
+  return evaluateFunctionReturnValue(definition, context, argumentValues);
 };
 
 const normalizeKeysInput = (value: unknown): string[] | undefined => {
@@ -339,7 +389,13 @@ const evaluateNodePreview = (
       const data = node.data as FunctionNodeData;
       const definition = context.functionsById?.get(data.functionId);
       let computedValue: ScalarValue | undefined;
-      if (definition && data.mode === 'applied') {
+      if (data.mode === 'reference') {
+        computedValue = buildFunctionReferenceValue(data, definition) as unknown as ScalarValue;
+        logicLogger.debug('Function node outputting reference', {
+          nodeId: node.id,
+          functionId: data.functionId
+        });
+      } else if (definition && data.mode === 'applied') {
         if (context.callStack.includes(data.functionId)) {
           logicLogger.error('Function preview recursion detected', {
             functionId: data.functionId,
@@ -421,18 +477,14 @@ const evaluateNodePreview = (
     }
     case 'list': {
       const data = node.data as ListNodeData;
-      const overrides: {
-        primarySample?: ScalarValue[];
-        secondarySample?: ScalarValue[];
-        start?: number | null;
-        end?: number | null;
-        order?: 'asc' | 'desc';
-      } = {};
+      const overrides: ListInputOverrides = { nodeId: node.id };
       const primaryBinding = getBindingValue(getListHandleId(node.id, 'primary'));
       const secondaryBinding = getBindingValue(getListHandleId(node.id, 'secondary'));
       const startBinding = getBindingValue(getListHandleId(node.id, 'start'));
       const endBinding = getBindingValue(getListHandleId(node.id, 'end'));
       const orderBinding = getBindingValue(getListHandleId(node.id, 'order'));
+      const callbackBinding = getBindingValue(getListHandleId(node.id, 'callback'));
+      const initialBinding = getBindingValue(getListHandleId(node.id, 'initial'));
       if (primaryBinding) {
         const arr = ensureArray(primaryBinding.value);
         if (arr) {
@@ -463,7 +515,30 @@ const evaluateNodePreview = (
           });
         }
       }
-      return evaluateListPreview(data, overrides);
+      if (callbackBinding) {
+        if (isFunctionReferenceValue(callbackBinding.value)) {
+          overrides.callbackRef = callbackBinding.value;
+        } else {
+          logicLogger.warn('Invalid callback binding ignored', {
+            nodeId: node.id,
+            handleId: callbackBinding.handleId
+          });
+        }
+      }
+      if (initialBinding) {
+        const scalar = ensureScalar(initialBinding.value);
+        if (scalar !== undefined) {
+          overrides.initialValue = scalar;
+        } else {
+          logicLogger.warn('Invalid reduce initial binding ignored', {
+            nodeId: node.id,
+            handleId: initialBinding.handleId
+          });
+        }
+      }
+      return evaluateListPreview(data, overrides, {
+        invokeCallback: (invocation) => invokeFunctionReference(invocation, context, node.id)
+      });
     }
     case 'object': {
       const data = node.data as ObjectNodeData;

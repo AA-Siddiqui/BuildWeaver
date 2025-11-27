@@ -13,6 +13,21 @@ describe('list operation config', () => {
 
   it('maps sort operation to list plus order inputs', () => {
     const inputs = getListOperationInputs('sort');
-    expect(inputs.map((input) => input.role)).toEqual(['primary', 'order']);
+    expect(inputs.map((input) => input.role)).toEqual(['primary', 'order', 'callback']);
+  });
+
+  it('requires callback for map operations', () => {
+    const inputs = getListOperationInputs('map');
+    expect(inputs.map((input) => input.role)).toEqual(['primary', 'callback']);
+  });
+
+  it('requires callback for filter operations', () => {
+    const inputs = getListOperationInputs('filter');
+    expect(inputs.map((input) => input.role)).toEqual(['primary', 'callback']);
+  });
+
+  it('requires callback and initial value for reduce operations', () => {
+    const inputs = getListOperationInputs('reduce');
+    expect(inputs.map((input) => input.role)).toEqual(['primary', 'callback', 'initial']);
   });
 });

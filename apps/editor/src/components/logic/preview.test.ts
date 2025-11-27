@@ -12,10 +12,12 @@ import {
   ArithmeticNodeData,
   ConditionalNodeData,
   DummyNodeData,
+  FunctionReferenceValue,
   ListNodeData,
   LogicalOperatorNodeData,
   ObjectNodeData,
   RelationalOperatorNodeData,
+  ScalarValue,
   StringNodeData
 } from '@buildweaver/libs';
 
@@ -168,6 +170,133 @@ describe('logic previews', () => {
 
     const preview = evaluateListPreview(listNode, { order: 'desc' });
     expect(preview.value).toEqual([3, 2, 1]);
+  });
+
+  it('maps list values using callback references', () => {
+    const listNode: ListNodeData = {
+      kind: 'list',
+      label: 'List',
+      description: 'Map',
+      operation: 'map',
+      primarySample: [1, 2, 3]
+    };
+    const reference: FunctionReferenceValue = {
+      kind: 'function-reference',
+      functionId: 'double'
+    };
+    const preview = evaluateListPreview(
+      listNode,
+      { callbackRef: reference },
+      {
+        invokeCallback: ({ args }) => {
+          const value = Number(args[0] ?? 0);
+          return (value * 2) as ScalarValue;
+        }
+      }
+    );
+    expect(preview.value).toEqual([2, 4, 6]);
+  });
+
+  it('filters list values using callback references', () => {
+    const listNode: ListNodeData = {
+      kind: 'list',
+      label: 'List',
+      description: 'Filter',
+      operation: 'filter',
+      primarySample: [1, 2, 3, 4]
+    };
+    const reference: FunctionReferenceValue = {
+      kind: 'function-reference',
+      functionId: 'isEven'
+    };
+    const preview = evaluateListPreview(
+      listNode,
+      { callbackRef: reference },
+      {
+        invokeCallback: ({ args }) => {
+          const value = Number(args[0] ?? 0);
+          return (value % 2 === 0) as unknown as ScalarValue;
+        }
+      }
+    );
+    expect(preview.value).toEqual([2, 4]);
+  });
+
+  it('reduces list values using callback references and initial sample', () => {
+    const listNode: ListNodeData = {
+      kind: 'list',
+      label: 'List',
+      description: 'Reduce',
+      operation: 'reduce',
+      primarySample: [1, 2, 3],
+      reducerInitialSample: 0,
+      reducerInitialSampleKind: 'number'
+    };
+    const reference: FunctionReferenceValue = {
+      kind: 'function-reference',
+      functionId: 'sum'
+    };
+    const preview = evaluateListPreview(
+      listNode,
+      { callbackRef: reference },
+      {
+        invokeCallback: ({ args }) => {
+          const accumulator = Number(args[0] ?? 0);
+          const value = Number(args[1] ?? 0);
+          return (accumulator + value) as ScalarValue;
+        }
+      }
+    );
+    expect(preview.value).toEqual(6);
+  });
+
+  it('sorts using comparator callbacks with two arguments', () => {
+    const listNode: ListNodeData = {
+      kind: 'list',
+      label: 'List',
+      description: 'Sort comparator',
+      operation: 'sort',
+      primarySample: [9, -9, 5, -5, 0, 1, -1],
+      sort: 'asc'
+    };
+    const reference: FunctionReferenceValue = {
+      kind: 'function-reference',
+      functionId: 'absDiff'
+    };
+    const preview = evaluateListPreview(
+      listNode,
+      { callbackRef: reference },
+      {
+        invokeCallback: ({ args }) => {
+          const [a, b] = args.map((value) => Number(value ?? 0));
+          return (a * a - b * b) as ScalarValue;
+        }
+      }
+    );
+    expect(preview.value).toEqual([0, -1, 1, -5, 5, -9, 9]);
+  });
+
+  it('preserves original ordering when comparator reports ties', () => {
+    const listNode: ListNodeData = {
+      kind: 'list',
+      label: 'List',
+      description: 'Stable comparator',
+      operation: 'sort',
+      primarySample: ['a', 'b', 'c'] as unknown as ScalarValue[],
+      sort: 'asc'
+    };
+    const reference: FunctionReferenceValue = {
+      kind: 'function-reference',
+      functionId: 'noop'
+    };
+    const preview = evaluateListPreview(
+      listNode,
+      { callbackRef: reference },
+      {
+        invokeCallback: () => 0
+      }
+    );
+    expect(preview.value).toEqual(['a', 'b', 'c']);
   });
 
   it('merges objects for preview', () => {
