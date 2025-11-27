@@ -9,6 +9,20 @@ const STYLE_LOG_PREFIX = '[PageBuilder:StyleControls]';
 const HEX_COLOR_PATTERN = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/;
 const ATTRIBUTE_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_.:-]*$/;
 const DEFAULT_COLOR_FALLBACK = '#111827';
+const GRADIENT_PREFIXES = ['linear-gradient', 'radial-gradient'] as const;
+const MIN_GRADIENT_STOPS = 2;
+
+export type GradientType = (typeof GRADIENT_PREFIXES)[number] extends `${infer Prefix}-gradient` ? Prefix : never;
+export type GradientStop = {
+  id: string;
+  color: string;
+  position: number; // 0 - 1 inclusive
+};
+export type GradientConfig = {
+  type: GradientType;
+  angle: number;
+  stops: GradientStop[];
+};
 
 type ColorPickerFieldConfig = {
   label: string;
@@ -36,7 +50,7 @@ export type CustomAttribute = {
 
 export type CustomAttributeList = CustomAttribute[];
 
-const logStyleControlEvent = (message: string, details?: Record<string, unknown>) => {
+export const logStyleControlEvent = (message: string, details?: Record<string, unknown>) => {
   if (typeof console === 'undefined' || typeof console.info !== 'function') {
     return;
   }
@@ -51,6 +65,197 @@ const safeRandomId = () => {
 };
 
 const isValidHexColor = (value?: string): value is string => HEX_COLOR_PATTERN.test(value ?? '');
+
+const clamp = (value: number, min: number, max: number) => {
+  if (Number.isNaN(value)) {
+    return min;
+  }
+  return Math.min(Math.max(value, min), max);
+};
+
+const clampAngle = (value: number) => clamp(value, 0, 360);
+const clampStopPosition = (value: number) => clamp(value, 0, 1);
+
+const splitGradientArgs = (input: string): string[] => {
+  const segments: string[] = [];
+  let depth = 0;
+  let current = '';
+  for (const char of input) {
+    if (char === ',' && depth === 0) {
+      if (current.trim()) {
+        segments.push(current.trim());
+      }
+      current = '';
+      continue;
+    }
+    if (char === '(') {
+      depth += 1;
+    }
+    if (char === ')' && depth > 0) {
+      depth -= 1;
+    }
+    current += char;
+  }
+  if (current.trim()) {
+    segments.push(current.trim());
+  }
+  return segments;
+};
+
+const normalizeStops = (stops: GradientStop[]): GradientStop[] => {
+  const normalized = stops
+    .map((stop) => ({
+      ...stop,
+      color: isValidHexColor(stop.color) ? stop.color : DEFAULT_COLOR_FALLBACK,
+      position: clampStopPosition(stop.position)
+    }))
+    .sort((a, b) => a.position - b.position);
+
+  if (normalized.length >= MIN_GRADIENT_STOPS) {
+    return normalized;
+  }
+  if (normalized.length === 1) {
+    return [
+      normalized[0],
+      {
+        id: safeRandomId(),
+        color: normalized[0].color,
+        position: normalized[0].position === 1 ? 0 : 1
+      }
+    ];
+  }
+  return [
+    {
+      id: safeRandomId(),
+      color: DEFAULT_COLOR_FALLBACK,
+      position: 0
+    },
+    {
+      id: safeRandomId(),
+      color: '#F9E7B2',
+      position: 1
+    }
+  ];
+};
+
+export const normalizeGradientConfig = (config: GradientConfig): GradientConfig => ({
+  type: config.type,
+  angle: clampAngle(config.angle ?? 0),
+  stops: normalizeStops(config.stops ?? [])
+});
+
+export const createDefaultGradientConfig = (seedColor?: string): GradientConfig =>
+  normalizeGradientConfig({
+    type: 'linear',
+    angle: 90,
+    stops: [
+      { id: safeRandomId(), color: seedColor && isValidHexColor(seedColor) ? seedColor : DEFAULT_COLOR_FALLBACK, position: 0 },
+      { id: safeRandomId(), color: '#F9E7B2', position: 1 }
+    ]
+  });
+
+const formatStopPosition = (position: number) => {
+  const percent = clampStopPosition(position) * 100;
+  return percent % 1 === 0 ? `${percent}%` : `${percent.toFixed(2)}%`;
+};
+
+const GRADIENT_STOP_PATTERN = /(#[0-9a-fA-F]{3,6})\s+([0-9]*\.?[0-9]+)%$/;
+
+export const isGradientValue = (value?: string): boolean => {
+  if (!value) {
+    return false;
+  }
+  const trimmed = value.trim().toLowerCase();
+  return GRADIENT_PREFIXES.some((prefix) => trimmed.startsWith(prefix));
+};
+
+export const parseGradientValue = (value?: string): GradientConfig | null => {
+  if (!value) {
+    return null;
+  }
+  const trimmed = value.trim();
+  if (!isGradientValue(trimmed)) {
+    return null;
+  }
+  const lower = trimmed.toLowerCase();
+  const [matchedPrefix] = GRADIENT_PREFIXES.filter((prefix) => lower.startsWith(prefix));
+  if (!matchedPrefix) {
+    return null;
+  }
+  const payload = trimmed.slice(matchedPrefix.length + 1, -1);
+  const parts = splitGradientArgs(payload);
+  if (parts.length < MIN_GRADIENT_STOPS + 1 && matchedPrefix === 'linear-gradient') {
+    return null;
+  }
+
+  if (matchedPrefix === 'linear-gradient') {
+    const anglePart = parts[0];
+    const stops = parts.slice(1);
+    const parsedAngle = parseFloat(anglePart.replace(/deg/i, ''));
+    const parsedStops: GradientStop[] = stops
+      .map((stop) => {
+        const match = stop.match(GRADIENT_STOP_PATTERN);
+        if (!match) {
+          return null;
+        }
+        return {
+          id: safeRandomId(),
+          color: match[1],
+          position: clampStopPosition(parseFloat(match[2]) / 100)
+        };
+      })
+      .filter((stop): stop is GradientStop => Boolean(stop));
+    if (!parsedStops.length) {
+      return null;
+    }
+    return normalizeGradientConfig({
+      type: 'linear',
+      angle: parsedAngle,
+      stops: parsedStops
+    });
+  }
+
+  if (matchedPrefix === 'radial-gradient') {
+    const stops = parts[0]?.toLowerCase().startsWith('circle') ? parts.slice(1) : parts;
+    if (stops.length < MIN_GRADIENT_STOPS) {
+      return null;
+    }
+    const parsedStops: GradientStop[] = stops
+      .map((stop) => {
+        const match = stop.match(GRADIENT_STOP_PATTERN);
+        if (!match) {
+          return null;
+        }
+        return {
+          id: safeRandomId(),
+          color: match[1],
+          position: clampStopPosition(parseFloat(match[2]) / 100)
+        };
+      })
+      .filter((stop): stop is GradientStop => Boolean(stop));
+    if (!parsedStops.length) {
+      return null;
+    }
+    return normalizeGradientConfig({
+      type: 'radial',
+      angle: 0,
+      stops: parsedStops
+    });
+  }
+
+  return null;
+};
+
+export const stringifyGradientConfig = (config: GradientConfig): string => {
+  const normalized = normalizeGradientConfig(config);
+  const stops = normalized.stops
+    .map((stop) => `${stop.color} ${formatStopPosition(stop.position)}`)
+    .join(', ');
+  if (normalized.type === 'radial') {
+    return `radial-gradient(circle, ${stops})`;
+  }
+  return `linear-gradient(${normalized.angle}deg, ${stops})`;
+};
 
 export const deriveColorPickerValue = (value?: string, fallback = DEFAULT_COLOR_FALLBACK) =>
   isValidHexColor(value) ? value : fallback;
@@ -462,7 +667,12 @@ export const createInlineStyle = (
   assign('fontWeight', read('fontWeight') as CSSProperties['fontWeight']);
   assign('lineHeight', read('lineHeight') as CSSProperties['lineHeight']);
   assign('color', read('textColor'));
-  assign('backgroundColor', read('backgroundColor'));
+  const backgroundValue = read('backgroundColor');
+  if (isGradientValue(backgroundValue)) {
+    assign('backgroundImage', backgroundValue as CSSProperties['backgroundImage']);
+  } else {
+    assign('backgroundColor', backgroundValue);
+  }
   assign('width', read('width'));
   assign('maxWidth', read('maxWidth'));
   assign('minHeight', read('minHeight'));
@@ -471,7 +681,13 @@ export const createInlineStyle = (
   assign('borderRadius', read('borderRadius'));
   const borderWidthValue = read('borderWidth');
   assign('borderWidth', borderWidthValue);
-  assign('borderColor', read('borderColor'));
+  const borderColorValue = read('borderColor');
+  if (isGradientValue(borderColorValue)) {
+    assign('borderImageSlice', 1 as CSSProperties['borderImageSlice']);
+    assign('borderImageSource', borderColorValue as CSSProperties['borderImageSource']);
+  } else {
+    assign('borderColor', borderColorValue);
+  }
   assign('boxShadow', read('boxShadow'));
   assign('opacity', read('opacity') as CSSProperties['opacity']);
 
@@ -674,6 +890,240 @@ const CustomCssFieldControl = ({ bindingOptions, placeholder, ...rest }: CustomC
   />
 );
 
+type GradientBuilderProps = {
+  config: GradientConfig;
+  readOnly?: boolean;
+  onConfigChange: (updater: (prev: GradientConfig) => GradientConfig) => void;
+  onManualValueChange: (value: string) => void;
+  currentValue: string;
+  fieldKey: string;
+};
+
+const findNextStopPosition = (stops: GradientStop[]): number => {
+  if (!stops.length) {
+    return 0.5;
+  }
+  const ordered = [...stops].sort((a, b) => a.position - b.position);
+  let largestGapMidpoint = 0.5;
+  let largestGap = -1;
+  for (let index = 0; index < ordered.length - 1; index += 1) {
+    const current = ordered[index];
+    const next = ordered[index + 1];
+    const gap = next.position - current.position;
+    if (gap > largestGap) {
+      largestGap = gap;
+      largestGapMidpoint = current.position + gap / 2;
+    }
+  }
+  if (largestGap <= 0) {
+    return clampStopPosition((ordered[0]?.position ?? 0) + 0.5);
+  }
+  return clampStopPosition(largestGapMidpoint);
+};
+
+const GradientBuilder = ({
+  config,
+  readOnly,
+  onConfigChange,
+  onManualValueChange,
+  currentValue,
+  fieldKey
+}: GradientBuilderProps) => {
+  const gradientValue = isGradientValue(currentValue) ? currentValue : stringifyGradientConfig(config);
+
+  const handleTypeChange = (event: ChangeEvent<HTMLSelectElement>) => {
+    if (readOnly) {
+      return;
+    }
+    const nextType = event.target.value as GradientType;
+    logStyleControlEvent('Gradient type changed', { fieldKey, type: nextType });
+    onConfigChange((prev) => ({ ...prev, type: nextType }));
+  };
+
+  const handleAngleChange = (event: ChangeEvent<HTMLInputElement>) => {
+    if (readOnly) {
+      return;
+    }
+    const nextAngle = clampAngle(parseFloat(event.target.value));
+    logStyleControlEvent('Gradient angle changed', { fieldKey, angle: nextAngle });
+    onConfigChange((prev) => ({ ...prev, angle: nextAngle }));
+  };
+
+  const handleAddStop = () => {
+    if (readOnly) {
+      return;
+    }
+    const nextStop: GradientStop = {
+      id: safeRandomId(),
+      color: config.stops[config.stops.length - 1]?.color ?? DEFAULT_COLOR_FALLBACK,
+      position: findNextStopPosition(config.stops)
+    };
+    logStyleControlEvent('Gradient stop added', { fieldKey, stopId: nextStop.id, position: nextStop.position });
+    onConfigChange((prev) => ({ ...prev, stops: [...prev.stops, nextStop] }));
+  };
+
+  const handleRemoveStop = (stopId: string) => {
+    if (readOnly) {
+      return;
+    }
+    if (config.stops.length <= MIN_GRADIENT_STOPS) {
+      logStyleControlEvent('Gradient stop removal blocked', { fieldKey, reason: 'min-stops' });
+      return;
+    }
+    logStyleControlEvent('Gradient stop removed', { fieldKey, stopId });
+    onConfigChange((prev) => ({ ...prev, stops: prev.stops.filter((stop) => stop.id !== stopId) }));
+  };
+
+  const handleStopColorChange = (stopId: string, nextColor: string) => {
+    if (readOnly) {
+      return;
+    }
+    if (!isValidHexColor(nextColor)) {
+      logStyleControlEvent('Gradient stop color rejected', { fieldKey, stopId, value: nextColor });
+      return;
+    }
+    logStyleControlEvent('Gradient stop color changed', { fieldKey, stopId, value: nextColor });
+    onConfigChange((prev) => ({
+      ...prev,
+      stops: prev.stops.map((stop) => (stop.id === stopId ? { ...stop, color: nextColor } : stop))
+    }));
+  };
+
+  const handleStopPositionChange = (stopId: string, nextPosition: number) => {
+    if (readOnly) {
+      return;
+    }
+    const clamped = clampStopPosition(nextPosition);
+    logStyleControlEvent('Gradient stop position changed', { fieldKey, stopId, position: clamped });
+    onConfigChange((prev) => ({
+      ...prev,
+      stops: prev.stops.map((stop) => (stop.id === stopId ? { ...stop, position: clamped } : stop))
+    }));
+  };
+
+  const handleManualCssChange = (event: ChangeEvent<HTMLInputElement>) => {
+    const next = event.target.value;
+    logStyleControlEvent('Gradient CSS manually edited', { fieldKey, length: next.length });
+    onManualValueChange(next);
+  };
+
+  const orderedStops = [...config.stops].sort((a, b) => a.position - b.position);
+
+  return (
+    <div className="space-y-3">
+      <div className="h-16 w-full rounded-lg border border-gray-200" style={{ backgroundImage: stringifyGradientConfig(config) }} />
+      <div className="space-y-1">
+        <label className="text-[0.6rem] uppercase tracking-[0.3em] text-gray-400" htmlFor={`${fieldKey}-gradient-type`}>
+          Gradient type
+        </label>
+        <select
+          id={`${fieldKey}-gradient-type`}
+          className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 focus:border-bw-amber focus:outline-none disabled:cursor-not-allowed"
+          value={config.type}
+          onChange={handleTypeChange}
+          disabled={readOnly}
+        >
+          <option value="linear">Linear</option>
+          <option value="radial">Radial</option>
+        </select>
+      </div>
+      {config.type === 'linear' ? (
+        <div className="space-y-1">
+          <label className="text-[0.6rem] uppercase tracking-[0.3em] text-gray-400" htmlFor={`${fieldKey}-gradient-angle`}>
+            Angle ({config.angle}°)
+          </label>
+          <div className="flex items-center gap-3">
+            <input
+              id={`${fieldKey}-gradient-angle`}
+              type="range"
+              min={0}
+              max={360}
+              step={1}
+              className="flex-1"
+              value={config.angle}
+              onChange={handleAngleChange}
+              aria-label="Gradient angle"
+              disabled={readOnly}
+            />
+            <input
+              type="number"
+              min={0}
+              max={360}
+              step={1}
+              className="w-20 rounded border border-gray-200 px-2 py-1 text-sm text-gray-900"
+              value={config.angle}
+              onChange={handleAngleChange}
+              aria-label="Gradient angle numeric"
+              disabled={readOnly}
+            />
+          </div>
+        </div>
+      ) : null}
+      <div className="space-y-2">
+        <div className="flex items-center justify-between">
+          <p className="text-[0.6rem] uppercase tracking-[0.3em] text-gray-400">Color stops</p>
+          <button
+            type="button"
+            onClick={handleAddStop}
+            className="text-xs font-semibold text-bw-amber disabled:cursor-not-allowed disabled:opacity-60"
+            disabled={readOnly}
+          >
+            Add stop
+          </button>
+        </div>
+        <div className="space-y-2">
+          {orderedStops.map((stop, index) => (
+            <div key={stop.id} className="max-w-full min-w-full flex flex-col gap-2 rounded-lg border border-gray-200 p-3">
+              <div className="w-full flex items-center gap-3">
+                <input
+                  type="color"
+                  className="h-9 aspect-square cursor-pointer rounded border border-gray-300 bg-white p-0 disabled:cursor-not-allowed"
+                  value={stop.color}
+                  onChange={(event) => handleStopColorChange(stop.id, event.target.value)}
+                  aria-label={`Color stop ${index + 1} color`}
+                  disabled={readOnly}
+                />
+                <input
+                  type="number"
+                  min={0}
+                  max={1}
+                  step={0.01}
+                  className="rounded border border-gray-200 px-2 py-1 text-sm text-gray-900"
+                  value={stop.position.toFixed(2)}
+                  onChange={(event) => handleStopPositionChange(stop.id, parseFloat(event.target.value))}
+                  aria-label={`Color stop ${index + 1} position`}
+                  disabled={readOnly}
+                />
+                <button
+                  type="button"
+                  className="text-xs text-red-500 disabled:cursor-not-allowed disabled:opacity-60"
+                  onClick={() => handleRemoveStop(stop.id)}
+                  disabled={readOnly || orderedStops.length <= MIN_GRADIENT_STOPS}
+                >
+                  Remove
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+      <div className="space-y-1">
+        <label className="text-[0.6rem] uppercase tracking-[0.3em] text-gray-400" htmlFor={`${fieldKey}-gradient-css`}>
+          Gradient CSS
+        </label>
+        <input
+          id={`${fieldKey}-gradient-css`}
+          type="text"
+          className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 focus:border-bw-amber focus:outline-none"
+          value={gradientValue}
+          onChange={handleManualCssChange}
+          disabled={readOnly}
+        />
+      </div>
+    </div>
+  );
+};
+
 const ColorPickerStaticControl = ({
   inputId,
   value,
@@ -684,7 +1134,34 @@ const ColorPickerStaticControl = ({
 }: StaticControlRendererProps & { placeholder?: string; fieldKey: string }) => {
   const colorInputId = `${inputId}-color`;
   const textInputId = `${inputId}-text`;
+  const modeSelectId = `${inputId}-mode`;
+  const [colorMode, setColorMode] = useState<'solid' | 'gradient'>(() => (isGradientValue(value) ? 'gradient' : 'solid'));
+  const [gradientConfig, setGradientConfig] = useState<GradientConfig>(() =>
+    parseGradientValue(value) ?? createDefaultGradientConfig(value && isValidHexColor(value) ? value : undefined)
+  );
   const colorPickerValue = deriveColorPickerValue(value);
+
+  useEffect(() => {
+    if (isGradientValue(value)) {
+      setColorMode('gradient');
+      const parsed = parseGradientValue(value);
+      if (parsed) {
+        setGradientConfig(parsed);
+      }
+      return;
+    }
+    setColorMode('solid');
+  }, [value]);
+
+  const updateGradientConfig = (updater: (prev: GradientConfig) => GradientConfig) => {
+    setGradientConfig((prev) => {
+      const nextConfig = normalizeGradientConfig(updater(prev));
+      const cssValue = stringifyGradientConfig(nextConfig);
+      logStyleControlEvent('Gradient updated', { fieldKey, value: cssValue });
+      onChange(cssValue);
+      return nextConfig;
+    });
+  };
 
   const handleColorChange = (event: ChangeEvent<HTMLInputElement>) => {
     const next = event.target.value;
@@ -698,38 +1175,95 @@ const ColorPickerStaticControl = ({
     onChange(next);
   };
 
+  const handleManualGradientInput = (next: string) => {
+    logStyleControlEvent('Gradient manual input received', { fieldKey });
+    onChange(next);
+    const parsed = parseGradientValue(next);
+    if (parsed) {
+      setGradientConfig(parsed);
+    }
+  };
+
   const handleReset = () => {
     logStyleControlEvent('Color reset requested', { fieldKey });
+    onChange('');
+    setColorMode('solid');
+  };
+
+  const handleModeChange = (event: ChangeEvent<HTMLSelectElement>) => {
+    const nextMode = event.target.value as 'solid' | 'gradient';
+    setColorMode(nextMode);
+    if (nextMode === 'gradient') {
+      let nextConfig = gradientConfig;
+      if (isValidHexColor(value)) {
+        nextConfig = normalizeGradientConfig({
+          ...gradientConfig,
+          stops: gradientConfig.stops.map((stop, index) => (index === 0 ? { ...stop, color: value } : stop))
+        });
+        setGradientConfig(nextConfig);
+      }
+      const cssValue = stringifyGradientConfig(nextConfig);
+      logStyleControlEvent('Color mode switched to gradient', { fieldKey, value: cssValue });
+      onChange(cssValue);
+      return;
+    }
+    logStyleControlEvent('Color mode switched to solid', { fieldKey });
     onChange('');
   };
 
   return (
-    <div className="space-y-2">
+    <div className="space-y-3">
       <div className="flex items-center gap-3">
-        <input
-          id={colorInputId}
-          type="color"
-          className="h-9 w-10 cursor-pointer rounded border border-gray-300 bg-white p-0 disabled:cursor-not-allowed"
-          aria-label="Color picker"
-          value={colorPickerValue}
-          onChange={handleColorChange}
+        <label htmlFor={modeSelectId} className="text-[0.6rem] uppercase tracking-[0.3em] text-gray-400">
+          Mode
+        </label>
+        <select
+          id={modeSelectId}
+          className="flex-1 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 focus:border-bw-amber focus:outline-none"
+          value={colorMode}
+          onChange={handleModeChange}
           disabled={readOnly}
-        />
-        <input
-          id={textInputId}
-          type="text"
-          className="flex-1 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:border-bw-amber focus:outline-none"
-          value={value ?? ''}
-          onChange={handleTextChange}
-          placeholder={placeholder}
-          disabled={readOnly}
-        />
+        >
+          <option value="solid">Solid</option>
+          <option value="gradient">Gradient</option>
+        </select>
         {value && !readOnly ? (
           <button type="button" onClick={handleReset} className="text-xs font-semibold text-bw-amber">
             Reset
           </button>
         ) : null}
       </div>
+      {colorMode === 'solid' ? (
+        <div className="flex items-center gap-3">
+          <input
+            id={colorInputId}
+            type="color"
+            className="h-9 w-10 cursor-pointer rounded border border-gray-300 bg-white p-0 disabled:cursor-not-allowed"
+            aria-label="Color picker"
+            value={colorPickerValue}
+            onChange={handleColorChange}
+            disabled={readOnly}
+          />
+          <input
+            id={textInputId}
+            type="text"
+            className="flex-1 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:border-bw-amber focus:outline-none"
+            value={value ?? ''}
+            onChange={handleTextChange}
+            placeholder={placeholder}
+            disabled={readOnly}
+          />
+        </div>
+      ) : (
+        <GradientBuilder
+          config={gradientConfig}
+          readOnly={readOnly}
+          onConfigChange={updateGradientConfig}
+          onManualValueChange={handleManualGradientInput}
+          currentValue={value ?? ''}
+          fieldKey={fieldKey}
+        />
+      )}
     </div>
   );
 };

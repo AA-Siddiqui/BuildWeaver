@@ -1,9 +1,13 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import {
   buildAttributeProps,
+  createDefaultGradientConfig,
   createInlineStyle,
   deriveColorPickerValue,
+  isGradientValue,
+  parseGradientValue,
   splitStyleProps,
+  stringifyGradientConfig,
   withStyleFields
 } from './style-controls';
 import type { BindingOption } from './dynamic-binding';
@@ -52,6 +56,28 @@ describe('style-controls helpers', () => {
       { id: '3', name: 'aria-label', value: 'Hero heading' }
     ]);
     expect(props).toEqual({ 'data-testid': 'hero-heading', 'aria-label': 'Hero heading' });
+  });
+
+  it('round-trips gradient configs to CSS strings', () => {
+    const config = createDefaultGradientConfig('#FFFFFF');
+    const cssValue = stringifyGradientConfig(config);
+    expect(isGradientValue(cssValue)).toBe(true);
+    const parsed = parseGradientValue(cssValue);
+    expect(parsed).not.toBeNull();
+    expect(parsed?.type).toBe('linear');
+    expect(parsed?.stops).toHaveLength(config.stops.length);
+  });
+
+  it('applies gradients to inline styles for backgrounds and borders', () => {
+    const gradient = 'linear-gradient(90deg, #111827 0%, #F9E7B2 100%)';
+    const style = createInlineStyle({
+      backgroundColor: gradient,
+      borderColor: gradient,
+      borderWidth: '2px'
+    });
+    expect(style.backgroundImage).toBe(gradient);
+    expect(style.borderImageSource).toBe(gradient);
+    expect(style.borderImageSlice).toBe(1);
   });
 });
 
@@ -142,5 +168,35 @@ describe('style-control custom fields', () => {
     );
     fireEvent.change(screen.getByLabelText(/custom css/i), { target: { value: 'color: red;' } });
     expect(handleChange).toHaveBeenCalledWith('color: red;');
+  });
+
+  it('switches to gradient mode and updates stops', () => {
+    const fields = withStyleFields({}, bindingOptions);
+    const colorField = fields.backgroundColor;
+    if (!colorField || colorField.type !== 'custom') {
+      throw new Error('Expected backgroundColor custom field');
+    }
+    const handleChange = jest.fn();
+    render(
+      colorField.render({
+        field: colorField,
+        value: '#111827',
+        id: 'bg-color-field',
+        name: 'backgroundColor',
+        onChange: handleChange
+      } as Parameters<NonNullable<typeof colorField.render>>[0])
+    );
+    fireEvent.change(screen.getByLabelText(/mode/i), { target: { value: 'gradient' } });
+    expect(handleChange).toHaveBeenCalledWith(expect.stringMatching(/linear-gradient/));
+    const gradientInput = screen.getByLabelText(/gradient css/i);
+    fireEvent.change(gradientInput, {
+      target: { value: 'linear-gradient(45deg, #111827 0%, #F9E7B2 100%)' }
+    });
+    expect(handleChange).toHaveBeenLastCalledWith('linear-gradient(45deg, #111827 0%, #F9E7B2 100%)');
+    fireEvent.click(screen.getByRole('button', { name: /add stop/i }));
+    expect(handleChange).toHaveBeenLastCalledWith(expect.stringMatching(/linear-gradient/));
+    const stopPositionInput = screen.getAllByLabelText(/position/i)[0];
+    fireEvent.change(stopPositionInput, { target: { value: '0.25' } });
+    expect(handleChange).toHaveBeenLastCalledWith(expect.stringMatching(/25%/));
   });
 });

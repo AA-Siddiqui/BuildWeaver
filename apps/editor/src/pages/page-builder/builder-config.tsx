@@ -3,6 +3,7 @@ import type { CSSProperties, ReactNode } from 'react';
 import {
   buildAttributeProps,
   createInlineStyle,
+  logStyleControlEvent,
   splitStyleProps,
   withStyleFields,
   type StyleableProps
@@ -33,6 +34,46 @@ type SectionProps = StyleableProps<{
   backgroundImage?: DynamicBindingValue;
   contentSlot?: SlotRenderer;
 }>;
+
+export const mergeSectionBackgrounds = (
+  baseInlineStyle: CSSProperties,
+  resolvedBackground?: string,
+  sectionId?: string
+): CSSProperties => {
+  const gradientLayer = typeof baseInlineStyle.backgroundImage === 'string' ? baseInlineStyle.backgroundImage : undefined;
+  const photoLayer = resolvedBackground ? `url(${resolvedBackground})` : undefined;
+  const mergedLayers = [gradientLayer, photoLayer].filter(Boolean) as string[];
+  const mergedBackgroundImage = mergedLayers.length ? mergedLayers.join(', ') : undefined;
+  const backgroundSize = photoLayer
+    ? gradientLayer
+      ? `${baseInlineStyle.backgroundSize ?? 'auto'}, cover`
+      : 'cover'
+    : baseInlineStyle.backgroundSize;
+  const backgroundPosition = photoLayer
+    ? gradientLayer
+      ? `${baseInlineStyle.backgroundPosition ?? '0% 0%'}, center`
+      : 'center'
+    : baseInlineStyle.backgroundPosition;
+
+  if (photoLayer && gradientLayer) {
+    logStyleControlEvent('Section layering gradient over background image', {
+      sectionId,
+      gradientLayer,
+      photoLayer
+    });
+  } else if (photoLayer) {
+    logStyleControlEvent('Section applying photo background', { sectionId, photoLayer });
+  } else if (gradientLayer) {
+    logStyleControlEvent('Section applying gradient background', { sectionId, gradientLayer });
+  }
+
+  return {
+    ...baseInlineStyle,
+    backgroundImage: mergedBackgroundImage,
+    backgroundSize,
+    backgroundPosition
+  };
+};
 
 type ColumnsProps = StyleableProps<{
   left?: SlotRenderer;
@@ -314,12 +355,8 @@ export const createPageBuilderConfig = ({ bindingOptions, resolveBinding }: Buil
         const resolvedSubheading = resolveFieldValue(subheading);
         const resolvedDescription = resolveFieldValue(description);
         const resolvedBackground = resolveFieldValue(backgroundImage);
-        const inlineStyle = {
-          ...createInlineStyle(styleProps, resolveStyleValue),
-          backgroundImage: resolvedBackground ? `url(${resolvedBackground})` : undefined,
-          backgroundSize: resolvedBackground ? 'cover' : undefined,
-          backgroundPosition: resolvedBackground ? 'center' : undefined
-        };
+        const baseInlineStyle = createInlineStyle(styleProps, resolveStyleValue);
+        const inlineStyle = mergeSectionBackgrounds(baseInlineStyle, resolvedBackground, id);
         const attributeProps = attachNodeIdentity(id, buildAttributeProps(customAttributes));
         return (
           <>

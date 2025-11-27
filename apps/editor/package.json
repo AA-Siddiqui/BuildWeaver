@@ -7,7 +7,7 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "lint": "eslint src --ext ts,tsx",
-    "test": "jest",
+    "test": "jest --runInBand",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
