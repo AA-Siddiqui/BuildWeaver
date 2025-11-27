@@ -149,7 +149,7 @@ const allowAllComponents = COMPONENT_ORDER.filter(Boolean);
 
 const renderSlot = (slot?: SlotRenderer, emptyLabel = 'Drag components here', minEmptyHeight = 60) => {
   if (slot) {
-    return slot({ className: 'rounded-xl border border-dashed border-gray-200 bg-gray-50', minEmptyHeight });
+    return slot({ className: 'rounded-xl border border-dashed', minEmptyHeight });
   }
   return (
     <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50/80 p-4 text-center text-xs text-gray-500">
