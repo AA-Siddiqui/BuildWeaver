@@ -8,6 +8,7 @@ import {
   NodeChange,
   ReactFlow,
   ReactFlowProvider,
+  XYPosition,
   addEdge,
   useEdgesState,
   useNodesState,
@@ -35,6 +36,7 @@ import { ConditionalNode } from '../components/logic/ConditionalNode';
 import { LogicalOperatorNode } from '../components/logic/LogicalOperatorNode';
 import { RelationalOperatorNode } from '../components/logic/RelationalOperatorNode';
 import { PreviewResolverProvider, createPreviewResolver } from '../components/logic/previewResolver';
+import { SeverableEdge } from '../components/logic/SeverableEdge';
 import { logicLogger } from '../lib/logger';
 import { useDeleteNodesShortcut } from '../hooks/useDeleteNodesShortcut';
 import { LogicNavigationProvider } from '../components/logic/LogicNavigationContext';
@@ -59,6 +61,13 @@ import { FunctionArgumentNode } from '../components/logic/function/FunctionArgum
 import { FunctionReturnNode } from '../components/logic/function/FunctionReturnNode';
 import { FunctionEditorModal } from '../components/logic/function/FunctionEditorModal';
 import { FunctionRegistryProvider } from '../components/logic/function/FunctionRegistryContext';
+import { LogicEdgeActionsProvider, SeverEdgeReason } from '../components/logic/LogicEdgeActionsContext';
+import {
+  buildNodePositionMap,
+  createRectFromPoints,
+  findEdgesIntersectingSegment,
+  getNodesWithinRect
+} from '../lib/graphInteractions';
 
 const nodeTypes = {
   dummy: DummyNode,
@@ -73,6 +82,10 @@ const nodeTypes = {
   function: FunctionNode,
   'function-argument': FunctionArgumentNode,
   'function-return': FunctionReturnNode
+};
+
+const edgeTypes = {
+  severable: SeverableEdge
 };
 
 export const isTargetHandleFree = (edges: Edge[], connection: Partial<Connection>): boolean => {
@@ -92,6 +105,28 @@ type StaticPaletteNodeType = Exclude<PaletteNodeType, 'page'>;
 
 const isStaticPaletteNodeType = (value: PaletteNodeType): value is StaticPaletteNodeType => value !== 'page';
 
+const ensureSeverableEdges = (incoming: FlowEdge[]): FlowEdge[] =>
+  incoming.map((edge) => (edge.type === 'severable' ? edge : { ...edge, type: 'severable' }));
+
+type ScreenPoint = { x: number; y: number };
+
+type GestureState = {
+  startFlow: XYPosition;
+  currentFlow: XYPosition;
+  startScreen: ScreenPoint;
+  currentScreen: ScreenPoint;
+};
+
+type InteractionMode = 'cut' | 'marquee';
+
+const MIN_GESTURE_DISTANCE = 6;
+
+const gestureDistance = (gesture: GestureState): number =>
+  Math.hypot(gesture.currentFlow.x - gesture.startFlow.x, gesture.currentFlow.y - gesture.startFlow.y);
+
+const isPaneTarget = (target: EventTarget | null): target is HTMLElement =>
+  target instanceof HTMLElement && Boolean(target.closest('.react-flow__pane'));
+
 const LogicEditorView = () => {
   const { projectId } = useParams<{ projectId: string }>();
   const navigate = useNavigate();
@@ -105,12 +140,18 @@ const LogicEditorView = () => {
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>([]);
   const [feedback, setFeedback] = useState('');
+  const [edgeCutGesture, setEdgeCutGesture] = useState<GestureState | null>(null);
+  const [marqueeGesture, setMarqueeGesture] = useState<GestureState | null>(null);
   const previewResolver = useMemo(
     () => createPreviewResolver(nodes, edges, { functions }),
     [nodes, edges, functions]
   );
   const connectionLineStyle = useMemo(() => ({ stroke: '#F9E7B2', strokeWidth: 2 }), []);
   const pendingSaveRef = useRef<Promise<unknown> | null>(null);
+  const interactionRef = useRef<{ mode: InteractionMode; pointerId: number } | null>(null);
+  const edgeCutGestureRef = useRef<GestureState | null>(null);
+  const marqueeGestureRef = useRef<GestureState | null>(null);
+  const edgesRef = useRef<FlowEdge[]>(edges);
   const deleteElements = useCallback(
     (elements: { nodes?: FlowNode[]; edges?: FlowEdge[] }) => {
       reactFlowInstance.deleteElements(elements);
@@ -133,9 +174,40 @@ const LogicEditorView = () => {
     }
   });
 
+  const severEdges = useCallback(
+    (edgeIds: string[], metadata: { reason: SeverEdgeReason }) => {
+      if (!edgeIds.length) {
+        logicLogger.debug('Edge sever requested without targets', { projectId, reason: metadata.reason });
+        return;
+      }
+      setEdges((current: FlowEdge[]) => current.filter((edge) => !edgeIds.includes(edge.id)));
+      setHasUnsavedChanges(true);
+      setFeedback(`Removed ${edgeIds.length} connection${edgeIds.length > 1 ? 's' : ''}`);
+      setTimeout(() => setFeedback(''), 2000);
+      logicLogger.info('Connections severed', {
+        projectId,
+        count: edgeIds.length,
+        reason: metadata.reason
+      });
+    },
+    [projectId, setEdges]
+  );
+
   useEffect(() => {
     setFeedback('');
   }, [projectId]);
+
+  useEffect(() => {
+    edgesRef.current = edges;
+  }, [edges]);
+
+  useEffect(() => {
+    edgeCutGestureRef.current = edgeCutGesture;
+  }, [edgeCutGesture]);
+
+  useEffect(() => {
+    marqueeGestureRef.current = marqueeGesture;
+  }, [marqueeGesture]);
 
   useEffect(() => {
     setSelectedNodeIds((current) => {
@@ -168,7 +240,7 @@ const LogicEditorView = () => {
   useEffect(() => {
     if (graphQuery.data?.graph) {
       setNodes(toFlowNodes(graphQuery.data.graph.nodes));
-      setEdges(toFlowEdges(graphQuery.data.graph.edges));
+      setEdges(ensureSeverableEdges(toFlowEdges(graphQuery.data.graph.edges)));
       setFunctions(graphQuery.data.graph.functions ?? []);
       setHasUnsavedChanges(false);
       setTimeout(() => {
@@ -186,7 +258,7 @@ const LogicEditorView = () => {
     onSuccess: ({ graph }) => {
       logicLogger.info('Graph saved', { projectId, nodes: graph.nodes.length, edges: graph.edges.length });
       setNodes(toFlowNodes(graph.nodes));
-      setEdges(toFlowEdges(graph.edges));
+      setEdges(ensureSeverableEdges(toFlowEdges(graph.edges)));
       setFunctions(graph.functions ?? []);
       setHasUnsavedChanges(false);
       setFeedback('Saved');
@@ -246,7 +318,14 @@ const LogicEditorView = () => {
       }
       logicLogger.debug('Nodes connected', { source: connection.source, target: connection.target });
       setHasUnsavedChanges(true);
-      setEdges((eds: FlowEdge[]) => addEdge({ ...connection, id: `${connection.source}-${connection.target}-${Date.now()}` }, eds));
+      setEdges((eds: FlowEdge[]) =>
+        ensureSeverableEdges(
+          addEdge(
+            { ...connection, id: `${connection.source}-${connection.target}-${Date.now()}`, type: 'severable' },
+            eds
+          )
+        )
+      );
     },
     [isHandleAvailable, setEdges]
   );
@@ -532,6 +611,237 @@ const LogicEditorView = () => {
     setSelectedNodeIds(selected.map((node) => node.id));
   }, []);
 
+  const projectPointer = useCallback(
+    (event: PointerEvent): { screen: ScreenPoint; flow: XYPosition } | null => {
+      const bounds = reactFlowWrapper.current?.getBoundingClientRect();
+      if (!bounds) {
+        logicLogger.warn('Unable to project pointer without wrapper bounds', { projectId });
+        return null;
+      }
+      const localX = event.clientX - bounds.left;
+      const localY = event.clientY - bounds.top;
+      const flowPoint = reactFlowInstance.project({ x: localX, y: localY });
+      return {
+        screen: { x: localX, y: localY },
+        flow: flowPoint
+      };
+    },
+    [projectId, reactFlowInstance]
+  );
+
+  const beginCutGesture = useCallback(
+    (event: PointerEvent) => {
+      const projected = projectPointer(event);
+      if (!projected) {
+        return;
+      }
+      const gesture: GestureState = {
+        startFlow: projected.flow,
+        currentFlow: projected.flow,
+        startScreen: projected.screen,
+        currentScreen: projected.screen
+      };
+      interactionRef.current = { mode: 'cut', pointerId: event.pointerId };
+      setEdgeCutGesture(gesture);
+      edgeCutGestureRef.current = gesture;
+      logicLogger.debug('Edge cut gesture started', { projectId, x: gesture.startFlow.x, y: gesture.startFlow.y });
+    },
+    [projectId, projectPointer]
+  );
+
+  const beginMarqueeGesture = useCallback(
+    (event: PointerEvent) => {
+      const projected = projectPointer(event);
+      if (!projected) {
+        return;
+      }
+      const gesture: GestureState = {
+        startFlow: projected.flow,
+        currentFlow: projected.flow,
+        startScreen: projected.screen,
+        currentScreen: projected.screen
+      };
+      interactionRef.current = { mode: 'marquee', pointerId: event.pointerId };
+      setMarqueeGesture(gesture);
+      marqueeGestureRef.current = gesture;
+      logicLogger.debug('Marquee selection started', { projectId, x: gesture.startFlow.x, y: gesture.startFlow.y });
+    },
+    [projectId, projectPointer]
+  );
+
+  const updateCutGesture = useCallback(
+    (event: PointerEvent) => {
+      const projected = projectPointer(event);
+      if (!projected) {
+        return;
+      }
+      setEdgeCutGesture((current) => {
+        if (!current) {
+          return current;
+        }
+        const next: GestureState = {
+          ...current,
+          currentFlow: projected.flow,
+          currentScreen: projected.screen
+        };
+        edgeCutGestureRef.current = next;
+        return next;
+      });
+    },
+    [projectPointer]
+  );
+
+  const updateMarqueeGesture = useCallback(
+    (event: PointerEvent) => {
+      const projected = projectPointer(event);
+      if (!projected) {
+        return;
+      }
+      setMarqueeGesture((current) => {
+        if (!current) {
+          return current;
+        }
+        const next: GestureState = {
+          ...current,
+          currentFlow: projected.flow,
+          currentScreen: projected.screen
+        };
+        marqueeGestureRef.current = next;
+        return next;
+      });
+    },
+    [projectPointer]
+  );
+
+  const finalizeCutGesture = useCallback(() => {
+    const gesture = edgeCutGestureRef.current;
+    setEdgeCutGesture(null);
+    edgeCutGestureRef.current = null;
+    if (!gesture) {
+      return;
+    }
+    const distance = gestureDistance(gesture);
+    if (distance < MIN_GESTURE_DISTANCE) {
+      logicLogger.debug('Edge cut gesture cancelled due to small distance', { projectId, distance });
+      return;
+    }
+    const nodePositions = buildNodePositionMap(reactFlowInstance.getNodes());
+    const intersecting = findEdgesIntersectingSegment(edgesRef.current, nodePositions, {
+      start: gesture.startFlow,
+      end: gesture.currentFlow
+    });
+    if (intersecting.length === 0) {
+      logicLogger.debug('Edge cut gesture finished without intersections', { projectId, distance });
+      return;
+    }
+    severEdges(intersecting, { reason: 'cut-gesture' });
+  }, [projectId, reactFlowInstance, severEdges]);
+
+  const finalizeMarqueeGesture = useCallback(() => {
+    const gesture = marqueeGestureRef.current;
+    setMarqueeGesture(null);
+    marqueeGestureRef.current = null;
+    if (!gesture) {
+      return;
+    }
+    const rect = createRectFromPoints(gesture.startFlow, gesture.currentFlow);
+    if (!rect) {
+      logicLogger.debug('Marquee gesture cancelled due to insufficient area', { projectId });
+      return;
+    }
+    const rfNodes = reactFlowInstance.getNodes();
+    const selectedNodes = getNodesWithinRect(rfNodes, rect);
+    const selectedIds = selectedNodes.map((node) => node.id);
+    const selectionSet = new Set(selectedIds);
+    reactFlowInstance.setNodes((current) =>
+      current.map((node) => {
+        const shouldSelect = selectionSet.has(node.id);
+        return node.selected === shouldSelect ? node : { ...node, selected: shouldSelect };
+      })
+    );
+    setSelectedNodeIds(selectedIds);
+    logicLogger.info('Marquee selection applied', { projectId, count: selectedIds.length, rect });
+    setFeedback(selectedIds.length ? `Selected ${selectedIds.length} node${selectedIds.length > 1 ? 's' : ''}` : 'No nodes selected');
+    setTimeout(() => setFeedback(''), 2000);
+  }, [projectId, reactFlowInstance]);
+
+  const handlePanePointerDown = useCallback(
+    (event: PointerEvent) => {
+      if (event.button !== 0 || interactionRef.current) {
+        return;
+      }
+      if (!isPaneTarget(event.target)) {
+        return;
+      }
+      if (event.ctrlKey) {
+        event.preventDefault();
+        event.stopPropagation();
+        beginCutGesture(event);
+        return;
+      }
+      if (event.shiftKey) {
+        event.preventDefault();
+        event.stopPropagation();
+        beginMarqueeGesture(event);
+      }
+    },
+    [beginCutGesture, beginMarqueeGesture]
+  );
+
+  useEffect(() => {
+    const element = reactFlowWrapper.current;
+    if (!element) {
+      return;
+    }
+    element.addEventListener('pointerdown', handlePanePointerDown);
+    return () => {
+      element.removeEventListener('pointerdown', handlePanePointerDown);
+    };
+  }, [handlePanePointerDown]);
+
+  useEffect(() => {
+    const handlePointerMove = (event: PointerEvent) => {
+      const interaction = interactionRef.current;
+      if (!interaction || interaction.pointerId !== event.pointerId) {
+        return;
+      }
+      if (interaction.mode === 'cut') {
+        updateCutGesture(event);
+      } else {
+        updateMarqueeGesture(event);
+      }
+    };
+
+    const handlePointerUp = (event: PointerEvent) => {
+      const interaction = interactionRef.current;
+      if (!interaction || interaction.pointerId !== event.pointerId) {
+        return;
+      }
+      if (interaction.mode === 'cut') {
+        finalizeCutGesture();
+      } else {
+        finalizeMarqueeGesture();
+      }
+      interactionRef.current = null;
+    };
+
+    window.addEventListener('pointermove', handlePointerMove);
+    window.addEventListener('pointerup', handlePointerUp);
+    return () => {
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerup', handlePointerUp);
+    };
+  }, [finalizeCutGesture, finalizeMarqueeGesture, updateCutGesture, updateMarqueeGesture]);
+
+  const edgeActions = useMemo(
+    () => ({
+      severEdge: (edgeId: string, options: { reason: SeverEdgeReason }) => {
+        severEdges([edgeId], { reason: options.reason });
+      }
+    }),
+    [severEdges]
+  );
+
   const isSaving = saveMutation.isPending || createPageMutation.isPending;
   const isLoading = graphQuery.isLoading || !projectId;
 
@@ -619,34 +929,65 @@ const LogicEditorView = () => {
               {(graphQuery.error as Error)?.message ?? 'Unable to load graph'}
             </div>
           )}
-          <div ref={reactFlowWrapper} className="h-full">
+          <div ref={reactFlowWrapper} className="relative h-full">
             <PreviewResolverProvider resolver={previewResolver}>
               <LogicNavigationProvider value={{ openPageBuilder: handleNavigateToBuilder }}>
                 <FunctionRegistryProvider functions={functions}>
-                  <ReactFlow
-                    nodes={nodes}
-                    edges={edges}
-                    nodeTypes={nodeTypes}
-                    fitView
-                    onNodesChange={handleNodesChange}
-                    onEdgesChange={handleEdgesChange}
-                    onConnect={handleConnect}
-                    isValidConnection={isHandleAvailable}
-                    onDrop={handleDrop}
-                    onDragOver={handleDragOver}
-                    onSelectionChange={handleSelectionChange}
-                    panOnDrag
-                    panOnScroll
-                    zoomOnScroll
-                    connectionLineStyle={connectionLineStyle}
-                  >
-                    <MiniMap pannable zoomable className="!bg-bw-ink/80" />
-                    <Controls />
-                    <Background gap={16} color="#ffffff33" />
-                  </ReactFlow>
+                  <LogicEdgeActionsProvider value={edgeActions}>
+                    <ReactFlow
+                      nodes={nodes}
+                      edges={edges}
+                      nodeTypes={nodeTypes}
+                      edgeTypes={edgeTypes}
+                      defaultEdgeOptions={{ type: 'severable' }}
+                      fitView
+                      onNodesChange={handleNodesChange}
+                      onEdgesChange={handleEdgesChange}
+                      onConnect={handleConnect}
+                      isValidConnection={isHandleAvailable}
+                      onDrop={handleDrop}
+                      onDragOver={handleDragOver}
+                      onSelectionChange={handleSelectionChange}
+                      panOnDrag
+                      panOnScroll
+                      zoomOnScroll
+                      connectionLineStyle={connectionLineStyle}
+                    >
+                      <MiniMap pannable zoomable className="!bg-bw-ink/80" />
+                      <Controls />
+                      <Background gap={16} color="#ffffff33" />
+                    </ReactFlow>
+                  </LogicEdgeActionsProvider>
                 </FunctionRegistryProvider>
               </LogicNavigationProvider>
             </PreviewResolverProvider>
+            <div className="pointer-events-none absolute inset-0">
+              {edgeCutGesture && (
+                <svg className="h-full w-full" data-testid="edge-cut-overlay">
+                  <line
+                    x1={edgeCutGesture.startScreen.x}
+                    y1={edgeCutGesture.startScreen.y}
+                    x2={edgeCutGesture.currentScreen.x}
+                    y2={edgeCutGesture.currentScreen.y}
+                    stroke="#D34E4E"
+                    strokeWidth={2}
+                    strokeDasharray="6 4"
+                  />
+                </svg>
+              )}
+              {marqueeGesture && (
+                <div
+                  data-testid="marquee-overlay"
+                  className="absolute border border-bw-sand/80 bg-bw-sand/20"
+                  style={{
+                    left: Math.min(marqueeGesture.startScreen.x, marqueeGesture.currentScreen.x),
+                    top: Math.min(marqueeGesture.startScreen.y, marqueeGesture.currentScreen.y),
+                    width: Math.abs(marqueeGesture.startScreen.x - marqueeGesture.currentScreen.x),
+                    height: Math.abs(marqueeGesture.startScreen.y - marqueeGesture.currentScreen.y)
+                  }}
+                />
+              )}
+            </div>
           </div>
         </div>
       </div>
