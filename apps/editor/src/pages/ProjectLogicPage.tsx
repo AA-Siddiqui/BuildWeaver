@@ -70,6 +70,8 @@ import {
   findEdgesIntersectingSegment,
   getNodesWithinRect
 } from '../lib/graphInteractions';
+import { cloneGraphSnapshot, GraphSnapshot, hashGraphSnapshot } from '../lib/graphSnapshot';
+import { DragHistoryBuffer } from '../lib/dragHistoryBuffer';
 
 const nodeTypes = {
   dummy: DummyNode,
@@ -91,18 +93,6 @@ const edgeTypes = {
 };
 
 const GRAPH_HISTORY_LIMIT = 150;
-
-type GraphSnapshot = {
-  nodes: FlowNode[];
-  edges: FlowEdge[];
-  functions: UserDefinedFunction[];
-};
-
-const cloneGraphSnapshot = (snapshot: GraphSnapshot): GraphSnapshot => ({
-  nodes: JSON.parse(JSON.stringify(snapshot.nodes)) as FlowNode[],
-  edges: JSON.parse(JSON.stringify(snapshot.edges)) as FlowEdge[],
-  functions: JSON.parse(JSON.stringify(snapshot.functions)) as UserDefinedFunction[]
-});
 
 export const isTargetHandleFree = (edges: Edge[], connection: Partial<Connection>): boolean => {
   if (!connection.target || !connection.targetHandle) {
@@ -171,10 +161,26 @@ const LogicEditorView = () => {
   const graphHistoryRef = useRef(
     new SnapshotHistory<GraphSnapshot>({
       clone: cloneGraphSnapshot,
+      hash: hashGraphSnapshot,
       limit: GRAPH_HISTORY_LIMIT,
       logger: (message, meta) => logicLogger.debug(message, meta)
     })
   );
+  const nodeDragHistoryRef = useRef(new DragHistoryBuffer<GraphSnapshot>());
+  const pendingDragFlushRef = useRef(false);
+
+  const flushDragSnapshot = useCallback(() => {
+    nodeDragHistoryRef.current.end((snapshot, context) => {
+      graphHistoryRef.current.observe(snapshot, {
+        projectId,
+        nodes: snapshot.nodes.length,
+        edges: snapshot.edges.length,
+        functions: snapshot.functions.length,
+        reason: context.reason,
+        nodeIds: context.nodeIds
+      });
+    });
+  }, [projectId]);
 
   const deleteElements = useCallback(
     (elements: { nodes?: FlowNode[]; edges?: FlowEdge[] }) => {
@@ -184,19 +190,28 @@ const LogicEditorView = () => {
   );
 
   useLayoutEffect(() => {
-    graphHistoryRef.current.observe(
-      { nodes, edges, functions },
-      {
-        projectId,
-        nodes: nodes.length,
-        edges: edges.length,
-        functions: functions.length
+    const snapshot = cloneGraphSnapshot({ nodes, edges, functions });
+    if (nodeDragHistoryRef.current.isActive()) {
+      nodeDragHistoryRef.current.capture(snapshot);
+      if (pendingDragFlushRef.current) {
+        pendingDragFlushRef.current = false;
+        flushDragSnapshot();
       }
-    );
-  }, [edges, functions, nodes, projectId]);
+      return;
+    }
+    graphHistoryRef.current.observe(snapshot, {
+      projectId,
+      nodes: snapshot.nodes.length,
+      edges: snapshot.edges.length,
+      functions: snapshot.functions.length,
+      reason: 'state-observer'
+    });
+  }, [edges, flushDragSnapshot, functions, nodes, projectId]);
 
   const resetGraphHistory = useCallback(
     (snapshot: GraphSnapshot, context: string) => {
+      nodeDragHistoryRef.current.reset();
+      pendingDragFlushRef.current = false;
       graphHistoryRef.current.reset(snapshot, { projectId, context });
     },
     [projectId]
@@ -289,6 +304,8 @@ const LogicEditorView = () => {
       setEdges(hydratedEdges);
       setFunctions(hydratedFunctions);
       setHasUnsavedChanges(false);
+      nodeDragHistoryRef.current.reset();
+      pendingDragFlushRef.current = false;
       resetGraphHistory({ nodes: hydratedNodes, edges: hydratedEdges, functions: hydratedFunctions }, 'hydrate');
       setTimeout(() => {
         try {
@@ -334,10 +351,25 @@ const LogicEditorView = () => {
 
   const handleNodesChange = useCallback(
     (changes: NodeChange[]) => {
+      const positionChanges = changes.filter((change) => change.type === 'position');
+      if (positionChanges.length) {
+        const nodeIds = Array.from(new Set(positionChanges.map((change) => change.id)));
+        const dragStart = positionChanges.some((change) => change.dragging === true);
+        const dragEnd = positionChanges.some((change) => change.dragging === false);
+        if (dragStart && !nodeDragHistoryRef.current.isActive()) {
+          nodeDragHistoryRef.current.begin({ reason: 'node-drag', nodeIds });
+          pendingDragFlushRef.current = false;
+          logicLogger.debug('Node drag session started', { projectId, nodeIds });
+        }
+        if (dragEnd) {
+          pendingDragFlushRef.current = true;
+          logicLogger.debug('Node drag session ended', { projectId, nodeIds });
+        }
+      }
       setHasUnsavedChanges(true);
       onNodesChange(changes);
     },
-    [onNodesChange]
+    [onNodesChange, projectId]
   );
 
   const handleEdgesChange = useCallback(
@@ -426,6 +458,8 @@ const LogicEditorView = () => {
 
   const restoreGraphSnapshot = useCallback(
     (snapshot: GraphSnapshot, action: 'undo' | 'redo') => {
+      nodeDragHistoryRef.current.reset();
+      pendingDragFlushRef.current = false;
       graphHistoryRef.current.suppressNextDiff();
       setNodes(snapshot.nodes);
       setEdges(snapshot.edges);
