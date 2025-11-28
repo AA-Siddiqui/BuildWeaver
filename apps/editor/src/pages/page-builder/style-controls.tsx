@@ -4,6 +4,7 @@ import type { CustomField, Field, FieldProps } from '@measured/puck';
 import type { BindingOption, DynamicBindingValue } from './dynamic-binding';
 import { isDynamicBindingValue } from './dynamic-binding';
 import { DynamicFieldControl, createDynamicSelectField, type StaticControlRendererProps } from './dynamic-field-control';
+import { PropertyFilterGuard, PropertySearchFieldControl, PROPERTY_SEARCH_FIELD_KEY } from './property-search';
 
 const STYLE_LOG_PREFIX = '[PageBuilder:StyleControls]';
 const ATTRIBUTE_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_.:-]*$/;
@@ -409,10 +410,20 @@ const createColorPickerField = ({ label, placeholder, fieldKey }: ColorPickerFie
   )
 });
 
+const createPropertySearchField = (): Field => ({
+  type: 'custom',
+  label: 'Search properties',
+  render: (props) => <PropertySearchFieldControl {...props} />
+});
+
 const createCustomAttributesField = (): Field<CustomAttributeList> => ({
   type: 'custom',
   label: 'Custom attributes',
-  render: (props) => <CustomAttributesFieldControl {...props} />
+  render: (props) => (
+    <PropertyFilterGuard fieldKey="customAttributes" label="Custom attributes">
+      <CustomAttributesFieldControl {...props} />
+    </PropertyFilterGuard>
+  )
 });
 
 const createPresetOrCustomField = (
@@ -712,16 +723,20 @@ const createSharedStyleFields = (bindingOptions: BindingOption[]) => ({
 
 type SharedStyleFields = ReturnType<typeof createSharedStyleFields>;
 
-type SharedFields = SharedStyleFields & {
-  customAttributes: ReturnType<typeof createCustomAttributesField>;
-  customCss: ReturnType<typeof createCustomCssField>;
+type PropertySearchFieldMap = {
+  [PROPERTY_SEARCH_FIELD_KEY]: ReturnType<typeof createPropertySearchField>;
 };
 
-const createSharedFields = (bindingOptions: BindingOption[]): SharedFields => ({
+const createSharedFields = (bindingOptions: BindingOption[]): SharedStyleFields & {
+  customAttributes: ReturnType<typeof createCustomAttributesField>;
+  customCss: ReturnType<typeof createCustomCssField>;
+} => ({
   ...createSharedStyleFields(bindingOptions),
   customAttributes: createCustomAttributesField(),
   customCss: createCustomCssField({ label: 'Custom CSS', placeholder: 'e.g. color: #000; margin-top: 2rem;' }, bindingOptions)
 });
+
+type SharedFields = ReturnType<typeof createSharedFields> & PropertySearchFieldMap;
 
 export type StyleFieldKey = keyof SharedStyleFields;
 export type StyleFieldValues = Partial<Record<StyleFieldKey, DynamicBindingValue>>;
@@ -735,6 +750,7 @@ export type StyleableProps<T extends Record<string, unknown>> = T & StyleFieldVa
 export const STYLE_FIELD_KEYS = Object.keys(createSharedStyleFields([])) as StyleFieldKey[];
 
 export const withStyleFields = <T extends Record<string, Field>>(fields: T, bindingOptions: BindingOption[]): T & SharedFields => ({
+  [PROPERTY_SEARCH_FIELD_KEY]: createPropertySearchField(),
   ...fields,
   ...createSharedFields(bindingOptions)
 });

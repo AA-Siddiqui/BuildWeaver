@@ -1,4 +1,5 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import type { ReactNode } from 'react';
 import {
   buildAttributeProps,
   createDefaultGradientConfig,
@@ -11,6 +12,7 @@ import {
   withStyleFields
 } from './style-controls';
 import type { BindingOption } from './dynamic-binding';
+import { PROPERTY_SEARCH_FIELD_KEY, resetPropertySearchState } from './property-search';
 
 const bindingOptions: BindingOption[] = [];
 
@@ -19,7 +21,8 @@ describe('style-controls helpers', () => {
     const original = { foo: { type: 'text', label: 'Foo' } } as const;
     const extended = withStyleFields(original, bindingOptions);
     expect(extended.foo).toEqual(original.foo);
-    expect(Object.keys(extended)).toEqual(expect.arrayContaining(['foo', 'layoutDisplay', 'padding']));
+    expect(Object.keys(extended)[0]).toBe(PROPERTY_SEARCH_FIELD_KEY);
+    expect(Object.keys(extended)).toEqual(expect.arrayContaining(['foo', 'layoutDisplay', 'padding', PROPERTY_SEARCH_FIELD_KEY]));
   });
 
   it('splits style props from render props', () => {
@@ -260,5 +263,105 @@ describe('style-control custom fields', () => {
     const alphaSliders = screen.getAllByLabelText(/alpha stop/i);
     fireEvent.change(alphaSliders[0], { target: { value: '25' } });
     expect(handleChange).toHaveBeenLastCalledWith(expect.stringContaining('rgba(17, 24, 39, 0.25)'));
+  });
+});
+
+describe('property search integration', () => {
+  afterEach(() => {
+    act(() => {
+      resetPropertySearchState();
+    });
+  });
+
+  const renderPropertySearchFixture = () => {
+    const fields = withStyleFields({}, bindingOptions);
+    const searchField = fields[PROPERTY_SEARCH_FIELD_KEY];
+    const paddingField = fields.padding;
+    const widthField = fields.width;
+
+    if (
+      !searchField ||
+      searchField.type !== 'custom' ||
+      typeof searchField.render !== 'function' ||
+      !paddingField ||
+      paddingField.type !== 'custom' ||
+      typeof paddingField.render !== 'function' ||
+      !widthField ||
+      widthField.type !== 'custom' ||
+      typeof widthField.render !== 'function'
+    ) {
+      throw new Error('Expected custom fields for property search fixture');
+    }
+
+    const paddingOnChange = jest.fn();
+    const widthOnChange = jest.fn();
+
+    const wrapField = (testId: string, node: ReactNode) => (
+      <div data-testid={`field-shell-${testId}`}>{node}</div>
+    );
+
+    render(
+      <>
+        {wrapField(
+          'search',
+          searchField.render({
+            field: searchField,
+            value: '',
+            id: 'property-search',
+            name: PROPERTY_SEARCH_FIELD_KEY,
+            onChange: jest.fn()
+          } as Parameters<NonNullable<typeof searchField.render>>[0])
+        )}
+        {wrapField(
+          'padding',
+          paddingField.render({
+            field: paddingField,
+            value: '',
+            id: 'padding-field',
+            name: 'padding',
+            onChange: paddingOnChange
+          } as Parameters<NonNullable<typeof paddingField.render>>[0])
+        )}
+        {wrapField(
+          'width',
+          widthField.render({
+            field: widthField,
+            value: '',
+            id: 'width-field',
+            name: 'width',
+            onChange: widthOnChange
+          } as Parameters<NonNullable<typeof widthField.render>>[0])
+        )}
+      </>
+    );
+
+    const getShell = (fieldName: string) => screen.getByTestId(`field-shell-${fieldName}`);
+
+    return { paddingOnChange, widthOnChange, getShell };
+  };
+
+  it('filters property controls when a query is entered', async () => {
+    const { getShell } = renderPropertySearchFixture();
+    const searchInput = screen.getByPlaceholderText(/search properties/i);
+    fireEvent.change(searchInput, { target: { value: 'width' } });
+    expect(screen.getByText('Width')).toBeInTheDocument();
+    expect(screen.queryByText('Padding')).toBeNull();
+    await waitFor(() =>
+      expect(getShell('padding')).toHaveAttribute('data-property-search-hidden', 'true')
+    );
+    await waitFor(() =>
+      expect(getShell('width')).toHaveAttribute('data-property-search-visible', 'true')
+    );
+    fireEvent.change(searchInput, { target: { value: 'unknown' } });
+    expect(screen.getByText(/no properties match "unknown"/i)).toBeInTheDocument();
+  });
+
+  it('still allows editing a filtered property', () => {
+    const { paddingOnChange } = renderPropertySearchFixture();
+    const searchInput = screen.getByPlaceholderText(/search properties/i);
+    fireEvent.change(searchInput, { target: { value: 'padding' } });
+    const paddingInput = screen.getByPlaceholderText('e.g. 64px');
+    fireEvent.change(paddingInput, { target: { value: '72px' } });
+    expect(paddingOnChange).toHaveBeenCalledWith('72px');
   });
 });

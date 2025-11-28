@@ -10,6 +10,7 @@ import {
   isDynamicBindingValue,
   logDynamicFieldEvent
 } from './dynamic-binding';
+import { PropertyFilterGuard } from './property-search';
 
 const VARIABLE_ICON = '{ }';
 
@@ -128,56 +129,58 @@ export const DynamicFieldControl = ({
       : 'Bind this field to a dynamic input';
 
   return (
-    <div className="space-y-2">
-      <div className="flex items-center justify-between text-[0.65rem] uppercase tracking-[0.3em] text-gray-500">
-        <label htmlFor={isDynamic ? fallbackInputId : resolvedId}>{field.label ?? 'Field'}</label>
-        <div className="flex items-center gap-1">
-          {labelActions?.({ isDynamic, value: staticValue, readOnly })}
-          <button
-            type="button"
-            className={`rounded-md border px-2 py-1 text-[0.65rem] font-semibold ${isDynamic ? 'border-bw-amber text-bw-amber' : 'border-gray-300 text-gray-500'} ${dynamicButtonDisabled ? 'cursor-not-allowed opacity-60' : 'hover:border-bw-amber hover:text-bw-amber'}`}
-            onClick={handleToggleMode}
-            title={toggleTitle}
-            aria-pressed={isDynamic}
-            disabled={dynamicButtonDisabled}
-          >
-            <span aria-hidden="true">{VARIABLE_ICON}</span>
-            <span className="sr-only">Toggle dynamic binding</span>
-          </button>
-        </div>
-      </div>
-      {isDynamic ? (
-        <>
-          <div className="space-y-1">
-            <label htmlFor={bindingSelectId} className="text-[0.6rem] uppercase tracking-[0.3em] text-gray-400">
-              {bindingLabel}
-            </label>
-            <select
-              id={bindingSelectId}
-              className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-bw-amber focus:outline-none"
-              value={currentBindingId || dynamicChoices[0]?.value || ''}
-              onChange={(event) => handleBindingChange(event.target.value)}
-              disabled={!hasDynamicChoices || readOnly}
+    <PropertyFilterGuard fieldKey={fieldKey} label={field.label ?? fieldKey}>
+      <div className="space-y-2">
+        <div className="flex items-center justify-between text-[0.65rem] uppercase tracking-[0.3em] text-gray-500">
+          <label htmlFor={isDynamic ? fallbackInputId : resolvedId}>{field.label ?? 'Field'}</label>
+          <div className="flex items-center gap-1">
+            {labelActions?.({ isDynamic, value: staticValue, readOnly })}
+            <button
+              type="button"
+              className={`rounded-md border px-2 py-1 text-[0.65rem] font-semibold ${isDynamic ? 'border-bw-amber text-bw-amber' : 'border-gray-300 text-gray-500'} ${dynamicButtonDisabled ? 'cursor-not-allowed opacity-60' : 'hover:border-bw-amber hover:text-bw-amber'}`}
+              onClick={handleToggleMode}
+              title={toggleTitle}
+              aria-pressed={isDynamic}
+              disabled={dynamicButtonDisabled}
             >
-              {dynamicChoices.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-            {!hasDynamicChoices ? (
-              <p className="text-xs text-gray-500">Add dynamic inputs to bind this field.</p>
-            ) : null}
+              <span aria-hidden="true">{VARIABLE_ICON}</span>
+              <span className="sr-only">Toggle dynamic binding</span>
+            </button>
           </div>
-          <div className="space-y-1 rounded-xl border border-dashed border-gray-200/80 p-3">
-            <p className="text-[0.6rem] uppercase tracking-[0.3em] text-gray-400">Fallback value</p>
-            {staticControl}
-          </div>
-        </>
-      ) : (
-        staticControl
-      )}
-    </div>
+        </div>
+        {isDynamic ? (
+          <>
+            <div className="space-y-1">
+              <label htmlFor={bindingSelectId} className="text-[0.6rem] uppercase tracking-[0.3em] text-gray-400">
+                {bindingLabel}
+              </label>
+              <select
+                id={bindingSelectId}
+                className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-bw-amber focus:outline-none"
+                value={currentBindingId || dynamicChoices[0]?.value || ''}
+                onChange={(event) => handleBindingChange(event.target.value)}
+                disabled={!hasDynamicChoices || readOnly}
+              >
+                {dynamicChoices.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+              {!hasDynamicChoices ? (
+                <p className="text-xs text-gray-500">Add dynamic inputs to bind this field.</p>
+              ) : null}
+            </div>
+            <div className="space-y-1 rounded-xl border border-dashed border-gray-200/80 p-3">
+              <p className="text-[0.6rem] uppercase tracking-[0.3em] text-gray-400">Fallback value</p>
+              {staticControl}
+            </div>
+          </>
+        ) : (
+          staticControl
+        )}
+      </div>
+    </PropertyFilterGuard>
   );
 };
 

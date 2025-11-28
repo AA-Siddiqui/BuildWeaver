@@ -10,6 +10,7 @@ import { SnapshotHistory } from '../lib/snapshotHistory';
 import { processEditorShortcut } from '../lib/editorShortcuts';
 import { createPageBuilderConfig } from './page-builder/builder-config';
 import { clearBuilderDraft, loadBuilderDraft, persistBuilderDraft } from './page-builder/draft-storage';
+import { PROPERTY_SEARCH_FIELD_KEY, resetPropertySearchState } from './page-builder/property-search';
 
 const randomId = () => {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -85,9 +86,19 @@ const summarizeBuilderData = (state?: Data) => ({
   zoneCount: getZoneCount(state?.zones as Record<string, Content> | Map<string, Content> | undefined)
 });
 
+const INTERNAL_PROP_KEYS = new Set<string>([PROPERTY_SEARCH_FIELD_KEY]);
+
+const sanitizeComponentProps = (props: ComponentData['props']) => {
+  const cleaned: ComponentData['props'] = { ...props };
+  INTERNAL_PROP_KEYS.forEach((key) => {
+    delete cleaned[key as keyof ComponentData['props']];
+  });
+  return cleaned;
+};
+
 const cloneComponent = (component: ComponentData): ComponentData => ({
   ...component,
-  props: { ...(component.props ?? {}) }
+  props: sanitizeComponentProps(component.props!)
 });
 
 const cloneContent = (items: ComponentData[] = []): ComponentData[] => items.map((item) => cloneComponent(item));
@@ -171,6 +182,13 @@ export const PageBuilderPage = () => {
   );
   const updateDraftStatus = useCallback((next: Partial<{ restored: boolean; savedAt?: number }>) => {
     draftStatusRef.current = { ...draftStatusRef.current, ...next };
+  }, []);
+
+  useEffect(() => {
+    resetPropertySearchState();
+    return () => {
+      resetPropertySearchState();
+    };
   }, []);
 
   const pageQuery = useQuery({

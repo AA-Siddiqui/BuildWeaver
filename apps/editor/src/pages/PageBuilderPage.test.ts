@@ -1,5 +1,6 @@
 import type { ComponentData, Content, Data } from '@measured/puck';
 import { createEmptyBuilderState, derivePuckSessionKey, normalizeBuilderStateForSave } from './PageBuilderPage';
+import { PROPERTY_SEARCH_FIELD_KEY } from './page-builder/property-search';
 
 jest.mock('@measured/puck', () => ({
   Puck: () => null
@@ -65,6 +66,23 @@ describe('normalizeBuilderStateForSave', () => {
     expect(normalized).not.toBe(state);
     expect(normalizedData.content[0]).not.toBe(component);
     expect((normalizedData.zones?.root?.[0] as ComponentData)).not.toBe(component);
+  });
+
+  it('strips UI-only props such as the property search field value', () => {
+    const component = createComponent({
+      props: {
+        id: 'component-1',
+        content: 'Hello',
+        [PROPERTY_SEARCH_FIELD_KEY]: 'width'
+      }
+    });
+    const state = {
+      root: { id: 'root', props: {}, children: [] },
+      content: [component]
+    } as Data;
+
+    const normalized = normalizeBuilderStateForSave(state) as Data;
+    expect((normalized.content[0] as ComponentData).props).not.toHaveProperty(PROPERTY_SEARCH_FIELD_KEY);
   });
 });
 
