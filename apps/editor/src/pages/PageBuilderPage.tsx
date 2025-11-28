@@ -11,6 +11,7 @@ import { processEditorShortcut } from '../lib/editorShortcuts';
 import { createPageBuilderConfig } from './page-builder/builder-config';
 import { clearBuilderDraft, loadBuilderDraft, persistBuilderDraft } from './page-builder/draft-storage';
 import { PROPERTY_SEARCH_FIELD_KEY, resetPropertySearchState } from './page-builder/property-search';
+import { BuilderPreviewModal, type BuilderPreviewViewport } from './page-builder/builder-preview-modal';
 
 const randomId = () => {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -165,6 +166,8 @@ export const PageBuilderPage = () => {
   const sheetToggleButtonRef = useRef<HTMLButtonElement | null>(null);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [feedback, setFeedback] = useState('');
+  const [isPreviewOpen, setIsPreviewOpen] = useState(false);
+  const [previewMode, setPreviewMode] = useState<BuilderPreviewViewport>('desktop');
   const draftStatusRef = useRef<{ restored: boolean; savedAt?: number }>({ restored: false });
   const draftPersistHandle = useRef<number | null>(null);
   const pendingSaveRef = useRef<Promise<unknown> | null>(null);
@@ -460,6 +463,56 @@ export const PageBuilderPage = () => {
     void persistBuilderChanges({ reason: 'manual', force: true });
   }, [hasUnsavedChanges, pageId, persistBuilderChanges, projectId]);
 
+  const handlePreviewOpen = useCallback(() => {
+    if (isPreviewOpen) {
+      logPageBuilderEvent('Preview modal already open', {
+        pageId,
+        projectId,
+        viewport: previewMode
+      });
+      return;
+    }
+    logPageBuilderEvent('Opening preview modal', {
+      pageId,
+      projectId,
+      viewport: previewMode,
+      summary: summarizeBuilderData(builderState)
+    });
+    setIsPreviewOpen(true);
+  }, [builderState, isPreviewOpen, pageId, previewMode, projectId]);
+
+  const handlePreviewClose = useCallback(
+    (reason: string) => {
+      if (!isPreviewOpen) {
+        return;
+      }
+      setIsPreviewOpen(false);
+      logPageBuilderEvent('Closing preview modal', {
+        pageId,
+        projectId,
+        viewport: previewMode,
+        reason
+      });
+    },
+    [isPreviewOpen, pageId, previewMode, projectId]
+  );
+
+  const handlePreviewModeChange = useCallback(
+    (nextMode: BuilderPreviewViewport) => {
+      if (nextMode === previewMode) {
+        return;
+      }
+      logPageBuilderEvent('Preview viewport changed', {
+        pageId,
+        projectId,
+        from: previewMode,
+        to: nextMode
+      });
+      setPreviewMode(nextMode);
+    },
+    [pageId, previewMode, projectId]
+  );
+
   const applyBuilderSnapshot = useCallback(
     (snapshot: BuilderSnapshot, action: 'undo' | 'redo') => {
       builderHistoryRef.current.suppressNextDiff();
@@ -567,7 +620,8 @@ export const PageBuilderPage = () => {
   }, [isSidebarOpen]);
 
   return (
-    <div className="flex h-screen bg-bw-ink text-white">
+    <>
+      <div className="flex h-screen bg-bw-ink text-white">
       {/* Modal sheet + backdrop */}
       <div
         className={`fixed inset-0 z-[60] pointer-events-none transition-opacity duration-200 ${isSidebarOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0'}`}
@@ -679,6 +733,13 @@ export const PageBuilderPage = () => {
             >
               {saveMutation.isPending ? 'Saving…' : 'Back to logic'}
             </button>
+            <button
+              type="button"
+              onClick={handlePreviewOpen}
+              className="rounded-lg border border-bw-sand/40 px-3 py-1 text-gray-700 transition hover:border-bw-sand hover:text-bw-ink"
+            >
+              Preview
+            </button>
             {feedback && <span className="text-gray-500">{feedback}</span>}
             <button
               type="button"
@@ -703,6 +764,16 @@ export const PageBuilderPage = () => {
           )}
         </div>
       </div>
-    </div>
+      </div>
+      <BuilderPreviewModal
+        isOpen={isPreviewOpen}
+        mode={previewMode}
+        onModeChange={handlePreviewModeChange}
+        onClose={() => handlePreviewClose('toolbar')}
+        config={builderConfig}
+        data={builderState}
+        pageName={page?.name}
+      />
+    </>
   );
 };
