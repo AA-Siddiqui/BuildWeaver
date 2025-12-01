@@ -1,6 +1,11 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { createDynamicBindingState } from './dynamic-binding';
-import { createDynamicBooleanField, createDynamicTextField } from './dynamic-field-control';
+import {
+  DYNAMIC_SELECT_OPTIONS_METADATA_KEY,
+  createDynamicBooleanField,
+  createDynamicSelectField,
+  createDynamicTextField
+} from './dynamic-field-control';
 
 describe('DynamicFieldControl', () => {
   const bindingOptions = [
@@ -69,6 +74,49 @@ describe('DynamicFieldControl', () => {
         fallback: 'Updated heading'
       })
     );
+  });
+});
+
+describe('createDynamicSelectField', () => {
+  it('prefers metadata-provided options', () => {
+    const field = createDynamicSelectField({
+      fieldKey: 'caseKey',
+      bindingOptions: [],
+      label: 'Case key',
+      options: [
+        { label: 'Default case', value: 'default' }
+      ]
+    });
+
+    if (field.type !== 'custom' || typeof field.render !== 'function') {
+      throw new Error('Select field must be a custom field');
+    }
+
+    const metadataField = {
+      ...field,
+      metadata: {
+        [DYNAMIC_SELECT_OPTIONS_METADATA_KEY]: [
+          { label: 'Meta primary', value: 'meta-primary' },
+          { label: 'Meta secondary', value: 'meta-secondary' }
+        ]
+      }
+    } as typeof field;
+
+    render(
+      <>
+        {field.render({
+          field: metadataField,
+          id: 'case-key-field',
+          name: 'caseKey',
+          onChange: jest.fn(),
+          readOnly: false,
+          value: 'meta-secondary'
+        } as Parameters<NonNullable<typeof field.render>>[0])}
+      </>
+    );
+
+    const select = screen.getByRole('combobox') as HTMLSelectElement;
+    expect(select.value).toBe('meta-secondary');
   });
 });
 

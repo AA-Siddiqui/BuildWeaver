@@ -21,6 +21,7 @@ export type StaticControlRendererProps = {
   readOnly?: boolean;
   onChange: (next: string) => void;
   isFallback: boolean;
+  field?: Field;
 };
 
 type LabelActionProps = {
@@ -36,6 +37,7 @@ export type DynamicFieldControlProps = FieldProps<CustomField<DynamicBindingValu
   placeholder?: string;
   bindingLabel?: string;
   labelActions?: (props: LabelActionProps) => ReactNode;
+  helperText?: string;
 };
 
 export const DynamicFieldControl = ({
@@ -49,7 +51,8 @@ export const DynamicFieldControl = ({
   placeholder,
   bindingLabel = 'Dynamic source',
   renderStaticControl,
-  labelActions
+  labelActions,
+  helperText
 }: DynamicFieldControlProps) => {
   const generatedId = useId();
   const resolvedId = id ?? generatedId;
@@ -119,7 +122,8 @@ export const DynamicFieldControl = ({
     readOnly,
     value: staticValue,
     onChange: handleStaticValueChange,
-    isFallback: isDynamic
+    isFallback: isDynamic,
+    field
   });
 
   const toggleTitle = dynamicButtonDisabled
@@ -179,6 +183,7 @@ export const DynamicFieldControl = ({
         ) : (
           staticControl
         )}
+        {helperText ? <p className="text-xs text-gray-500">{helperText}</p> : null}
       </div>
     </PropertyFilterGuard>
   );
@@ -204,6 +209,7 @@ type TextareaFieldConfig = BaseFieldConfig & {
 type SelectFieldConfig = BaseFieldConfig & {
   label: string;
   options: ReadonlyArray<{ label: string; value: string }>;
+  helperText?: string;
 };
 
 type BooleanFieldConfig = BaseFieldConfig & {
@@ -272,7 +278,7 @@ export const createDynamicTextareaField = ({
   )
 });
 
-export const createDynamicSelectField = ({ fieldKey, bindingOptions, label, options }: SelectFieldConfig): Field => ({
+export const createDynamicSelectField = ({ fieldKey, bindingOptions, label, options, helperText }: SelectFieldConfig): Field => ({
   type: 'custom',
   label,
   render: (props) => (
@@ -280,7 +286,8 @@ export const createDynamicSelectField = ({ fieldKey, bindingOptions, label, opti
       {...props}
       fieldKey={fieldKey}
       bindingOptions={bindingOptions}
-      renderStaticControl={({ inputId, value, onChange, readOnly }) => (
+      helperText={helperText}
+      renderStaticControl={({ inputId, value, onChange, readOnly, field }) => (
         <select
           id={inputId}
           className={baseInputClassName}
@@ -288,16 +295,20 @@ export const createDynamicSelectField = ({ fieldKey, bindingOptions, label, opti
           onChange={(event) => onChange(event.target.value)}
           disabled={readOnly}
         >
-          {options.map((option) => (
-            <option key={option.value ?? option.label} value={option.value}>
-              {option.label}
-            </option>
-          ))}
+          {((field?.metadata?.[DYNAMIC_SELECT_OPTIONS_METADATA_KEY] as ReadonlyArray<{ label: string; value: string }>) ?? options).map(
+            (option) => (
+              <option key={option.value ?? option.label} value={option.value}>
+                {option.label}
+              </option>
+            )
+          )}
         </select>
       )}
     />
   )
 });
+
+export const DYNAMIC_SELECT_OPTIONS_METADATA_KEY = 'bwDynamicSelectOptions';
 
 const TRUTHY_BOOLEAN_VALUES = new Set(['true', '1', 'yes', 'on']);
 const FALSY_BOOLEAN_VALUES = new Set(['false', '0', 'no', 'off']);
@@ -332,22 +343,20 @@ export const createDynamicBooleanField = ({
       {...props}
       fieldKey={fieldKey}
       bindingOptions={bindingOptions}
+      helperText={helperText}
       renderStaticControl={({ inputId, value, onChange, readOnly }) => {
         const effectiveValue = coerceBooleanOption(value, defaultValue) ? 'true' : 'false';
         return (
-          <div className="space-y-1">
-            <select
-              id={inputId}
-              className={baseInputClassName}
-              value={effectiveValue}
-              onChange={(event) => onChange(event.target.value)}
-              disabled={readOnly}
-            >
-              <option value="true">{trueLabel}</option>
-              <option value="false">{falseLabel}</option>
-            </select>
-            {helperText ? <p className="text-xs text-gray-500">{helperText}</p> : null}
-          </div>
+          <select
+            id={inputId}
+            className={baseInputClassName}
+            value={effectiveValue}
+            onChange={(event) => onChange(event.target.value)}
+            disabled={readOnly}
+          >
+            <option value="true">{trueLabel}</option>
+            <option value="false">{falseLabel}</option>
+          </select>
         );
       }}
     />

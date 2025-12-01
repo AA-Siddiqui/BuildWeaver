@@ -15,7 +15,12 @@ import {
   type DynamicBindingValue,
   resolveDynamicBindingValue
 } from './dynamic-binding';
-import { createDynamicSelectField, createDynamicTextField, createDynamicTextareaField } from './dynamic-field-control';
+import {
+  DYNAMIC_SELECT_OPTIONS_METADATA_KEY,
+  createDynamicSelectField,
+  createDynamicTextField,
+  createDynamicTextareaField
+} from './dynamic-field-control';
 
 type BuilderConfigParams = {
   bindingOptions: BindingOption[];
@@ -133,9 +138,8 @@ type SpacerProps = StyleableProps<{
 }>;
 
 type ConditionalProps = StyleableProps<{
-  activeElement?: DynamicBindingValue;
-  elementA?: SlotRenderer;
-  elementB?: SlotRenderer;
+  activeCaseKey?: DynamicBindingValue;
+  cases?: ConditionalCaseConfig[];
 }>;
 
 const COMPONENT_ORDER = [
@@ -192,16 +196,82 @@ const coerceBooleanString = (value?: string, fallback = true, meta?: Record<stri
   return fallback;
 };
 
-const normalizeConditionalChoice = (value?: string): 'a' | 'b' => {
-  if (!value) {
-    return 'a';
-  }
-  const normalized = value.trim().toLowerCase();
-  if (normalized.startsWith('b') || normalized.endsWith('b')) {
-    return 'b';
-  }
-  return 'a';
+const CASE_KEY_SANITIZE_PATTERN = /[^a-z0-9_-]+/g;
+
+type ConditionalCaseConfig = {
+  caseKey?: string;
+  label?: string;
+  slot?: SlotRenderer;
 };
+
+type NormalizedConditionalCase = {
+  key: string;
+  label: string;
+  slot?: SlotRenderer;
+};
+
+const sanitizeCaseKey = (key: string | undefined, fallback: string, meta?: Record<string, unknown>): string => {
+  if (!key || !key.trim()) {
+    logRenderControlEvent('Case key missing – using fallback', { ...meta, fallback });
+    return fallback;
+  }
+  const trimmed = key.trim();
+  const normalized = trimmed
+    .toLowerCase()
+    .replace(/\s+/g, '-')
+    .replace(CASE_KEY_SANITIZE_PATTERN, '-')
+    .replace(/-+/g, '-')
+    .replace(/(^-|-$)+/g, '');
+  if (!normalized) {
+    logRenderControlEvent('Case key collapsed during normalization', { ...meta, source: key, fallback });
+    return fallback;
+  }
+  if (normalized !== trimmed) {
+    logRenderControlEvent('Case key sanitized', { ...meta, source: key, normalized });
+  }
+  return normalized;
+};
+
+const normalizeConditionalCases = (cases: ConditionalCaseConfig[] | undefined, componentId?: string): NormalizedConditionalCase[] => {
+  const seen = new Set<string>();
+  return (cases ?? []).map((entry, index) => {
+    const fallbackKey = `case-${index + 1}`;
+    let key = sanitizeCaseKey(entry.caseKey, fallbackKey, { componentId, index });
+    if (seen.has(key)) {
+      const deduped = `${key}-${index + 1}`;
+      logRenderControlEvent('Duplicate case key detected', { componentId, index, key, deduped });
+      key = deduped;
+    }
+    seen.add(key);
+    return {
+      key,
+      label: entry.label?.trim() || `Case ${index + 1}`,
+      slot: entry.slot
+    } satisfies NormalizedConditionalCase;
+  });
+};
+
+const buildConditionalSelectOptions = (cases: NormalizedConditionalCase[]) =>
+  cases.map((entry) => ({ label: `${entry.label} (${entry.key})`, value: entry.key }));
+
+const getSelectionKey = (
+  value: DynamicBindingValue | string | undefined,
+  fallbackKey: string | undefined,
+  resolver: (input: DynamicBindingValue | string | undefined) => string,
+  meta?: Record<string, unknown>
+) => {
+  const resolved = resolver(value as DynamicBindingValue | string | undefined);
+  if (!resolved) {
+    if (fallbackKey) {
+      logRenderControlEvent('Conditional selection defaulted to fallback', { ...meta, fallbackKey });
+    }
+    return fallbackKey;
+  }
+  const normalized = sanitizeCaseKey(resolved, fallbackKey ?? resolved, meta);
+  return normalized;
+};
+
+const CONDITIONAL_CASE_HELPER_TEXT = 'Provide or bind to a string that matches one of the defined case keys (e.g., "primary-view").';
 
 const getColumnsTemplate = (layout: ColumnsLayout): string => {
   switch (layout) {
@@ -291,31 +361,6 @@ export const createPageBuilderConfig = ({ bindingOptions, resolveBinding }: Buil
     }
     return isVisible;
   };
-  const interpretConditionalChoice = (raw?: string): { selection: 'a' | 'b'; recognized: boolean } => {
-    if (!raw) {
-      return { selection: 'a', recognized: false };
-    }
-    const normalized = raw.trim().toLowerCase();
-    const selection = normalizeConditionalChoice(raw);
-    const recognized = normalized.startsWith('a') || normalized.startsWith('b') || normalized.endsWith('a') || normalized.endsWith('b');
-    return { selection, recognized };
-  };
-  const resolveConditionalSelection = (value: DynamicBindingValue | string | undefined, componentId?: string): 'a' | 'b' => {
-    const rawChoice = resolveFieldValue(value as DynamicBindingValue | string | undefined);
-    const { selection, recognized } = interpretConditionalChoice(rawChoice);
-    if (!rawChoice) {
-      logRenderControlEvent('Conditional selection defaulted', { component: 'Conditional', componentId, resolved: selection });
-    } else if (!recognized) {
-      logRenderControlEvent('Conditional selection normalized', {
-        component: 'Conditional',
-        componentId,
-        rawChoice,
-        resolved: selection
-      });
-    }
-    return selection;
-  };
-
   const components: Config['components'] = {
     Heading: {
       label: 'Heading',
@@ -552,50 +597,101 @@ export const createPageBuilderConfig = ({ bindingOptions, resolveBinding }: Buil
     Conditional: {
       label: 'Conditional',
       defaultProps: {
-        activeElement: 'a',
+        activeCaseKey: 'primary',
+        cases: [
+          { caseKey: 'primary', label: 'Primary view' },
+          { caseKey: 'alternate', label: 'Alternate view' }
+        ],
         padding: '24px',
         borderRadius: '12px',
         backgroundColor: '#FFFFFF'
       },
       fields: enhanceFields({
-        activeElement: createDynamicSelectField({
-          fieldKey: 'activeElement',
+        activeCaseKey: createDynamicSelectField({
+          fieldKey: 'activeCaseKey',
           bindingOptions,
-          label: 'Active element',
+          label: 'Active case key',
+          helperText: CONDITIONAL_CASE_HELPER_TEXT,
           options: [
-            { label: 'Element A', value: 'a' },
-            { label: 'Element B', value: 'b' }
+            { label: 'Case 1', value: 'case-1' },
+            { label: 'Case 2', value: 'case-2' }
           ]
         }),
-        elementA: {
-          type: 'slot',
-          label: 'Element A',
-          allow: allowAllComponents
-        },
-        elementB: {
-          type: 'slot',
-          label: 'Element B',
-          allow: allowAllComponents
+        cases: {
+          type: 'array',
+          label: 'Case definitions',
+          arrayFields: {
+            caseKey: {
+              type: 'text',
+              label: 'Case key',
+              placeholder: 'e.g. primary-view'
+            },
+            label: {
+              type: 'text',
+              label: 'Display label',
+              placeholder: 'Primary view'
+            },
+            slot: {
+              type: 'slot',
+              label: 'Case content',
+              allow: allowAllComponents
+            }
+          },
+          defaultItemProps: { caseKey: 'new-case', label: 'New case' },
+          getItemSummary: (item: ConditionalCaseConfig, index?: number) => item?.label || item?.caseKey || `Case ${String((index ?? 0) + 1)}`,
+          min: 1
         }
       }),
+      resolveFields: (data, { fields }) => {
+        const conditionalFields = { ...fields };
+        const normalizedCases = normalizeConditionalCases(data.props.cases as ConditionalCaseConfig[], data.props.id);
+        const options = normalizedCases.length ? buildConditionalSelectOptions(normalizedCases) : [{ label: 'No cases defined', value: '' }];
+        if ('activeCaseKey' in conditionalFields) {
+          const activeField = conditionalFields.activeCaseKey as ReturnType<typeof createDynamicSelectField>;
+          conditionalFields.activeCaseKey = {
+            ...activeField,
+            metadata: {
+              ...(activeField.metadata ?? {}),
+              [DYNAMIC_SELECT_OPTIONS_METADATA_KEY]: options
+            }
+          };
+        }
+        return conditionalFields;
+      },
       render: (props) => {
         const { styleProps, rest } = splitStyleProps(props);
-        const { activeElement = 'a', elementA, elementB, customAttributes, customCss, id, renderWhen } = rest as ConditionalProps;
+        const { activeCaseKey, cases, customAttributes, customCss, id, renderWhen } = rest as ConditionalProps;
         if (!shouldRenderComponent('Conditional', id, renderWhen)) {
           return <></>;
         }
-        const selection = resolveConditionalSelection(activeElement, id);
-        const activeSlot = selection === 'b' ? elementB : elementA;
-        if (!activeSlot) {
-          logRenderControlEvent('Conditional slot empty', {
-            component: 'Conditional',
-            componentId: id,
-            selection
-          });
-        }
+        const normalizedCases = normalizeConditionalCases(cases, id);
         const inlineStyle = createInlineStyle(styleProps, resolveStyleValue);
         const attributeProps = attachNodeIdentity(id, buildAttributeProps(customAttributes));
-        const fallbackLabel = selection === 'b' ? 'Element B content' : 'Element A content';
+        if (!normalizedCases.length) {
+          logRenderControlEvent('Conditional component missing cases', { componentId: id });
+          return (
+            <>
+              <div
+                style={inlineStyle}
+                className="rounded-xl border border-dashed border-red-200 bg-red-50/70 p-4 text-sm text-red-900"
+                {...attributeProps}
+              >
+                <p>Add at least one case to render content.</p>
+              </div>
+              {renderScopedCss(id, customCss)}
+            </>
+          );
+        }
+        const defaultKey = normalizedCases[0]?.key;
+        const selectionKey = getSelectionKey(activeCaseKey, defaultKey, (value) => resolveFieldValue(value as DynamicBindingValue), {
+          component: 'Conditional',
+          componentId: id
+        });
+        const activeCase = normalizedCases.find((entry) => entry.key === selectionKey) ?? normalizedCases[0];
+        if (!activeCase) {
+          logRenderControlEvent('Conditional selection fallback used', { componentId: id, selectionKey, fallbackKey: defaultKey });
+        }
+        const selectionLabel = activeCase?.label ?? 'Selected case';
         return (
           <>
             <div
@@ -603,13 +699,15 @@ export const createPageBuilderConfig = ({ bindingOptions, resolveBinding }: Buil
               className="space-y-3 rounded-xl border border-dashed border-bw-amber/60 bg-white/90 p-4"
               {...attributeProps}
             >
-              <div className="flex items-center justify-between text-xs uppercase tracking-[0.3em] text-gray-500">
+              <div className="flex flex-wrap items-center justify-between gap-2 text-xs uppercase tracking-[0.3em] text-gray-500">
                 <span>Conditional render</span>
-                <span className="font-semibold text-bw-amber">
-                  Showing {selection === 'b' ? 'Element B' : 'Element A'}
-                </span>
+                <div className="flex items-center gap-2 text-[0.6rem] normal-case tracking-normal text-gray-500">
+                  <span>Expecting case key string</span>
+                  <code className="rounded bg-gray-100 px-1.5 py-0.5 text-[0.65rem] text-gray-700">{selectionKey ?? defaultKey}</code>
+                </div>
               </div>
-              <div>{renderSlot(activeSlot, fallbackLabel, 120)}</div>
+              <p className="text-xs text-gray-500">{CONDITIONAL_CASE_HELPER_TEXT}</p>
+              <div>{renderSlot(activeCase?.slot, `${selectionLabel} content`, 120)}</div>
             </div>
             {renderScopedCss(id, customCss)}
           </>

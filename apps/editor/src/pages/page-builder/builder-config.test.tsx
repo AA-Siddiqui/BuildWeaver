@@ -81,39 +81,56 @@ describe('Heading component rendering', () => {
 });
 
 describe('Conditional component', () => {
-  it('switches between Element A and Element B', () => {
-    const config = createPageBuilderConfig({
-      bindingOptions: [],
-      resolveBinding: (text) => text ?? ''
-    });
-    const conditional = config.components?.Conditional;
-    if (!conditional?.render) {
-      throw new Error('Conditional component is not registered');
-    }
+  const config = createPageBuilderConfig({
+    bindingOptions: [],
+    resolveBinding: (text) => text ?? ''
+  });
+  const conditional = config.components?.Conditional;
 
-    const slotA = ({ className }: { className?: string }) => (
-      <div data-testid="slot-a" className={className}>
-        Element A content
-      </div>
-    );
-    const slotB = ({ className }: { className?: string }) => (
-      <div data-testid="slot-b" className={className}>
-        Element B content
-      </div>
-    );
+  if (!conditional?.render) {
+    throw new Error('Conditional component is not registered');
+  }
 
+  const slotFactory = (testId: string, label: string) => ({ className }: { className?: string }) => (
+    <div data-testid={testId} className={className}>
+      {label}
+    </div>
+  );
+
+  it('renders the case whose key matches the provided string', () => {
     render(
       <>
         {conditional.render({
           id: 'conditional-test',
-          activeElement: 'b',
-          elementA: slotA,
-          elementB: slotB
+          activeCaseKey: 'secondary',
+          cases: [
+            { caseKey: 'primary', label: 'Primary view', slot: slotFactory('slot-primary', 'Primary') },
+            { caseKey: 'secondary', label: 'Secondary view', slot: slotFactory('slot-secondary', 'Secondary') },
+            { caseKey: 'tertiary', label: 'Tertiary view', slot: slotFactory('slot-tertiary', 'Tertiary') }
+          ]
         } as unknown as Parameters<NonNullable<typeof conditional.render>>[0])}
       </>
     );
 
-    expect(screen.getByTestId('slot-b')).toBeInTheDocument();
-    expect(screen.queryByTestId('slot-a')).not.toBeInTheDocument();
+    expect(screen.getByTestId('slot-secondary')).toBeInTheDocument();
+    expect(screen.queryByTestId('slot-primary')).not.toBeInTheDocument();
+  });
+
+  it('falls back to the first case when the key is missing', () => {
+    render(
+      <>
+        {conditional.render({
+          id: 'conditional-test-fallback',
+          activeCaseKey: 'unknown-value',
+          cases: [
+            { caseKey: 'alpha', label: 'Alpha view', slot: slotFactory('slot-alpha', 'Alpha') },
+            { caseKey: 'beta', label: 'Beta view', slot: slotFactory('slot-beta', 'Beta') }
+          ]
+        } as unknown as Parameters<NonNullable<typeof conditional.render>>[0])}
+      </>
+    );
+
+    expect(screen.getByTestId('slot-alpha')).toBeInTheDocument();
+    expect(screen.queryByTestId('slot-beta')).not.toBeInTheDocument();
   });
 });
