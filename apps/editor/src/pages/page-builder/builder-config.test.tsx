@@ -86,6 +86,7 @@ describe('Conditional component', () => {
     resolveBinding: (text) => text ?? ''
   });
   const conditional = config.components?.Conditional;
+  const helperText = 'Provide or bind to a string that matches one of the defined case keys (e.g., "primary-view").';
 
   if (!conditional?.render) {
     throw new Error('Conditional component is not registered');
@@ -132,5 +133,36 @@ describe('Conditional component', () => {
 
     expect(screen.getByTestId('slot-alpha')).toBeInTheDocument();
     expect(screen.queryByTestId('slot-beta')).not.toBeInTheDocument();
+  });
+
+  it('hides helper UI when the active case slot has content', () => {
+    render(
+      <>
+        {conditional.render({
+          id: 'conditional-hide-helper',
+          activeCaseKey: 'primary',
+          cases: [{ caseKey: 'primary', label: 'Primary view', slot: slotFactory('slot-hide-helper', 'Rendered slot') }]
+        } as unknown as Parameters<NonNullable<typeof conditional.render>>[0])}
+      </>
+    );
+
+    expect(screen.getByTestId('slot-hide-helper')).toBeInTheDocument();
+    expect(screen.queryByText('Conditional render')).not.toBeInTheDocument();
+    expect(screen.queryByText(helperText)).not.toBeInTheDocument();
+  });
+
+  it('shows helper UI when no slot content exists', () => {
+    render(
+      <>
+        {conditional.render({
+          id: 'conditional-show-helper',
+          activeCaseKey: 'primary',
+          cases: [{ caseKey: 'primary', label: 'Primary view' }]
+        } as unknown as Parameters<NonNullable<typeof conditional.render>>[0])}
+      </>
+    );
+
+    expect(screen.getByText('Conditional render')).toBeInTheDocument();
+    expect(screen.getByText(helperText)).toBeInTheDocument();
   });
 });

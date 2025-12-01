@@ -692,6 +692,19 @@ export const createPageBuilderConfig = ({ bindingOptions, resolveBinding }: Buil
           logRenderControlEvent('Conditional selection fallback used', { componentId: id, selectionKey, fallbackKey: defaultKey });
         }
         const selectionLabel = activeCase?.label ?? 'Selected case';
+        const activeSlotRenderer = activeCase?.slot;
+        const hasActiveSlotContent = Boolean(activeSlotRenderer);
+        const slotNode = renderSlot(activeSlotRenderer, `${selectionLabel} content`, 120);
+        if (hasActiveSlotContent) {
+          return (
+            <>
+              <div style={inlineStyle} {...attributeProps}>
+                {slotNode}
+              </div>
+              {renderScopedCss(id, customCss)}
+            </>
+          );
+        }
         return (
           <>
             <div
@@ -707,7 +720,7 @@ export const createPageBuilderConfig = ({ bindingOptions, resolveBinding }: Buil
                 </div>
               </div>
               <p className="text-xs text-gray-500">{CONDITIONAL_CASE_HELPER_TEXT}</p>
-              <div>{renderSlot(activeCase?.slot, `${selectionLabel} content`, 120)}</div>
+              <div>{slotNode}</div>
             </div>
             {renderScopedCss(id, customCss)}
           </>
