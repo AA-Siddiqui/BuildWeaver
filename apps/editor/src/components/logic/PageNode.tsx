@@ -7,6 +7,7 @@ import { useLogicNavigation } from './LogicNavigationContext';
 import { projectPagesApi } from '../../lib/api-client';
 import { normalizeRouteSegment } from '../../lib/routes';
 import { logicLogger } from '../../lib/logger';
+import { invalidateProjectGraphCache } from '../../lib/query-helpers';
 
 export const PageNode = ({ data, selected }: NodeProps<PageNodeData>) => {
   const navigate = useNavigate();
@@ -65,7 +66,12 @@ export const PageNode = ({ data, selected }: NodeProps<PageNodeData>) => {
             : node
         )
       );
-      queryClient.invalidateQueries({ queryKey: ['project-graph', projectId] });
+      void invalidateProjectGraphCache(
+        queryClient,
+        projectId,
+        { reason: 'page-metadata-update' },
+        (message, details) => logicLogger.info(message, details)
+      );
       queryClient.invalidateQueries({ queryKey: ['project-pages', projectId] });
     },
     onError: (error) => {

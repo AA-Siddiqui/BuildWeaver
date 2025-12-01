@@ -5,13 +5,15 @@ import { Puck } from '@measured/puck';
 import type { ComponentData, Content, Data } from '@measured/puck';
 import '@measured/puck/puck.css';
 import type { PageBuilderState, PageDocument, PageDynamicInput } from '../types/api';
-import { projectPagesApi } from '../lib/api-client';
+import { projectGraphApi, projectPagesApi } from '../lib/api-client';
+import { projectGraphQueryKey, invalidateProjectGraphCache } from '../lib/query-helpers';
 import { SnapshotHistory } from '../lib/snapshotHistory';
 import { processEditorShortcut } from '../lib/editorShortcuts';
 import { createPageBuilderConfig } from './page-builder/builder-config';
 import { clearBuilderDraft, loadBuilderDraft, persistBuilderDraft } from './page-builder/draft-storage';
 import { PROPERTY_SEARCH_FIELD_KEY, resetPropertySearchState } from './page-builder/property-search';
 import { BuilderPreviewModal, type BuilderPreviewViewport } from './page-builder/builder-preview-modal';
+import { buildDynamicInputPreviewMap } from './page-builder/dynamic-input-preview';
 
 const randomId = () => {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -200,6 +202,15 @@ export const PageBuilderPage = () => {
     enabled: Boolean(projectId && pageId)
   });
 
+  const graphQuery = useQuery({
+    queryKey: projectGraphQueryKey(projectId ?? 'preview'),
+    queryFn: () => projectGraphApi.get(projectId!),
+    enabled: Boolean(projectId),
+    staleTime: 0,
+    refetchOnMount: 'always',
+    refetchOnWindowFocus: 'always'
+  });
+
   const hydrateFromPage = useCallback(
     (incomingPage: PageDocument) => {
       const hydratedState = toPuckValue(incomingPage.builderState);
@@ -270,6 +281,39 @@ export const PageBuilderPage = () => {
   }, [pageQuery.error, pageQuery.isError, pageId, projectId]);
 
   useEffect(() => {
+    if (graphQuery.isError) {
+      logPageBuilderEvent('Failed to load project graph for previews', {
+        pageId,
+        projectId,
+        error: (graphQuery.error as Error)?.message ?? 'Unknown error'
+      });
+    }
+  }, [graphQuery.error, graphQuery.isError, pageId, projectId]);
+
+  useEffect(() => {
+    if (graphQuery.isFetching) {
+      logPageBuilderEvent('Fetching project graph for live previews', {
+        pageId,
+        projectId,
+        queryState: graphQuery.status
+      });
+    }
+  }, [graphQuery.isFetching, graphQuery.status, pageId, projectId]);
+
+  useEffect(() => {
+    if (graphQuery.isSuccess && graphQuery.data?.graph) {
+      logPageBuilderEvent('Project graph ready for live previews', {
+        pageId,
+        projectId,
+        nodes: graphQuery.data.graph.nodes.length,
+        edges: graphQuery.data.graph.edges.length,
+        functions: graphQuery.data.graph.functions?.length ?? 0,
+        loadedAt: graphQuery.dataUpdatedAt
+      });
+    }
+  }, [graphQuery.data?.graph, graphQuery.dataUpdatedAt, graphQuery.isSuccess, pageId, projectId]);
+
+  useEffect(() => {
     return () => {
       if (typeof window !== 'undefined' && draftPersistHandle.current) {
         window.clearTimeout(draftPersistHandle.current);
@@ -288,18 +332,32 @@ export const PageBuilderPage = () => {
     [dynamicInputs]
   );
 
+  const dynamicPreviewMap = useMemo(
+    () =>
+      buildDynamicInputPreviewMap({
+        graph: graphQuery.data?.graph,
+        pageId,
+        inputs: dynamicInputs,
+        logger: logPageBuilderEvent
+      }),
+    [dynamicInputs, graphQuery.data?.graph, graphQuery.dataUpdatedAt, pageId]
+  );
+
   const builderConfig = useMemo(
     () =>
       createPageBuilderConfig({
         bindingOptions,
         resolveBinding: (text?: string, bindingId?: string) => {
           if (bindingId) {
+            if (dynamicPreviewMap.has(bindingId)) {
+              return dynamicPreviewMap.get(bindingId) ?? '';
+            }
             return `{{${dynamicLabelMap.get(bindingId) ?? bindingId}}}`;
           }
           return text || 'Text';
         }
       }),
-    [bindingOptions, dynamicLabelMap]
+    [bindingOptions, dynamicLabelMap, dynamicPreviewMap]
   );
 
   useLayoutEffect(() => {
@@ -354,7 +412,7 @@ export const PageBuilderPage = () => {
         dynamicInputs
       });
     },
-    onSuccess: ({ page }) => {
+    onSuccess: async ({ page }) => {
       logPageBuilderEvent('Save succeeded', {
         pageId: page.id,
         summary: summarizeBuilderData(page.builderState as Data)
@@ -363,7 +421,12 @@ export const PageBuilderPage = () => {
       clearBuilderDraft(draftStorageKey);
       updateDraftStatus({ restored: false, savedAt: undefined });
       setFeedback('Saved');
-      queryClient.invalidateQueries({ queryKey: ['project-graph', projectId] });
+      await invalidateProjectGraphCache(
+        queryClient,
+        projectId,
+        { reason: 'page-save' },
+        (message, details) => logPageBuilderEvent(message, details)
+      );
       setTimeout(() => setFeedback(''), 2000);
     },
     onError: (error: unknown) => {

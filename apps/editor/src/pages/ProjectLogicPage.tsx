@@ -38,6 +38,7 @@ import { RelationalOperatorNode } from '../components/logic/RelationalOperatorNo
 import { PreviewResolverProvider, createPreviewResolver } from '../components/logic/previewResolver';
 import { SeverableEdge } from '../components/logic/SeverableEdge';
 import { logicLogger } from '../lib/logger';
+import { projectGraphQueryKey, invalidateProjectGraphCache } from '../lib/query-helpers';
 import { SnapshotHistory } from '../lib/snapshotHistory';
 import { processEditorShortcut } from '../lib/editorShortcuts';
 import { useDeleteNodesShortcut } from '../hooks/useDeleteNodesShortcut';
@@ -289,7 +290,7 @@ const LogicEditorView = () => {
   }, [activeFunction, functions]);
 
   const graphQuery = useQuery({
-    queryKey: ['project-graph', projectId],
+    queryKey: projectGraphQueryKey(projectId ?? 'logic'),
     queryFn: () => projectGraphApi.get(projectId!),
     enabled: Boolean(projectId),
     staleTime: 5 * 60 * 1000
@@ -327,6 +328,12 @@ const LogicEditorView = () => {
       setHasUnsavedChanges(false);
       setFeedback('Saved');
       setTimeout(() => setFeedback(''), 2000);
+      void invalidateProjectGraphCache(
+        queryClient,
+        projectId,
+        { reason: 'logic-save' },
+        (message, details) => logicLogger.debug(message, details)
+      );
     },
     onError: (error: unknown) => {
       logicLogger.error('Graph save failed', {
