@@ -57,4 +57,63 @@ describe('Heading component rendering', () => {
     );
     expect(screen.getByText('Transparent heading')).toHaveStyle({ backgroundColor: 'transparent' });
   });
+
+  it('does not render when renderWhen resolves false', () => {
+    const config = createPageBuilderConfig({
+      bindingOptions: [],
+      resolveBinding: (text) => text ?? ''
+    });
+    const heading = config.components?.Heading;
+    if (!heading?.render) {
+      throw new Error('Heading component is not registered');
+    }
+    render(
+      <>
+        {heading.render({
+          id: 'heading-hidden',
+          content: 'Hidden heading',
+          renderWhen: 'false'
+        } as unknown as Parameters<NonNullable<typeof heading.render>>[0])}
+      </>
+    );
+    expect(screen.queryByText('Hidden heading')).not.toBeInTheDocument();
+  });
+});
+
+describe('Conditional component', () => {
+  it('switches between Element A and Element B', () => {
+    const config = createPageBuilderConfig({
+      bindingOptions: [],
+      resolveBinding: (text) => text ?? ''
+    });
+    const conditional = config.components?.Conditional;
+    if (!conditional?.render) {
+      throw new Error('Conditional component is not registered');
+    }
+
+    const slotA = ({ className }: { className?: string }) => (
+      <div data-testid="slot-a" className={className}>
+        Element A content
+      </div>
+    );
+    const slotB = ({ className }: { className?: string }) => (
+      <div data-testid="slot-b" className={className}>
+        Element B content
+      </div>
+    );
+
+    render(
+      <>
+        {conditional.render({
+          id: 'conditional-test',
+          activeElement: 'b',
+          elementA: slotA,
+          elementB: slotB
+        } as unknown as Parameters<NonNullable<typeof conditional.render>>[0])}
+      </>
+    );
+
+    expect(screen.getByTestId('slot-b')).toBeInTheDocument();
+    expect(screen.queryByTestId('slot-a')).not.toBeInTheDocument();
+  });
 });

@@ -1,6 +1,6 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { createDynamicBindingState } from './dynamic-binding';
-import { createDynamicTextField } from './dynamic-field-control';
+import { createDynamicBooleanField, createDynamicTextField } from './dynamic-field-control';
 
 describe('DynamicFieldControl', () => {
   const bindingOptions = [
@@ -69,5 +69,49 @@ describe('DynamicFieldControl', () => {
         fallback: 'Updated heading'
       })
     );
+  });
+});
+
+describe('createDynamicBooleanField', () => {
+  const bindingOptions = [{ label: 'Toggle', value: 'toggle' }];
+
+  const renderBooleanField = (value: unknown, onChange = jest.fn()) => {
+    const field = createDynamicBooleanField({
+      fieldKey: 'renderWhen',
+      bindingOptions,
+      label: 'Visibility',
+      trueLabel: 'Render',
+      falseLabel: 'Hide',
+      defaultValue: true
+    });
+
+    if (field.type !== 'custom' || typeof field.render !== 'function') {
+      throw new Error('Boolean field must render as a custom field');
+    }
+
+    const props = {
+      field,
+      id: 'render-field',
+      name: 'renderWhen',
+      onChange,
+      readOnly: false,
+      value
+    } as Parameters<NonNullable<typeof field.render>>[0];
+
+    return { onChange, ...render(<>{field.render(props)}</>) };
+  };
+
+  it('defaults to true when no value is provided', () => {
+    renderBooleanField(undefined);
+    const select = screen.getByLabelText('Visibility') as HTMLSelectElement;
+    expect(select.value).toBe('true');
+  });
+
+  it('propagates user selections as boolean strings', () => {
+    const handleChange = jest.fn();
+    renderBooleanField('true', handleChange);
+    const select = screen.getByLabelText('Visibility');
+    fireEvent.change(select, { target: { value: 'false' } });
+    expect(handleChange).toHaveBeenCalledWith('false');
   });
 });

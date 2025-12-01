@@ -132,9 +132,16 @@ type SpacerProps = StyleableProps<{
   height?: DynamicBindingValue;
 }>;
 
+type ConditionalProps = StyleableProps<{
+  activeElement?: DynamicBindingValue;
+  elementA?: SlotRenderer;
+  elementB?: SlotRenderer;
+}>;
+
 const COMPONENT_ORDER = [
   'Section',
   'Columns',
+  'Conditional',
   'Heading',
   'Paragraph',
   'Button',
@@ -156,6 +163,44 @@ const renderSlot = (slot?: SlotRenderer, emptyLabel = 'Drag components here', mi
       {emptyLabel}
     </div>
   );
+};
+
+const RENDER_CONTROL_LOG_PREFIX = '[PageBuilder:RenderControl]';
+
+const logRenderControlEvent = (message: string, details?: Record<string, unknown>) => {
+  if (typeof console === 'undefined' || typeof console.info !== 'function') {
+    return;
+  }
+  console.info(`${RENDER_CONTROL_LOG_PREFIX} ${message}`, details ?? '');
+};
+
+const BOOLEAN_TRUE_VALUES = new Set(['true', '1', 'yes', 'on']);
+const BOOLEAN_FALSE_VALUES = new Set(['false', '0', 'no', 'off']);
+
+const coerceBooleanString = (value?: string, fallback = true, meta?: Record<string, unknown>): boolean => {
+  if (!value) {
+    return fallback;
+  }
+  const normalized = value.trim().toLowerCase();
+  if (BOOLEAN_TRUE_VALUES.has(normalized)) {
+    return true;
+  }
+  if (BOOLEAN_FALSE_VALUES.has(normalized)) {
+    return false;
+  }
+  logRenderControlEvent('Boolean value fallback applied', { ...meta, raw: value });
+  return fallback;
+};
+
+const normalizeConditionalChoice = (value?: string): 'a' | 'b' => {
+  if (!value) {
+    return 'a';
+  }
+  const normalized = value.trim().toLowerCase();
+  if (normalized.startsWith('b') || normalized.endsWith('b')) {
+    return 'b';
+  }
+  return 'a';
 };
 
 const getColumnsTemplate = (layout: ColumnsLayout): string => {
@@ -222,6 +267,54 @@ export const createPageBuilderConfig = ({ bindingOptions, resolveBinding }: Buil
     legacyBindingId?: string
   ): string => resolveDynamicBindingValue(value as DynamicBindingValue, resolveBinding, legacyBindingId);
   const resolveStyleValue = (value: DynamicBindingValue | undefined) => resolveDynamicBindingValue(value, resolveBinding);
+  const resolveBooleanField = (
+    value: DynamicBindingValue | string | boolean | undefined,
+    fallback = true,
+    meta?: { component?: string; field?: string; componentId?: string }
+  ): boolean => {
+    if (typeof value === 'boolean') {
+      return value;
+    }
+    if (value === null || typeof value === 'undefined') {
+      return fallback;
+    }
+    return coerceBooleanString(resolveFieldValue(value as DynamicBindingValue | string), fallback, meta);
+  };
+  const shouldRenderComponent = (
+    component: string,
+    componentId: string | undefined,
+    renderWhen?: DynamicBindingValue | string | boolean
+  ) => {
+    const isVisible = resolveBooleanField(renderWhen, true, { component, field: 'renderWhen', componentId });
+    if (!isVisible) {
+      logRenderControlEvent('Component visibility disabled', { component, componentId });
+    }
+    return isVisible;
+  };
+  const interpretConditionalChoice = (raw?: string): { selection: 'a' | 'b'; recognized: boolean } => {
+    if (!raw) {
+      return { selection: 'a', recognized: false };
+    }
+    const normalized = raw.trim().toLowerCase();
+    const selection = normalizeConditionalChoice(raw);
+    const recognized = normalized.startsWith('a') || normalized.startsWith('b') || normalized.endsWith('a') || normalized.endsWith('b');
+    return { selection, recognized };
+  };
+  const resolveConditionalSelection = (value: DynamicBindingValue | string | undefined, componentId?: string): 'a' | 'b' => {
+    const rawChoice = resolveFieldValue(value as DynamicBindingValue | string | undefined);
+    const { selection, recognized } = interpretConditionalChoice(rawChoice);
+    if (!rawChoice) {
+      logRenderControlEvent('Conditional selection defaulted', { component: 'Conditional', componentId, resolved: selection });
+    } else if (!recognized) {
+      logRenderControlEvent('Conditional selection normalized', {
+        component: 'Conditional',
+        componentId,
+        rawChoice,
+        resolved: selection
+      });
+    }
+    return selection;
+  };
 
   const components: Config['components'] = {
     Heading: {
@@ -235,7 +328,10 @@ export const createPageBuilderConfig = ({ bindingOptions, resolveBinding }: Buil
       },
       render: (props) => {
         const { styleProps, rest } = splitStyleProps(props);
-        const { content, size = 'h2', bindingId, customAttributes, customCss, id } = rest as HeadingProps;
+        const { content, size = 'h2', bindingId, customAttributes, customCss, id, renderWhen } = rest as HeadingProps;
+        if (!shouldRenderComponent('Heading', id, renderWhen)) {
+          return <></>;
+        }
         const resolvedContent = resolveFieldValue(content, bindingId);
         const resolvedSize = resolveFieldValue(size);
         const allowedHeadingTags = new Set(['h1', 'h2', 'h3', 'h4']);
@@ -261,7 +357,10 @@ export const createPageBuilderConfig = ({ bindingOptions, resolveBinding }: Buil
       },
       render: (props) => {
         const { styleProps, rest } = splitStyleProps(props);
-        const { content, bindingId, customAttributes, customCss, id } = rest as ParagraphProps;
+        const { content, bindingId, customAttributes, customCss, id, renderWhen } = rest as ParagraphProps;
+        if (!shouldRenderComponent('Paragraph', id, renderWhen)) {
+          return <></>;
+        }
         const attributeProps = attachNodeIdentity(id, buildAttributeProps(customAttributes));
         return (
           <>
@@ -285,7 +384,10 @@ export const createPageBuilderConfig = ({ bindingOptions, resolveBinding }: Buil
       },
       render: (props) => {
         const { styleProps, rest } = splitStyleProps(props);
-        const { label, variant = 'primary', bindingId, href, customAttributes, customCss, id } = rest as ButtonProps;
+        const { label, variant = 'primary', bindingId, href, customAttributes, customCss, id, renderWhen } = rest as ButtonProps;
+        if (!shouldRenderComponent('Button', id, renderWhen)) {
+          return <></>;
+        }
         const content = resolveFieldValue(label, bindingId);
         const resolvedVariant = resolveFieldValue(variant);
         const nextVariant = ['ghost', 'link', 'primary'].includes(resolvedVariant)
@@ -348,8 +450,12 @@ export const createPageBuilderConfig = ({ bindingOptions, resolveBinding }: Buil
           backgroundImage,
           customAttributes,
           customCss,
-          id
+          id,
+          renderWhen
         } = rest as SectionProps;
+        if (!shouldRenderComponent('Section', id, renderWhen)) {
+          return <></>;
+        }
         const resolvedEyebrow = resolveFieldValue(eyebrow);
         const resolvedHeading = resolveFieldValue(heading);
         const resolvedSubheading = resolveFieldValue(subheading);
@@ -408,7 +514,10 @@ export const createPageBuilderConfig = ({ bindingOptions, resolveBinding }: Buil
       }),
       render: (props) => {
         const { styleProps, rest } = splitStyleProps(props);
-        const { layout = 'equal', stackAt = 'md', left, right, customAttributes, customCss, id } = rest as ColumnsProps;
+        const { layout = 'equal', stackAt = 'md', left, right, customAttributes, customCss, id, renderWhen } = rest as ColumnsProps;
+        if (!shouldRenderComponent('Columns', id, renderWhen)) {
+          return <></>;
+        }
         const rawLayout = resolveFieldValue(layout);
         const resolvedLayout: ColumnsLayout = ['wideLeft', 'wideRight', 'equal'].includes(rawLayout as string)
           ? ((rawLayout as ColumnsLayout) ?? 'equal')
@@ -434,6 +543,73 @@ export const createPageBuilderConfig = ({ bindingOptions, resolveBinding }: Buil
             >
               <div>{renderSlot(left, 'Left column content')}</div>
               <div>{renderSlot(right, 'Right column content')}</div>
+            </div>
+            {renderScopedCss(id, customCss)}
+          </>
+        );
+      }
+    },
+    Conditional: {
+      label: 'Conditional',
+      defaultProps: {
+        activeElement: 'a',
+        padding: '24px',
+        borderRadius: '12px',
+        backgroundColor: '#FFFFFF'
+      },
+      fields: enhanceFields({
+        activeElement: createDynamicSelectField({
+          fieldKey: 'activeElement',
+          bindingOptions,
+          label: 'Active element',
+          options: [
+            { label: 'Element A', value: 'a' },
+            { label: 'Element B', value: 'b' }
+          ]
+        }),
+        elementA: {
+          type: 'slot',
+          label: 'Element A',
+          allow: allowAllComponents
+        },
+        elementB: {
+          type: 'slot',
+          label: 'Element B',
+          allow: allowAllComponents
+        }
+      }),
+      render: (props) => {
+        const { styleProps, rest } = splitStyleProps(props);
+        const { activeElement = 'a', elementA, elementB, customAttributes, customCss, id, renderWhen } = rest as ConditionalProps;
+        if (!shouldRenderComponent('Conditional', id, renderWhen)) {
+          return <></>;
+        }
+        const selection = resolveConditionalSelection(activeElement, id);
+        const activeSlot = selection === 'b' ? elementB : elementA;
+        if (!activeSlot) {
+          logRenderControlEvent('Conditional slot empty', {
+            component: 'Conditional',
+            componentId: id,
+            selection
+          });
+        }
+        const inlineStyle = createInlineStyle(styleProps, resolveStyleValue);
+        const attributeProps = attachNodeIdentity(id, buildAttributeProps(customAttributes));
+        const fallbackLabel = selection === 'b' ? 'Element B content' : 'Element A content';
+        return (
+          <>
+            <div
+              style={inlineStyle}
+              className="space-y-3 rounded-xl border border-dashed border-bw-amber/60 bg-white/90 p-4"
+              {...attributeProps}
+            >
+              <div className="flex items-center justify-between text-xs uppercase tracking-[0.3em] text-gray-500">
+                <span>Conditional render</span>
+                <span className="font-semibold text-bw-amber">
+                  Showing {selection === 'b' ? 'Element B' : 'Element A'}
+                </span>
+              </div>
+              <div>{renderSlot(activeSlot, fallbackLabel, 120)}</div>
             </div>
             {renderScopedCss(id, customCss)}
           </>
@@ -474,7 +650,10 @@ export const createPageBuilderConfig = ({ bindingOptions, resolveBinding }: Buil
       }),
       render: (props) => {
         const { styleProps, rest } = splitStyleProps(props);
-        const { src, alt, caption, objectFit = 'cover', aspectRatio, customAttributes, customCss, id } = rest as ImageProps;
+        const { src, alt, caption, objectFit = 'cover', aspectRatio, customAttributes, customCss, id, renderWhen } = rest as ImageProps;
+        if (!shouldRenderComponent('Image', id, renderWhen)) {
+          return <></>;
+        }
         const resolvedSrc = resolveFieldValue(src);
         const resolvedAlt = resolveFieldValue(alt);
         const resolvedCaption = resolveFieldValue(caption);
@@ -523,7 +702,21 @@ export const createPageBuilderConfig = ({ bindingOptions, resolveBinding }: Buil
       }),
       render: (props) => {
         const { styleProps, rest } = splitStyleProps(props);
-        const { eyebrow, heading, content, imageUrl, actionHref, actionLabel, customAttributes, customCss, id } = rest as CardProps;
+        const {
+          eyebrow,
+          heading,
+          content,
+          imageUrl,
+          actionHref,
+          actionLabel,
+          customAttributes,
+          customCss,
+          id,
+          renderWhen
+        } = rest as CardProps;
+        if (!shouldRenderComponent('Card', id, renderWhen)) {
+          return <></>;
+        }
         const inlineStyle = createInlineStyle(styleProps, resolveStyleValue);
         const attributeProps = attachNodeIdentity(id, buildAttributeProps(customAttributes));
         const resolvedEyebrow = resolveFieldValue(eyebrow);
@@ -586,7 +779,10 @@ export const createPageBuilderConfig = ({ bindingOptions, resolveBinding }: Buil
       }),
       render: (props) => {
         const { styleProps, rest } = splitStyleProps(props);
-        const { items = [], variant = 'bullet', customAttributes, customCss, id } = rest as ListProps;
+        const { items = [], variant = 'bullet', customAttributes, customCss, id, renderWhen } = rest as ListProps;
+        if (!shouldRenderComponent('List', id, renderWhen)) {
+          return <></>;
+        }
         const inlineStyle = createInlineStyle(styleProps, resolveStyleValue);
         const attributeProps = attachNodeIdentity(id, buildAttributeProps(customAttributes));
         const resolvedVariantRaw = resolveFieldValue(variant);
@@ -645,7 +841,10 @@ export const createPageBuilderConfig = ({ bindingOptions, resolveBinding }: Buil
       fields: enhanceFields({}),
       render: (props) => {
         const { styleProps, rest } = splitStyleProps(props);
-        const { customAttributes, customCss, id } = rest as StyleableProps<Record<string, never>>;
+        const { customAttributes, customCss, id, renderWhen } = rest as StyleableProps<Record<string, never>>;
+        if (!shouldRenderComponent('Divider', id, renderWhen)) {
+          return <></>;
+        }
         const attributeProps = attachNodeIdentity(id, buildAttributeProps(customAttributes));
         return (
           <>
@@ -676,7 +875,10 @@ export const createPageBuilderConfig = ({ bindingOptions, resolveBinding }: Buil
       }),
       render: (props) => {
         const { styleProps, rest } = splitStyleProps(props);
-        const { height = '48px', customAttributes, customCss, id } = rest as SpacerProps;
+        const { height = '48px', customAttributes, customCss, id, renderWhen } = rest as SpacerProps;
+        if (!shouldRenderComponent('Spacer', id, renderWhen)) {
+          return <></>;
+        }
         const inlineStyle = createInlineStyle(styleProps, resolveStyleValue);
         const attributeProps = attachNodeIdentity(id, buildAttributeProps(customAttributes));
         return (
@@ -691,7 +893,7 @@ export const createPageBuilderConfig = ({ bindingOptions, resolveBinding }: Buil
 
   return {
     categories: {
-      layout: { title: 'Layout', components: ['Section', 'Columns', 'Divider', 'Spacer'] },
+      layout: { title: 'Layout', components: ['Section', 'Columns', 'Conditional', 'Divider', 'Spacer'] },
       content: { title: 'Content', components: ['Heading', 'Paragraph', 'Card', 'List'] },
       media: { title: 'Media', components: ['Image'] },
       actions: { title: 'Actions', components: ['Button'] }

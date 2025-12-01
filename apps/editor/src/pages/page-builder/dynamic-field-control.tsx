@@ -206,6 +206,14 @@ type SelectFieldConfig = BaseFieldConfig & {
   options: ReadonlyArray<{ label: string; value: string }>;
 };
 
+type BooleanFieldConfig = BaseFieldConfig & {
+  label: string;
+  trueLabel?: string;
+  falseLabel?: string;
+  helperText?: string;
+  defaultValue?: boolean;
+};
+
 const baseInputClassName =
   'w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:border-bw-amber focus:outline-none disabled:cursor-not-allowed';
 
@@ -287,6 +295,61 @@ export const createDynamicSelectField = ({ fieldKey, bindingOptions, label, opti
           ))}
         </select>
       )}
+    />
+  )
+});
+
+const TRUTHY_BOOLEAN_VALUES = new Set(['true', '1', 'yes', 'on']);
+const FALSY_BOOLEAN_VALUES = new Set(['false', '0', 'no', 'off']);
+
+const coerceBooleanOption = (value?: string, fallback = false): boolean => {
+  if (!value) {
+    return fallback;
+  }
+  const normalized = value.trim().toLowerCase();
+  if (TRUTHY_BOOLEAN_VALUES.has(normalized)) {
+    return true;
+  }
+  if (FALSY_BOOLEAN_VALUES.has(normalized)) {
+    return false;
+  }
+  return fallback;
+};
+
+export const createDynamicBooleanField = ({
+  fieldKey,
+  bindingOptions,
+  label,
+  trueLabel = 'Enabled',
+  falseLabel = 'Disabled',
+  helperText,
+  defaultValue = false
+}: BooleanFieldConfig): Field => ({
+  type: 'custom',
+  label,
+  render: (props) => (
+    <DynamicFieldControl
+      {...props}
+      fieldKey={fieldKey}
+      bindingOptions={bindingOptions}
+      renderStaticControl={({ inputId, value, onChange, readOnly }) => {
+        const effectiveValue = coerceBooleanOption(value, defaultValue) ? 'true' : 'false';
+        return (
+          <div className="space-y-1">
+            <select
+              id={inputId}
+              className={baseInputClassName}
+              value={effectiveValue}
+              onChange={(event) => onChange(event.target.value)}
+              disabled={readOnly}
+            >
+              <option value="true">{trueLabel}</option>
+              <option value="false">{falseLabel}</option>
+            </select>
+            {helperText ? <p className="text-xs text-gray-500">{helperText}</p> : null}
+          </div>
+        );
+      }}
     />
   )
 });

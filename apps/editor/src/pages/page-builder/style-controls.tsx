@@ -3,7 +3,12 @@ import type { CSSProperties, ChangeEvent } from 'react';
 import type { CustomField, Field, FieldProps } from '@measured/puck';
 import type { BindingOption, DynamicBindingValue } from './dynamic-binding';
 import { isDynamicBindingValue } from './dynamic-binding';
-import { DynamicFieldControl, createDynamicSelectField, type StaticControlRendererProps } from './dynamic-field-control';
+import {
+  DynamicFieldControl,
+  createDynamicBooleanField,
+  createDynamicSelectField,
+  type StaticControlRendererProps
+} from './dynamic-field-control';
 import { PropertyFilterGuard, PropertySearchFieldControl, PROPERTY_SEARCH_FIELD_KEY } from './property-search';
 
 const STYLE_LOG_PREFIX = '[PageBuilder:StyleControls]';
@@ -728,10 +733,20 @@ type PropertySearchFieldMap = {
 };
 
 const createSharedFields = (bindingOptions: BindingOption[]): SharedStyleFields & {
+  renderWhen: ReturnType<typeof createDynamicBooleanField>;
   customAttributes: ReturnType<typeof createCustomAttributesField>;
   customCss: ReturnType<typeof createCustomCssField>;
 } => ({
   ...createSharedStyleFields(bindingOptions),
+  renderWhen: createDynamicBooleanField({
+    fieldKey: 'renderWhen',
+    bindingOptions,
+    label: 'Visibility',
+    trueLabel: 'Render element',
+    falseLabel: 'Hide element',
+    helperText: 'Toggle or bind to hide/show this component.',
+    defaultValue: true
+  }),
   customAttributes: createCustomAttributesField(),
   customCss: createCustomCssField({ label: 'Custom CSS', placeholder: 'e.g. color: #000; margin-top: 2rem;' }, bindingOptions)
 });
@@ -741,10 +756,13 @@ type SharedFields = ReturnType<typeof createSharedFields> & PropertySearchFieldM
 export type StyleFieldKey = keyof SharedStyleFields;
 export type StyleFieldValues = Partial<Record<StyleFieldKey, DynamicBindingValue>>;
 
+export type RenderControlValue = DynamicBindingValue | string | boolean | null | undefined;
+
 export type StyleableProps<T extends Record<string, unknown>> = T & StyleFieldValues & {
   id?: string;
   customAttributes?: CustomAttributeList;
   customCss?: string;
+  renderWhen?: RenderControlValue;
 };
 
 export const STYLE_FIELD_KEYS = Object.keys(createSharedStyleFields([])) as StyleFieldKey[];
