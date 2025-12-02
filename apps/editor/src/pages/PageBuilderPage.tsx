@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, useLayoutEffect } fr
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Puck } from '@measured/puck';
+import type { BuilderPreviewViewport } from './page-builder/preview-viewports';
 import type { ComponentData, Content, Data } from '@measured/puck';
 import '@measured/puck/puck.css';
 import type { PageBuilderState, PageDocument, PageDynamicInput } from '../types/api';
@@ -12,8 +13,8 @@ import { processEditorShortcut } from '../lib/editorShortcuts';
 import { createPageBuilderConfig } from './page-builder/builder-config';
 import { clearBuilderDraft, loadBuilderDraft, persistBuilderDraft } from './page-builder/draft-storage';
 import { PROPERTY_SEARCH_FIELD_KEY, resetPropertySearchState } from './page-builder/property-search';
-import { BuilderPreviewModal, type BuilderPreviewViewport } from './page-builder/builder-preview-modal';
 import { buildDynamicInputPreviewMap } from './page-builder/dynamic-input-preview';
+import { createPreviewSnapshotToken } from './page-builder/preview-bridge';
 
 const randomId = () => {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -29,6 +30,7 @@ const logPageBuilderEvent = (message: string, details?: Record<string, unknown>)
 };
 
 const BUILDER_HISTORY_LIMIT = 100;
+const DEFAULT_PREVIEW_VIEWPORT: BuilderPreviewViewport = 'desktop';
 
 const buildDefaultSection = (): ComponentData => ({
   type: 'Section',
@@ -168,8 +170,6 @@ export const PageBuilderPage = () => {
   const sheetToggleButtonRef = useRef<HTMLButtonElement | null>(null);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [feedback, setFeedback] = useState('');
-  const [isPreviewOpen, setIsPreviewOpen] = useState(false);
-  const [previewMode, setPreviewMode] = useState<BuilderPreviewViewport>('desktop');
   const draftStatusRef = useRef<{ restored: boolean; savedAt?: number }>({ restored: false });
   const draftPersistHandle = useRef<number | null>(null);
   const pendingSaveRef = useRef<Promise<unknown> | null>(null);
@@ -527,54 +527,41 @@ export const PageBuilderPage = () => {
   }, [hasUnsavedChanges, pageId, persistBuilderChanges, projectId]);
 
   const handlePreviewOpen = useCallback(() => {
-    if (isPreviewOpen) {
-      logPageBuilderEvent('Preview modal already open', {
+    if (typeof window === 'undefined' || !projectId || !pageId) {
+      return;
+    }
+    const token = createPreviewSnapshotToken(builderState, dynamicInputs);
+    if (!token) {
+      setFeedback('Preview is unavailable in this browser');
+      setTimeout(() => setFeedback(''), 3000);
+      logPageBuilderEvent('Preview snapshot could not be stored', {
         pageId,
-        projectId,
-        viewport: previewMode
+        projectId
       });
       return;
     }
-    logPageBuilderEvent('Opening preview modal', {
+    const targetUrl = new URL(window.location.href);
+    targetUrl.pathname = `/app/${projectId}/page/${pageId}/preview`;
+    targetUrl.searchParams.set('token', token);
+    targetUrl.searchParams.set('viewport', DEFAULT_PREVIEW_VIEWPORT);
+    const opened = window.open(targetUrl.toString(), '_blank', 'noopener,noreferrer');
+    if (!opened) {
+      setFeedback('Allow pop-ups to open preview');
+      setTimeout(() => setFeedback(''), 3000);
+      logPageBuilderEvent('Preview tab blocked by browser', {
+        pageId,
+        projectId
+      });
+      return;
+    }
+    logPageBuilderEvent('Opened preview tab', {
       pageId,
       projectId,
-      viewport: previewMode,
-      summary: summarizeBuilderData(builderState)
+      token,
+      summary: summarizeBuilderData(builderState),
+      viewport: DEFAULT_PREVIEW_VIEWPORT
     });
-    setIsPreviewOpen(true);
-  }, [builderState, isPreviewOpen, pageId, previewMode, projectId]);
-
-  const handlePreviewClose = useCallback(
-    (reason: string) => {
-      if (!isPreviewOpen) {
-        return;
-      }
-      setIsPreviewOpen(false);
-      logPageBuilderEvent('Closing preview modal', {
-        pageId,
-        projectId,
-        viewport: previewMode,
-        reason
-      });
-    },
-    [isPreviewOpen, pageId, previewMode, projectId]
-  );
-
-  const handlePreviewModeChange = useCallback(
-    (nextMode: BuilderPreviewViewport) => {
-      if (nextMode === previewMode) {
-        return;
-      }
-      logPageBuilderEvent('Preview viewport changed', {
-        pageId,
-        projectId,
-        from: previewMode,
-        to: nextMode
-      });
-      setPreviewMode(nextMode);
-    },
-    [pageId, previewMode, projectId]
-  );
+  }, [builderState, dynamicInputs, pageId, projectId]);
 
   const applyBuilderSnapshot = useCallback(
     (snapshot: BuilderSnapshot, action: 'undo' | 'redo') => {
@@ -828,15 +815,6 @@ export const PageBuilderPage = () => {
         </div>
       </div>
       </div>
-      <BuilderPreviewModal
-        isOpen={isPreviewOpen}
-        mode={previewMode}
-        onModeChange={handlePreviewModeChange}
-        onClose={() => handlePreviewClose('toolbar')}
-        config={builderConfig}
-        data={builderState}
-        pageName={page?.name}
-      />
     </>
   );
 };

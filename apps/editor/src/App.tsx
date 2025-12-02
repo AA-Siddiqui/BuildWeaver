@@ -6,6 +6,7 @@ import { SignupPage } from './pages/SignupPage';
 import { WorkspacePage } from './pages/WorkspacePage';
 import { ProjectLogicPage } from './pages/ProjectLogicPage';
 import { PageBuilderPage } from './pages/PageBuilderPage';
+import { PagePreviewPage } from './pages/PagePreviewPage';
 import { ProtectedRoute } from './components/routing/ProtectedRoute';
 import { useInitializeAuth } from './hooks/useInitializeAuth';
 
@@ -39,6 +40,14 @@ export const App = () => {
           element={
             <ProtectedRoute>
               <PageBuilderPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/app/:projectId/page/:pageId/preview"
+          element={
+            <ProtectedRoute>
+              <PagePreviewPage />
             </ProtectedRoute>
           }
         />

@@ -14,12 +14,17 @@ export const AppLayout = ({ children }: AppLayoutProps) => {
   const user = useAuthStore((state) => state.user);
   const logout = useAuthStore((state) => state.logout);
   const hideHeader = location.pathname.startsWith('/app/');
+  const isPreviewRoute = location.pathname.endsWith('/preview');
 
   const handleLogout = () => {
     logout();
     queryClient.clear();
     navigate('/login');
   };
+
+  if (isPreviewRoute) {
+    return <>{children}</>;
+  }
 
   return (
     <div className="min-h-screen bg-bw-ink text-bw-platinum">

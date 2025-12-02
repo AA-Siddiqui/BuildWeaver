@@ -81,4 +81,57 @@
     stroke: #f9e7b2 !important;
     stroke-width: 2 !important;
   }
+
+  .preview-viewport-controls {
+    @apply fixed right-6 top-1/2 flex -translate-y-1/2 flex-col gap-3 rounded-2xl border border-white/20 bg-black/70 p-3 text-white shadow-2xl backdrop-blur;
+    pointer-events: auto;
+  }
+
+  .preview-viewport-controls--visible {
+    animation: bubble-in 260ms ease-out;
+    opacity: 1;
+  }
+
+  .preview-viewport-controls--hidden {
+    animation: bubble-out 220ms ease-in forwards;
+    pointer-events: none;
+  }
+
+  .preview-viewport-button {
+    @apply flex w-32 flex-col items-center rounded-xl border border-white/20 bg-white/5 px-3 py-2 text-left transition;
+  }
+
+  .preview-viewport-button--active {
+    @apply border-bw-sand bg-bw-sand/20 text-bw-sand;
+  }
+}
+
+@layer utilities {
+  @keyframes bubble-in {
+    0% {
+      transform: translateY(-50%) scale(0.75);
+      opacity: 0;
+    }
+    70% {
+      transform: translateY(-50%) scale(1.05);
+    }
+    100% {
+      transform: translateY(-50%) scale(1);
+      opacity: 1;
+    }
+  }
+
+  @keyframes bubble-out {
+    0% {
+      transform: translateY(-50%) scale(1);
+      opacity: 1;
+    }
+    30% {
+      transform: translateY(-50%) scale(1.05);
+    }
+    100% {
+      transform: translateY(-50%) scale(0.75);
+      opacity: 0;
+    }
+  }
 }
