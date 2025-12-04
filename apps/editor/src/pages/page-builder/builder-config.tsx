@@ -1,5 +1,6 @@
 import type { Config, Field } from '@measured/puck';
 import type { CSSProperties, ReactNode } from 'react';
+import type { ScalarValue } from '@buildweaver/libs';
 import {
   buildAttributeProps,
   createInlineStyle,
@@ -13,6 +14,7 @@ import {
   type BindingOption,
   type BindingResolver,
   type DynamicBindingValue,
+  isDynamicBindingValue,
   resolveDynamicBindingValue
 } from './dynamic-binding';
 import {
@@ -25,6 +27,7 @@ import {
 type BuilderConfigParams = {
   bindingOptions: BindingOption[];
   resolveBinding: BindingResolver;
+  resolveBindingValue?: (bindingId?: string, propertyPath?: string[]) => ScalarValue | undefined;
 };
 
 type SlotRenderer = ((props?: { className?: string; minEmptyHeight?: number }) => ReactNode) | undefined;
@@ -101,9 +104,16 @@ type ListItem = {
   description?: DynamicBindingValue;
 };
 
+type ResolvedListEntry = {
+  text?: string | null;
+  description?: string | null;
+  icon?: string | null;
+};
+
 type ListProps = StyleableProps<{
   items?: ListItem[];
   variant?: DynamicBindingValue;
+  dataSource?: DynamicBindingValue;
 }>;
 
 type CardProps = StyleableProps<{
@@ -330,13 +340,19 @@ const buttonFields = (
     href: createDynamicTextField({ fieldKey: 'href', bindingOptions, label: 'Href', placeholder: 'https://example.com' })
   });
 
-export const createPageBuilderConfig = ({ bindingOptions, resolveBinding }: BuilderConfigParams): Config => {
+export const createPageBuilderConfig = ({ bindingOptions, resolveBinding, resolveBindingValue }: BuilderConfigParams): Config => {
   const enhanceFields = (fields: Record<string, Field>) => withStyleFields(fields, bindingOptions);
   const resolveFieldValue = (
     value: DynamicBindingValue | string | undefined,
     legacyBindingId?: string
   ): string => resolveDynamicBindingValue(value as DynamicBindingValue, resolveBinding, legacyBindingId);
   const resolveStyleValue = (value: DynamicBindingValue | undefined) => resolveDynamicBindingValue(value, resolveBinding);
+  const resolveScalarField = (value: DynamicBindingValue | undefined): ScalarValue | undefined => {
+    if (!value || typeof resolveBindingValue !== 'function' || !isDynamicBindingValue(value)) {
+      return undefined;
+    }
+    return resolveBindingValue(value.bindingId, value.propertyPath);
+  };
   const resolveBooleanField = (
     value: DynamicBindingValue | string | boolean | undefined,
     fallback = true,
@@ -349,6 +365,58 @@ export const createPageBuilderConfig = ({ bindingOptions, resolveBinding }: Buil
       return fallback;
     }
     return coerceBooleanString(resolveFieldValue(value as DynamicBindingValue | string), fallback, meta);
+  };
+  const stringifyScalarValue = (entry: ScalarValue): string => {
+    if (entry === null) {
+      return '—';
+    }
+    if (typeof entry === 'string') {
+      return entry;
+    }
+    if (typeof entry === 'number' || typeof entry === 'boolean') {
+      return String(entry);
+    }
+    try {
+      return JSON.stringify(entry);
+    } catch {
+      return '';
+    }
+  };
+  const pickRecordValue = (record: Record<string, ScalarValue>, keys: string[]): string | undefined => {
+    for (const key of keys) {
+      const value = record[key];
+      if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+        return typeof value === 'string' ? value : String(value);
+      }
+    }
+    return undefined;
+  };
+  const normalizeListEntry = (entry: ScalarValue, index: number): ResolvedListEntry => {
+    if (entry === null || typeof entry === 'undefined') {
+      return { text: `Item ${index + 1}` };
+    }
+    if (typeof entry === 'string' || typeof entry === 'number' || typeof entry === 'boolean') {
+      return { text: String(entry) };
+    }
+    if (Array.isArray(entry)) {
+      return { text: entry.map((value) => stringifyScalarValue(value as ScalarValue)).join(', ') };
+    }
+    if (typeof entry === 'object') {
+      const record = entry as Record<string, ScalarValue>;
+      const text =
+        pickRecordValue(record, ['title', 'name', 'label', 'heading', 'text']) ?? `Item ${index + 1}`;
+      const description = pickRecordValue(record, ['description', 'summary', 'body', 'content', 'details']);
+      const icon = pickRecordValue(record, ['icon', 'emoji']);
+      return { text, description, icon };
+    }
+    return { text: `Item ${index + 1}` };
+  };
+  const resolveListEntries = (value: DynamicBindingValue | undefined): ResolvedListEntry[] | undefined => {
+    const scalarValue = resolveScalarField(value);
+    if (!Array.isArray(scalarValue)) {
+      return undefined;
+    }
+    return scalarValue.map((entry, index) => normalizeListEntry(entry as ScalarValue, index));
   };
   const shouldRenderComponent = (
     component: string,
@@ -875,6 +943,14 @@ export const createPageBuilderConfig = ({ bindingOptions, resolveBinding }: Buil
             { label: 'Plain', value: 'plain' }
           ]
         }),
+        dataSource: createDynamicTextField({
+          fieldKey: 'dataSource',
+          bindingOptions,
+          label: 'Dynamic list',
+          placeholder: 'Select a list input',
+          helperText: 'Bind to a list input to render each entry automatically. Manual items are ignored when active.',
+          allowedDataTypes: ['list']
+        }),
         items: {
           type: 'array',
           label: 'Items',
@@ -890,7 +966,7 @@ export const createPageBuilderConfig = ({ bindingOptions, resolveBinding }: Buil
       }),
       render: (props) => {
         const { styleProps, rest } = splitStyleProps(props);
-        const { items = [], variant = 'bullet', customAttributes, customCss, id, renderWhen } = rest as ListProps;
+        const { items = [], variant = 'bullet', dataSource, customAttributes, customCss, id, renderWhen } = rest as ListProps;
         if (!shouldRenderComponent('List', id, renderWhen)) {
           return <></>;
         }
@@ -900,31 +976,52 @@ export const createPageBuilderConfig = ({ bindingOptions, resolveBinding }: Buil
         const resolvedVariant = ['bullet', 'numbered', 'plain'].includes(resolvedVariantRaw)
           ? (resolvedVariantRaw as 'bullet' | 'numbered' | 'plain')
           : 'bullet';
-        const resolvedItems = items.map((item) => ({
+        const resolvedItems: ResolvedListEntry[] = items.map((item) => ({
           text: resolveFieldValue(item.text),
           description: resolveFieldValue(item.description),
           icon: resolveFieldValue(item.icon)
         }));
+        const dynamicEntries = resolveListEntries(dataSource);
+        if (dynamicEntries) {
+          logRenderControlEvent(
+            dynamicEntries.length ? 'Rendering list from dynamic collection' : 'Dynamic list binding resolved empty array',
+            {
+              componentId: id,
+              entries: dynamicEntries.length
+            }
+          );
+        }
+        const listEntries = dynamicEntries && dynamicEntries.length ? dynamicEntries : resolvedItems;
         const listClass =
           resolvedVariant === 'numbered'
             ? 'list-decimal pl-6'
             : resolvedVariant === 'bullet'
               ? 'list-disc pl-6'
               : 'space-y-3';
-        const renderItem = (item: { text?: string | null; description?: string | null }, index: number) => (
+        const renderItem = (item: ResolvedListEntry, index: number) => (
           <li key={`${item?.text ?? index}-${index}`} className="space-y-1 text-gray-700">
-            <div className="font-medium text-bw-ink">{item?.text || `Item ${index + 1}`}</div>
-            {item?.description && <p className="text-sm text-gray-500">{item?.description}</p>}
+            <div className="flex items-start gap-2">
+              {item?.icon ? <span className="text-lg leading-none text-bw-amber">{item.icon}</span> : null}
+              <div>
+                <div className="font-medium text-bw-ink">{item?.text || `Item ${index + 1}`}</div>
+                {item?.description && <p className="text-sm text-gray-500">{item?.description}</p>}
+              </div>
+            </div>
           </li>
         );
         if (resolvedVariant === 'plain') {
           return (
             <>
               <div style={inlineStyle} className="space-y-3" {...attributeProps}>
-                {resolvedItems.map((item, index) => (
+                {listEntries.map((item, index) => (
                   <div key={`${item?.text ?? index}-${index}`} className="border-l-2 border-bw-amber/30 pl-4 text-gray-700">
-                    <div className="font-medium text-bw-ink">{item?.text || `Item ${index + 1}`}</div>
-                    {item?.description && <p className="text-sm text-gray-500">{item?.description}</p>}
+                    <div className="flex items-start gap-2">
+                      {item?.icon ? <span className="text-lg leading-none text-bw-amber">{item.icon}</span> : null}
+                      <div>
+                        <div className="font-medium text-bw-ink">{item?.text || `Item ${index + 1}`}</div>
+                        {item?.description && <p className="text-sm text-gray-500">{item?.description}</p>}
+                      </div>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -935,7 +1032,7 @@ export const createPageBuilderConfig = ({ bindingOptions, resolveBinding }: Buil
         return (
           <>
             <ul style={inlineStyle} className={listClass} {...attributeProps}>
-              {resolvedItems.map((item, index) => renderItem(item, index))}
+              {listEntries.map((item, index) => renderItem(item, index))}
             </ul>
             {renderScopedCss(id, customCss)}
           </>

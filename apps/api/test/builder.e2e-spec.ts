@@ -80,7 +80,20 @@ describe('Builder surfaces (e2e)', () => {
             kind: 'page',
             pageId: landingPageId,
             pageName: 'Landing',
-            inputs: []
+            inputs: [
+              {
+                id: `list-${randomUUID()}`,
+                label: 'Inline Articles',
+                dataType: 'list',
+                listItemType: 'object',
+                objectSample: {
+                  title: 'Sample',
+                  author: {
+                    name: 'Avery'
+                  }
+                }
+              }
+            ]
           }
         }
       ],
@@ -120,6 +133,18 @@ describe('Builder surfaces (e2e)', () => {
             target: '_blank'
           }
         }
+      },
+      {
+        id: randomUUID(),
+        label: 'Featured Articles',
+        dataType: 'list',
+        listItemType: 'object',
+        objectSample: {
+          title: 'Welcome to BuildWeaver',
+          author: {
+            name: 'Editor'
+          }
+        }
       }
     ];
     const updatePageRes = await request(app.getHttpServer())
@@ -127,7 +152,7 @@ describe('Builder surfaces (e2e)', () => {
       .set('Authorization', `Bearer ${token}`)
       .send({ dynamicInputs });
     expect(updatePageRes.status).toBe(200);
-    expect(updatePageRes.body.data.page.dynamicInputs).toHaveLength(2);
+    expect(updatePageRes.body.data.page.dynamicInputs).toHaveLength(3);
     const savedObjectInput = updatePageRes.body.data.page.dynamicInputs.find(
       (input: { dataType: string }) => input.dataType === 'object'
     );
@@ -144,8 +169,13 @@ describe('Builder surfaces (e2e)', () => {
       (node: { data: { pageId: string } }) => node.data.pageId === landingPageId
     );
     expect(refreshedPageNode.position).toEqual(graphPayload.nodes[1].position);
-    expect(refreshedPageNode.data.inputs).toHaveLength(2);
+    expect(refreshedPageNode.data.inputs).toHaveLength(3);
     expect(refreshedPageNode.data.inputs.find((input: { label: string }) => input.label === 'Hero Title')).toBeDefined();
+    const listInput = refreshedPageNode.data.inputs.find(
+      (input: { label: string }) => input.label === 'Featured Articles'
+    );
+    expect(listInput).toMatchObject({ dataType: 'list', listItemType: 'object' });
+    expect(listInput.objectSample).toMatchObject({ title: 'Welcome to BuildWeaver' });
   });
 
   it('persists conditional, logical, and relational nodes in the graph', async () => {

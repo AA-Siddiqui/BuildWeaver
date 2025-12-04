@@ -1,4 +1,6 @@
 import { render, screen } from '@testing-library/react';
+import type { ScalarValue } from '@buildweaver/libs';
+import { createDynamicBindingState } from './dynamic-binding';
 import { createPageBuilderConfig, mergeSectionBackgrounds } from './builder-config';
 
 describe('mergeSectionBackgrounds', () => {
@@ -164,5 +166,63 @@ describe('Conditional component', () => {
 
     expect(screen.getByText('Conditional render')).toBeInTheDocument();
     expect(screen.getByText(helperText)).toBeInTheDocument();
+  });
+});
+
+describe('List component dynamic data', () => {
+  const dynamicList: ScalarValue = [
+    { title: 'First article', description: 'Intro piece', icon: '🔥' },
+    'Loose string entry'
+  ];
+  const baseBindingOptions = [
+    { label: 'Dynamic list', value: 'dynamic-list', dataType: 'list' as const, listItemType: 'object' as const }
+  ];
+
+  it('renders entries from a bound list input', () => {
+    const config = createPageBuilderConfig({
+      bindingOptions: baseBindingOptions,
+      resolveBinding: (text) => text ?? '',
+      resolveBindingValue: (bindingId) => (bindingId === 'dynamic-list' ? dynamicList : undefined)
+    });
+    const listComponent = config.components?.List;
+    if (!listComponent?.render) {
+      throw new Error('List component is not registered');
+    }
+    render(
+      <>
+        {listComponent.render({
+          id: 'list-dynamic',
+          variant: 'bullet',
+          dataSource: createDynamicBindingState('dynamic-list', '[]')
+        } as unknown as Parameters<NonNullable<typeof listComponent.render>>[0])}
+      </>
+    );
+    expect(screen.getByText('First article')).toBeInTheDocument();
+    expect(screen.getByText('Loose string entry')).toBeInTheDocument();
+    expect(screen.getByText('🔥')).toBeInTheDocument();
+  });
+
+  it('falls back to manual items when no dynamic data is available', () => {
+    const config = createPageBuilderConfig({
+      bindingOptions: [],
+      resolveBinding: (text) => text ?? '',
+      resolveBindingValue: () => undefined
+    });
+    const listComponent = config.components?.List;
+    if (!listComponent?.render) {
+      throw new Error('List component is not registered');
+    }
+    render(
+      <>
+        {listComponent.render({
+          id: 'list-manual',
+          variant: 'plain',
+          dataSource: createDynamicBindingState('missing-list', '[]'),
+          items: [{ text: 'Manual entry', description: 'Fallback' }]
+        } as unknown as Parameters<NonNullable<typeof listComponent.render>>[0])}
+      </>
+    );
+    expect(screen.getByText('Manual entry')).toBeInTheDocument();
+    expect(screen.getByText('Fallback')).toBeInTheDocument();
   });
 });

@@ -9,8 +9,11 @@ import {
   LogicalOperation,
   ObjectOperation,
   ObjectValueSampleKind,
+  PageDynamicInputDataType,
+  PageDynamicListItemType,
   RelationalOperation,
   ScalarSampleKind,
+  ScalarValue,
   StringNodeInputRole,
   StringOperation,
   UserDefinedFunction
@@ -76,13 +79,20 @@ class PageNodeInputDto {
   @IsString()
   description?: string;
 
-  @IsIn(['string', 'number', 'boolean', 'object'])
-  dataType!: 'string' | 'number' | 'boolean' | 'object';
+  @IsIn(['string', 'number', 'boolean', 'object', 'list'])
+  dataType!: PageDynamicInputDataType;
 
-  @ValidateIf((input) => input.dataType === 'object')
+  @ValidateIf((input: PageNodeInputDto) => input.dataType === 'list')
+  @IsOptional()
+  @IsIn(['string', 'number', 'boolean', 'object'])
+  listItemType?: PageDynamicListItemType;
+
+  @ValidateIf((input: PageNodeInputDto) =>
+    input.dataType === 'object' || (input.dataType === 'list' && input.listItemType === 'object')
+  )
   @IsOptional()
   @IsObject()
-  objectSample?: Record<string, unknown>;
+  objectSample?: Record<string, ScalarValue>;
 }
 
 class DummySampleDto {

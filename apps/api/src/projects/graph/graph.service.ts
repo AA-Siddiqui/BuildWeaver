@@ -52,6 +52,7 @@ export class ProjectGraphService {
 
     const composed = this.composeGraph(graph, pages);
     this.logger.debug(`Loaded graph nodes=${composed.nodes.length} edges=${composed.edges.length}`);
+    this.logPageNodeInputSummary(projectId, composed.nodes);
     return composed;
   }
 
@@ -66,6 +67,7 @@ export class ProjectGraphService {
     const pageIds = new Set(pages.map((page) => page.id));
 
     const normalizedPayload = this.withGraphDefaults(payload);
+    this.logPageNodeInputSummary(projectId, normalizedPayload.nodes);
     const declaredFunctionIds = new Set(normalizedPayload.functions.map((fn) => fn.id).filter(Boolean));
     const sanitizedFunctions = this.sanitizeFunctions(normalizedPayload.functions, pageIds, declaredFunctionIds);
     const allowedFunctionIds = new Set(sanitizedFunctions.map((fn) => fn.id));
@@ -283,6 +285,34 @@ export class ProjectGraphService {
         inputs: page.dynamicInputs
       }
     };
+  }
+
+  private logPageNodeInputSummary(projectId: string, nodes: LogicEditorNode[]): void {
+    const pageNodes = nodes.filter((node) => node.type === 'page');
+    if (!pageNodes.length) {
+      return;
+    }
+    const counts: Record<string, number> = {};
+    const missingListMetadata: Array<{ nodeId: string; inputId?: string; label?: string }> = [];
+    for (const node of pageNodes) {
+      const data = node.data as Partial<PageNodeData> | undefined;
+      const inputs = Array.isArray(data?.inputs) ? data?.inputs : [];
+      for (const input of inputs) {
+        const dataType = (input as Partial<PageNodeData['inputs'][number]>)?.dataType ?? 'unknown';
+        counts[dataType] = (counts[dataType] ?? 0) + 1;
+        if (dataType === 'list' && !(input as Partial<PageNodeData['inputs'][number]>)?.listItemType) {
+          missingListMetadata.push({ nodeId: node.id, inputId: input?.id, label: input?.label });
+        }
+      }
+    }
+    this.logger.debug(
+      `Graph input snapshot project=${projectId} pageNodes=${pageNodes.length} inputCounts=${JSON.stringify(counts)}`
+    );
+    if (missingListMetadata.length) {
+      this.logger.warn(
+        `List inputs missing item metadata project=${projectId} count=${missingListMetadata.length} details=${JSON.stringify(missingListMetadata)}`
+      );
+    }
   }
 
   private withGraphDefaults(graph?: ProjectGraphSnapshot | null): ProjectGraphSnapshot {

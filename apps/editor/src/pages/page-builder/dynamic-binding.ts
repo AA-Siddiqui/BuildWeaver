@@ -1,10 +1,12 @@
-import type { PageDynamicInputDataType, ScalarValue } from '@buildweaver/libs';
+import type { PageDynamicInputDataType, PageDynamicListItemType, ScalarValue } from '@buildweaver/libs';
 
 export type BindingOption = {
 	label: string;
 	value: string;
 	dataType?: PageDynamicInputDataType;
 	objectSample?: Record<string, ScalarValue>;
+	listItemType?: PageDynamicListItemType;
+	listObjectSample?: Record<string, ScalarValue>;
 	previewValue?: ScalarValue;
 };
 

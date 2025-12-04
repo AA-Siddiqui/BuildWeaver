@@ -186,13 +186,16 @@ export interface FunctionReturnNodeData {
   returnId: string;
 }
 
-export type PageDynamicInputDataType = 'string' | 'number' | 'boolean' | 'object';
+export type PageDynamicInputDataType = 'string' | 'number' | 'boolean' | 'object' | 'list';
+
+export type PageDynamicListItemType = Exclude<PageDynamicInputDataType, 'list'>;
 
 export interface PageDynamicInput {
   id: string;
   label: string;
   description?: string;
   dataType: PageDynamicInputDataType;
+  listItemType?: PageDynamicListItemType;
   objectSample?: Record<string, ScalarValue>;
 }
 

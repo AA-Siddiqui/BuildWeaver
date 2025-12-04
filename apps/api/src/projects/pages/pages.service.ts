@@ -121,16 +121,31 @@ export class ProjectPagesService {
         const id = input.id ?? randomUUID();
         const label = input.label.trim();
         const dataType = input.dataType ?? 'string';
-        const objectSample = this.coerceObjectSample(dataType, 'objectSample' in input ? input.objectSample : undefined, {
-          id,
-          label,
-          index
-        });
+        const listItemType = this.coerceListItemType(
+          dataType,
+          'listItemType' in input ? input.listItemType : undefined,
+          {
+            id,
+            label,
+            index
+          }
+        );
+        const objectSample = this.coerceObjectSample(
+          dataType,
+          listItemType,
+          'objectSample' in input ? input.objectSample : undefined,
+          {
+            id,
+            label,
+            index
+          }
+        );
         return {
           id,
           label,
           description: input.description?.trim(),
           dataType,
+          listItemType: dataType === 'list' ? listItemType : undefined,
           objectSample
         } satisfies PageDynamicInput;
       })
@@ -148,12 +163,36 @@ export class ProjectPagesService {
       });
   }
 
+  private coerceListItemType(
+    dataType: PageDynamicInput['dataType'],
+    incoming: unknown,
+    meta: { id: string; label: string; index: number }
+  ): PageDynamicInput['listItemType'] {
+    if (dataType !== 'list') {
+      return undefined;
+    }
+    const allowed: PageDynamicInput['listItemType'][] = ['string', 'number', 'boolean', 'object'];
+    if (typeof incoming === 'string' && allowed.includes(incoming as PageDynamicInput['listItemType'])) {
+      return incoming as PageDynamicInput['listItemType'];
+    }
+    this.logger.warn('List item type defaulted', {
+      inputId: meta.id,
+      label: meta.label,
+      index: meta.index,
+      receivedType: typeof incoming,
+      fallback: 'string'
+    });
+    return 'string';
+  }
+
   private coerceObjectSample(
     dataType: PageDynamicInput['dataType'],
+    listItemType: PageDynamicInput['listItemType'],
     sample: unknown,
     meta: { id: string; label: string; index: number }
   ): Record<string, ScalarValue> | undefined {
-    if (dataType !== 'object' || !sample) {
+    const expectsObject = dataType === 'object' || (dataType === 'list' && listItemType === 'object');
+    if (!expectsObject || !sample) {
       return undefined;
     }
     if (!isPlainObject(sample)) {

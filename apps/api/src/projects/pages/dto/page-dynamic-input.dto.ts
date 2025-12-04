@@ -14,10 +14,15 @@ export class PageDynamicInputDto implements Partial<PageDynamicInput> {
   description?: string;
 
   @IsOptional()
-  @IsIn(['string', 'number', 'boolean', 'object'])
+  @IsIn(['string', 'number', 'boolean', 'object', 'list'])
   dataType?: PageDynamicInput['dataType'];
 
-  @ValidateIf((input) => input.dataType === 'object')
+  @ValidateIf((input) => input.dataType === 'list')
+  @IsOptional()
+  @IsIn(['string', 'number', 'boolean', 'object'])
+  listItemType?: PageDynamicInput['listItemType'];
+
+  @ValidateIf((input) => input.dataType === 'object' || input.listItemType === 'object')
   @IsOptional()
   @IsObject()
   objectSample?: Record<string, ScalarValue>;

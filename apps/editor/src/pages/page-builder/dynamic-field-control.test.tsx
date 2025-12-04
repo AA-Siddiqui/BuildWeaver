@@ -1,4 +1,5 @@
 import { fireEvent, render, screen } from '@testing-library/react';
+import { useState } from 'react';
 import { createDynamicBindingState, type BindingOption } from './dynamic-binding';
 import {
   DYNAMIC_SELECT_OPTIONS_METADATA_KEY,
@@ -20,6 +21,20 @@ describe('DynamicFieldControl', () => {
         link: {
           href: 'https://example.com',
           target: '_blank'
+        }
+      }
+    }
+  ];
+  const listBindingOptions: BindingOption[] = [
+    {
+      label: 'Articles',
+      value: 'articles',
+      dataType: 'list',
+      listItemType: 'object',
+      listObjectSample: {
+        title: 'Sample article',
+        author: {
+          name: 'Avery'
         }
       }
     }
@@ -46,7 +61,65 @@ describe('DynamicFieldControl', () => {
       value
     } as Parameters<NonNullable<typeof field.render>>[0];
 
-    return { onChange, ...render(<>{field.render(props)}</>) };
+    const Harness = () => {
+      const [currentValue, setCurrentValue] = useState(value);
+      return (
+        <>
+          {field.render({
+            ...props,
+            value: currentValue,
+            onChange: (next) => {
+              setCurrentValue(next);
+              onChange(next);
+            }
+          })}
+        </>
+      );
+    };
+
+    return { onChange, ...render(<Harness />) };
+  };
+
+  const renderListField = (value: unknown, onChange = jest.fn()) => {
+    const field = createDynamicTextField({
+      fieldKey: 'listField',
+      bindingOptions: listBindingOptions,
+      label: 'Articles',
+      placeholder: 'Articles',
+      helperText: 'Bind to a list input',
+      allowedDataTypes: ['list']
+    });
+
+    if (field.type !== 'custom' || typeof field.render !== 'function') {
+      throw new Error('List field must render as a custom field');
+    }
+
+    const props = {
+      field,
+      id: 'list-field',
+      name: 'list',
+      onChange,
+      readOnly: false,
+      value
+    } as Parameters<NonNullable<typeof field.render>>[0];
+
+    const Harness = () => {
+      const [currentValue, setCurrentValue] = useState(value);
+      return (
+        <>
+          {field.render({
+            ...props,
+            value: currentValue,
+            onChange: (next) => {
+              setCurrentValue(next);
+              onChange(next);
+            }
+          })}
+        </>
+      );
+    };
+
+    return { onChange, ...render(<Harness />) };
   };
 
   it('switches into dynamic mode via the toggle button', () => {
@@ -102,6 +175,48 @@ describe('DynamicFieldControl', () => {
       expect.objectContaining({
         bindingId: 'ctaPayload',
         propertyPath: ['link', 'href']
+      })
+    );
+  });
+
+  it('shows warnings when binding type does not match allowed data types', () => {
+    renderListField(createDynamicBindingState('heroTitle', 'Default'));
+    expect(screen.getByText(/expects list data/i)).toBeInTheDocument();
+  });
+
+  it('allows selecting list entries and object properties', () => {
+    const handleChange = jest.fn();
+    renderListField(createDynamicBindingState('articles', '[]'), handleChange);
+    handleChange.mockClear();
+    fireEvent.click(screen.getByLabelText('Display a specific item'));
+    expect(handleChange).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bindingId: 'articles',
+        propertyPath: ['0']
+      })
+    );
+    handleChange.mockClear();
+    const indexInput = screen.getByLabelText(/item index/i) as HTMLInputElement;
+    fireEvent.change(indexInput, { target: { value: '2' } });
+    expect(handleChange).toHaveBeenCalledWith(
+      expect.objectContaining({
+        propertyPath: ['2', 'title']
+      })
+    );
+    handleChange.mockClear();
+    const propertySelect = screen.getByLabelText('Select object property') as HTMLSelectElement;
+    fireEvent.change(propertySelect, { target: { value: 'author' } });
+    expect(handleChange).toHaveBeenCalledWith(
+      expect.objectContaining({
+        propertyPath: ['2', 'author']
+      })
+    );
+    handleChange.mockClear();
+    const nestedSelect = screen.getByLabelText('Select nested property level 2') as HTMLSelectElement;
+    fireEvent.change(nestedSelect, { target: { value: 'name' } });
+    expect(handleChange).toHaveBeenCalledWith(
+      expect.objectContaining({
+        propertyPath: ['2', 'author', 'name']
       })
     );
   });

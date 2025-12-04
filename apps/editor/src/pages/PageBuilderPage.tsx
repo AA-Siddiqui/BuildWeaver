@@ -6,6 +6,7 @@ import type { BuilderPreviewViewport } from './page-builder/preview-viewports';
 import type { ComponentData, Content, Data } from '@measured/puck';
 import '@measured/puck/puck.css';
 import type { PageBuilderState, PageDocument, PageDynamicInput } from '../types/api';
+import type { ScalarValue } from '@buildweaver/libs';
 import { projectGraphApi, projectPagesApi } from '../lib/api-client';
 import { projectGraphQueryKey, invalidateProjectGraphCache } from '../lib/query-helpers';
 import { SnapshotHistory } from '../lib/snapshotHistory';
@@ -40,6 +41,31 @@ const formatObjectSampleDraft = (sample?: Record<string, unknown>): string => {
   } catch {
     return '';
   }
+};
+
+const requiresObjectSample = (input: PageDynamicInput): boolean =>
+  input.dataType === 'object' || (input.dataType === 'list' && input.listItemType === 'object');
+
+const deriveListObjectSample = (
+  input: PageDynamicInput,
+  previewValue?: ScalarValue
+): Record<string, ScalarValue> | undefined => {
+  if (input.dataType !== 'list' || input.listItemType !== 'object') {
+    return undefined;
+  }
+  if (input.objectSample) {
+    return input.objectSample;
+  }
+  if (Array.isArray(previewValue)) {
+    const firstObject = previewValue.find(
+      (entry): entry is Record<string, ScalarValue> =>
+        Boolean(entry) && typeof entry === 'object' && !Array.isArray(entry)
+    );
+    if (firstObject) {
+      return firstObject;
+    }
+  }
+  return undefined;
 };
 
 
@@ -213,7 +239,7 @@ export const PageBuilderPage = () => {
   }, []);
 
   useEffect(() => {
-    const allowed = new Set(dynamicInputs.map((input) => input.id));
+    const allowed = new Set(dynamicInputs.filter(requiresObjectSample).map((input) => input.id));
     setObjectSampleDrafts((current) => {
       const entries = Object.entries(current);
       const filtered = entries.filter(([key]) => allowed.has(key));
@@ -383,13 +409,18 @@ export const PageBuilderPage = () => {
   const bindingOptions = useMemo(
     () => [
       { label: 'Static content', value: '' },
-      ...dynamicInputs.map((input) => ({
-        label: input.label,
-        value: input.id,
-        dataType: input.dataType,
-        objectSample: input.objectSample,
-        previewValue: dynamicPreviewMap.get(input.id)
-      }))
+      ...dynamicInputs.map((input) => {
+        const previewValue = dynamicPreviewMap.get(input.id);
+        return {
+          label: input.label,
+          value: input.id,
+          dataType: input.dataType,
+          objectSample: input.dataType === 'object' ? input.objectSample : undefined,
+          listItemType: input.dataType === 'list' ? input.listItemType : undefined,
+          listObjectSample: deriveListObjectSample(input, previewValue),
+          previewValue
+        };
+      })
     ],
     [dynamicInputs, dynamicPreviewMap]
   );
@@ -410,6 +441,13 @@ export const PageBuilderPage = () => {
             return `{{${formatBindingPlaceholder(label, propertyPath)}}}`;
           }
           return text || 'Text';
+        },
+        resolveBindingValue: (bindingId?: string, propertyPath?: string[]) => {
+          if (!bindingId) {
+            return undefined;
+          }
+          const rawValue = dynamicPreviewMap.get(bindingId);
+          return resolvePropertyPathValue(rawValue, propertyPath);
         }
       }),
     [bindingOptions, dynamicLabelMap, dynamicPreviewMap]
@@ -536,26 +574,37 @@ export const PageBuilderPage = () => {
 
   const handleDynamicInputChange = useCallback(
     (inputId: string, updates: Partial<PageDynamicInput>) => {
+      let shouldFlushSampleDraft = false;
       setDynamicInputs((current) => {
         const next = current.map((input) => {
           if (input.id !== inputId) {
             return input;
           }
           const nextDataType = updates.dataType ?? input.dataType;
+          const nextListItemType =
+            nextDataType === 'list'
+              ? (updates.listItemType ?? input.listItemType ?? 'string')
+              : undefined;
+          const previouslyRequiredSample = requiresObjectSample(input);
           const nextInput: PageDynamicInput = {
             ...input,
             ...updates,
-            label: updates.label ?? input.label
+            label: updates.label ?? input.label,
+            dataType: nextDataType,
+            listItemType: nextListItemType
           };
-          if (nextDataType !== 'object') {
+          if (!requiresObjectSample(nextInput)) {
             nextInput.objectSample = undefined;
+          }
+          if (previouslyRequiredSample && !requiresObjectSample(nextInput)) {
+            shouldFlushSampleDraft = true;
           }
           return nextInput;
         });
         scheduleDraftPersist(builderState, next);
         return next;
       });
-      if (updates.dataType && updates.dataType !== 'object') {
+      if (shouldFlushSampleDraft) {
         setObjectSampleDrafts((current) => {
           if (!(inputId in current)) {
             return current;
@@ -577,7 +626,8 @@ export const PageBuilderPage = () => {
       logPageBuilderEvent('Dynamic input updated', {
         inputId,
         updates: Object.keys(updates),
-        nextType: updates.dataType
+        nextType: updates.dataType,
+        nextListItemType: updates.listItemType
       });
     },
     [builderState, scheduleDraftPersist]
@@ -860,11 +910,34 @@ export const PageBuilderPage = () => {
                     <option value="number">Number</option>
                     <option value="boolean">Boolean</option>
                     <option value="object">Object</option>
+                    <option value="list">List</option>
                   </select>
                 </label>
-                {input.dataType === 'object' ? (
+                {input.dataType === 'list' ? (
                   <label className="mt-2 block text-xs uppercase tracking-wide text-bw-platinum/60">
-                    Object sample
+                    List item type
+                    <select
+                      className="mt-1 w-full rounded-lg border border-white/10 bg-bw-ink px-2 py-1 text-white"
+                      value={input.listItemType ?? 'string'}
+                      onChange={(event) =>
+                        handleDynamicInputChange(input.id, {
+                          listItemType: event.target.value as PageDynamicInput['listItemType']
+                        })
+                      }
+                    >
+                      <option value="string">String</option>
+                      <option value="number">Number</option>
+                      <option value="boolean">Boolean</option>
+                      <option value="object">Object</option>
+                    </select>
+                    <p className="mt-1 text-[0.65rem] text-bw-platinum/70">
+                      Lists wrap the selected type. For example, a list of objects can drive repeaters in the builder.
+                    </p>
+                  </label>
+                ) : null}
+                {requiresObjectSample(input) ? (
+                  <label className="mt-2 block text-xs uppercase tracking-wide text-bw-platinum/60">
+                    {input.dataType === 'object' ? 'Object sample' : 'List item sample'}
                     <textarea
                       className="mt-1 h-28 w-full rounded-lg border border-white/10 bg-bw-ink px-2 py-1 font-mono text-xs text-white"
                       value={objectSampleDrafts[input.id] ?? formatObjectSampleDraft(input.objectSample as Record<string, unknown> | undefined)}
@@ -878,7 +951,9 @@ export const PageBuilderPage = () => {
                       <p className="mt-1 text-[0.65rem] text-red-300">{objectSampleErrors[input.id]}</p>
                     ) : (
                       <p className="mt-1 text-[0.65rem] text-bw-platinum/70">
-                        Provide JSON to describe available fields. Nested objects become selectable in bindings.
+                        {input.dataType === 'object'
+                          ? 'Provide JSON to describe available fields. Nested objects become selectable in bindings.'
+                          : 'Provide JSON representing a single list item. Its fields become available when binding to each entry.'}
                       </p>
                     )}
                   </label>

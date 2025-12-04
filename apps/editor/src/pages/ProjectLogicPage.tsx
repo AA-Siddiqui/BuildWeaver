@@ -20,7 +20,9 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useParams } from 'react-router-dom';
 import type {
   FunctionNodeData,
+  LogicEditorNode,
   LogicEditorNodeData,
+  PageNodeData,
   ProjectGraphSnapshot,
   UserDefinedFunction
 } from '../types/api';
@@ -441,6 +443,20 @@ const LogicEditorView = () => {
         edges: serializeEdges(edges),
         functions: normalizedFunctions
       };
+      const inputSummary = summarizePageNodeInputs(payload.nodes);
+      if (inputSummary) {
+        logicLogger.debug('Graph payload page input summary', {
+          projectId,
+          pageNodes: inputSummary.pageNodes,
+          inputCounts: inputSummary.inputCounts
+        });
+        if (inputSummary.missingListMetadata.length) {
+          logicLogger.warn('Graph payload list inputs missing metadata', {
+            projectId,
+            missing: inputSummary.missingListMetadata.slice(0, 5)
+          });
+        }
+      }
 
       if (pendingSaveRef.current) {
         logicLogger.debug('Awaiting in-flight graph save', { reason, projectId });
@@ -1158,3 +1174,30 @@ export const ProjectLogicPage = () => (
 );
 
 export { createPageNode, serializeNodes, serializeEdges };
+
+type PageNodeInputSummary = {
+  pageNodes: number;
+  inputCounts: Record<string, number>;
+  missingListMetadata: Array<{ nodeId: string; inputId?: string; label?: string }>;
+};
+
+function summarizePageNodeInputs(nodes: LogicEditorNode[]): PageNodeInputSummary | null {
+  const pageNodes = nodes.filter((node) => node.type === 'page');
+  if (!pageNodes.length) {
+    return null;
+  }
+  const inputCounts: Record<string, number> = {};
+  const missingListMetadata: Array<{ nodeId: string; inputId?: string; label?: string }> = [];
+  for (const node of pageNodes) {
+    const data = node.data as Partial<PageNodeData> | undefined;
+    const inputs = Array.isArray(data?.inputs) ? data.inputs : [];
+    for (const input of inputs) {
+      const type = input?.dataType ?? 'unknown';
+      inputCounts[type] = (inputCounts[type] ?? 0) + 1;
+      if (type === 'list' && !input?.listItemType) {
+        missingListMetadata.push({ nodeId: node.id, inputId: input?.id, label: input?.label });
+      }
+    }
+  }
+  return { pageNodes: pageNodes.length, inputCounts, missingListMetadata };
+}

@@ -20,6 +20,26 @@ const logPreviewEvent = (message: string, details?: Record<string, unknown>) => 
   }
 };
 
+const deriveListObjectSample = (
+  input: PageDynamicInput,
+  previewValue?: ScalarValue
+): Record<string, ScalarValue> | undefined => {
+  if (input.dataType !== 'list' || input.listItemType !== 'object') {
+    return undefined;
+  }
+  if (input.objectSample) {
+    return input.objectSample;
+  }
+  if (Array.isArray(previewValue)) {
+    const firstObject = previewValue.find(
+      (entry): entry is Record<string, ScalarValue> =>
+        Boolean(entry) && typeof entry === 'object' && !Array.isArray(entry)
+    );
+    return firstObject;
+  }
+  return undefined;
+};
+
 const createEmptyBuilderState = (): Data =>
   ({
     root: {
@@ -35,13 +55,18 @@ const toPuckValue = (state?: PageBuilderState): Data => (state as Data) ?? creat
 const buildBindingOptions = (inputs: PageDynamicInput[], previewMap: Map<string, ScalarValue>) =>
   [
     { label: 'Static content', value: '' },
-    ...inputs.map((input) => ({
-      label: input.label,
-      value: input.id,
-      dataType: input.dataType,
-      objectSample: input.objectSample,
-      previewValue: previewMap.get(input.id)
-    }))
+    ...inputs.map((input) => {
+      const previewValue = previewMap.get(input.id);
+      return {
+        label: input.label,
+        value: input.id,
+        dataType: input.dataType,
+        objectSample: input.dataType === 'object' ? input.objectSample : undefined,
+        listItemType: input.dataType === 'list' ? input.listItemType : undefined,
+        listObjectSample: deriveListObjectSample(input, previewValue),
+        previewValue
+      };
+    })
   ];
 
 const isPreviewViewport = (value: string | null): value is BuilderPreviewViewport =>
@@ -146,6 +171,13 @@ export const PagePreviewPage = () => {
             return `{{${formatBindingPlaceholder(label, propertyPath)}}}`;
           }
           return text || 'Text';
+        },
+        resolveBindingValue: (bindingId?: string, propertyPath?: string[]) => {
+          if (!bindingId) {
+            return undefined;
+          }
+          const rawValue = dynamicPreviewMap.get(bindingId);
+          return resolvePropertyPathValue(rawValue, propertyPath);
         }
       }),
     [bindingOptions, dynamicLabelMap, dynamicPreviewMap]
