@@ -76,8 +76,13 @@ class PageNodeInputDto {
   @IsString()
   description?: string;
 
-  @IsIn(['string', 'number', 'boolean'])
-  dataType!: 'string' | 'number' | 'boolean';
+  @IsIn(['string', 'number', 'boolean', 'object'])
+  dataType!: 'string' | 'number' | 'boolean' | 'object';
+
+  @ValidateIf((input) => input.dataType === 'object')
+  @IsOptional()
+  @IsObject()
+  objectSample?: Record<string, unknown>;
 }
 
 class DummySampleDto {

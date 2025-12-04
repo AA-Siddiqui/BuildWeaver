@@ -4,12 +4,15 @@ import { useQuery } from '@tanstack/react-query';
 import type { Data } from '@measured/puck';
 import { Render } from '@measured/puck';
 import type { PageBuilderState, PageDocument, PageDynamicInput } from '../types/api';
+import type { ScalarValue } from '@buildweaver/libs';
 import { projectGraphApi, projectPagesApi } from '../lib/api-client';
 import { projectGraphQueryKey } from '../lib/query-helpers';
 import { createPageBuilderConfig } from './page-builder/builder-config';
 import { buildDynamicInputPreviewMap } from './page-builder/dynamic-input-preview';
 import { consumePreviewSnapshot } from './page-builder/preview-bridge';
 import { PREVIEW_VIEWPORTS, type BuilderPreviewViewport } from './page-builder/preview-viewports';
+import { formatBindingPlaceholder, resolvePropertyPathValue } from './page-builder/dynamic-binding';
+import { formatScalar } from '../components/logic/preview';
 
 const logPreviewEvent = (message: string, details?: Record<string, unknown>) => {
   if (typeof console !== 'undefined') {
@@ -29,8 +32,17 @@ const createEmptyBuilderState = (): Data =>
 
 const toPuckValue = (state?: PageBuilderState): Data => (state as Data) ?? createEmptyBuilderState();
 
-const buildBindingOptions = (inputs: PageDynamicInput[]) =>
-  [{ label: 'Static content', value: '' }, ...inputs.map((input) => ({ label: input.label, value: input.id }))];
+const buildBindingOptions = (inputs: PageDynamicInput[], previewMap: Map<string, ScalarValue>) =>
+  [
+    { label: 'Static content', value: '' },
+    ...inputs.map((input) => ({
+      label: input.label,
+      value: input.id,
+      dataType: input.dataType,
+      objectSample: input.objectSample,
+      previewValue: previewMap.get(input.id)
+    }))
+  ];
 
 const isPreviewViewport = (value: string | null): value is BuilderPreviewViewport =>
   value === 'desktop' || value === 'tablet' || value === 'mobile';
@@ -105,8 +117,6 @@ export const PagePreviewPage = () => {
     return map;
   }, [dynamicInputs]);
 
-  const bindingOptions = useMemo(() => buildBindingOptions(dynamicInputs), [dynamicInputs]);
-
   const dynamicPreviewMap = useMemo(
     () =>
       buildDynamicInputPreviewMap({
@@ -118,16 +128,22 @@ export const PagePreviewPage = () => {
     [dynamicInputs, graphQuery.data?.graph, graphQuery.dataUpdatedAt, pageId]
   );
 
+  const bindingOptions = useMemo(() => buildBindingOptions(dynamicInputs, dynamicPreviewMap), [dynamicInputs, dynamicPreviewMap]);
+
   const builderConfig = useMemo(
     () =>
       createPageBuilderConfig({
         bindingOptions,
-        resolveBinding: (text?: string, bindingId?: string) => {
+        resolveBinding: (text?: string, bindingId?: string, propertyPath?: string[]) => {
           if (bindingId) {
             if (dynamicPreviewMap.has(bindingId)) {
-              return dynamicPreviewMap.get(bindingId) ?? '';
+              const resolvedValue = resolvePropertyPathValue(dynamicPreviewMap.get(bindingId), propertyPath);
+              if (typeof resolvedValue !== 'undefined') {
+                return formatScalar(resolvedValue);
+              }
             }
-            return `{{${dynamicLabelMap.get(bindingId) ?? bindingId}}}`;
+            const label = dynamicLabelMap.get(bindingId) ?? bindingId;
+            return `{{${formatBindingPlaceholder(label, propertyPath)}}}`;
           }
           return text || 'Text';
         }

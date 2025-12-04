@@ -1,5 +1,5 @@
 import { fireEvent, render, screen } from '@testing-library/react';
-import { createDynamicBindingState } from './dynamic-binding';
+import { createDynamicBindingState, type BindingOption } from './dynamic-binding';
 import {
   DYNAMIC_SELECT_OPTIONS_METADATA_KEY,
   createDynamicBooleanField,
@@ -8,9 +8,21 @@ import {
 } from './dynamic-field-control';
 
 describe('DynamicFieldControl', () => {
-  const bindingOptions = [
+  const bindingOptions: BindingOption[] = [
     { label: 'Hero title', value: 'heroTitle' },
-    { label: 'CTA label', value: 'ctaLabel' }
+    { label: 'CTA label', value: 'ctaLabel' },
+    {
+      label: 'CTA payload',
+      value: 'ctaPayload',
+      dataType: 'object',
+      objectSample: {
+        label: 'Join now',
+        link: {
+          href: 'https://example.com',
+          target: '_blank'
+        }
+      }
+    }
   ];
 
   const renderTextField = (value: unknown, onChange = jest.fn()) => {
@@ -72,6 +84,24 @@ describe('DynamicFieldControl', () => {
         __bwDynamicBinding: true,
         bindingId: 'heroTitle',
         fallback: 'Updated heading'
+      })
+    );
+  });
+
+  it('surfaces nested selectors for object bindings', () => {
+    const handleChange = jest.fn();
+    renderTextField(createDynamicBindingState('ctaPayload', 'Join us', ['link']), handleChange);
+    fireEvent.change(screen.getByRole('combobox', { name: /dynamic source/i }), {
+      target: { value: 'ctaPayload' }
+    });
+    const topLevelSelect = screen.getByLabelText('Select object property') as HTMLSelectElement;
+    expect(topLevelSelect.value).toBe('link');
+    const nestedSelect = screen.getByLabelText('Select nested property level 2');
+    fireEvent.change(nestedSelect, { target: { value: 'href' } });
+    expect(handleChange).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bindingId: 'ctaPayload',
+        propertyPath: ['link', 'href']
       })
     );
   });

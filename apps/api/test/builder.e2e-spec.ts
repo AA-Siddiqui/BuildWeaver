@@ -107,13 +107,34 @@ describe('Builder surfaces (e2e)', () => {
       ])
     );
 
-    const dynamicInputs = [{ id: randomUUID(), label: 'Hero Title', dataType: 'string' }];
+    const dynamicInputs = [
+      { id: randomUUID(), label: 'Hero Title', dataType: 'string' },
+      {
+        id: randomUUID(),
+        label: 'Hero CTA',
+        dataType: 'object',
+        objectSample: {
+          label: 'Get started',
+          action: {
+            href: 'https://example.com',
+            target: '_blank'
+          }
+        }
+      }
+    ];
     const updatePageRes = await request(app.getHttpServer())
       .put(`/projects/${projectId}/pages/${landingPageId}`)
       .set('Authorization', `Bearer ${token}`)
       .send({ dynamicInputs });
     expect(updatePageRes.status).toBe(200);
-    expect(updatePageRes.body.data.page.dynamicInputs).toHaveLength(1);
+    expect(updatePageRes.body.data.page.dynamicInputs).toHaveLength(2);
+    const savedObjectInput = updatePageRes.body.data.page.dynamicInputs.find(
+      (input: { dataType: string }) => input.dataType === 'object'
+    );
+    expect(savedObjectInput?.objectSample).toMatchObject({
+      label: 'Get started',
+      action: expect.objectContaining({ href: 'https://example.com' })
+    });
 
     const refreshedGraph = await request(app.getHttpServer())
       .get(`/projects/${projectId}/graph`)
@@ -123,8 +144,8 @@ describe('Builder surfaces (e2e)', () => {
       (node: { data: { pageId: string } }) => node.data.pageId === landingPageId
     );
     expect(refreshedPageNode.position).toEqual(graphPayload.nodes[1].position);
-    expect(refreshedPageNode.data.inputs).toHaveLength(1);
-    expect(refreshedPageNode.data.inputs[0].label).toBe('Hero Title');
+    expect(refreshedPageNode.data.inputs).toHaveLength(2);
+    expect(refreshedPageNode.data.inputs.find((input: { label: string }) => input.label === 'Hero Title')).toBeDefined();
   });
 
   it('persists conditional, logical, and relational nodes in the graph', async () => {

@@ -15,6 +15,8 @@ import { clearBuilderDraft, loadBuilderDraft, persistBuilderDraft } from './page
 import { PROPERTY_SEARCH_FIELD_KEY, resetPropertySearchState } from './page-builder/property-search';
 import { buildDynamicInputPreviewMap } from './page-builder/dynamic-input-preview';
 import { createPreviewSnapshotToken } from './page-builder/preview-bridge';
+import { formatBindingPlaceholder, resolvePropertyPathValue } from './page-builder/dynamic-binding';
+import { formatScalar } from '../components/logic/preview';
 
 const randomId = () => {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -28,6 +30,18 @@ const logPageBuilderEvent = (message: string, details?: Record<string, unknown>)
     console.info(`[PageBuilder] ${message}`, details ?? '');
   }
 };
+
+const formatObjectSampleDraft = (sample?: Record<string, unknown>): string => {
+  if (!sample) {
+    return '';
+  }
+  try {
+    return JSON.stringify(sample, null, 2);
+  } catch {
+    return '';
+  }
+};
+
 
 const BUILDER_HISTORY_LIMIT = 100;
 const DEFAULT_PREVIEW_VIEWPORT: BuilderPreviewViewport = 'desktop';
@@ -165,6 +179,8 @@ export const PageBuilderPage = () => {
   const [builderState, setBuilderState] = useState<Data>(createEmptyBuilderState());
   const [puckSessionKey, setPuckSessionKey] = useState(() => derivePuckSessionKey(undefined, pageId));
   const [dynamicInputs, setDynamicInputs] = useState<PageDynamicInput[]>([]);
+  const [objectSampleDrafts, setObjectSampleDrafts] = useState<Record<string, string>>({});
+  const [objectSampleErrors, setObjectSampleErrors] = useState<Record<string, string>>({});
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const sheetCloseButtonRef = useRef<HTMLButtonElement | null>(null);
   const sheetToggleButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -195,6 +211,32 @@ export const PageBuilderPage = () => {
       resetPropertySearchState();
     };
   }, []);
+
+  useEffect(() => {
+    const allowed = new Set(dynamicInputs.map((input) => input.id));
+    setObjectSampleDrafts((current) => {
+      const entries = Object.entries(current);
+      const filtered = entries.filter(([key]) => allowed.has(key));
+      if (filtered.length === entries.length) {
+        return current;
+      }
+      return filtered.reduce<Record<string, string>>((acc, [key, value]) => {
+        acc[key] = value;
+        return acc;
+      }, {});
+    });
+    setObjectSampleErrors((current) => {
+      const entries = Object.entries(current);
+      const filtered = entries.filter(([key]) => allowed.has(key));
+      if (filtered.length === entries.length) {
+        return current;
+      }
+      return filtered.reduce<Record<string, string>>((acc, [key, value]) => {
+        acc[key] = value;
+        return acc;
+      }, {});
+    });
+  }, [dynamicInputs]);
 
   const pageQuery = useQuery({
     queryKey: ['project-page', projectId, pageId],
@@ -327,11 +369,6 @@ export const PageBuilderPage = () => {
     return map;
   }, [dynamicInputs]);
 
-  const bindingOptions = useMemo(
-    () => [{ label: 'Static content', value: '' }, ...dynamicInputs.map((input) => ({ label: input.label, value: input.id }))],
-    [dynamicInputs]
-  );
-
   const dynamicPreviewMap = useMemo(
     () =>
       buildDynamicInputPreviewMap({
@@ -343,16 +380,34 @@ export const PageBuilderPage = () => {
     [dynamicInputs, graphQuery.data?.graph, graphQuery.dataUpdatedAt, pageId]
   );
 
+  const bindingOptions = useMemo(
+    () => [
+      { label: 'Static content', value: '' },
+      ...dynamicInputs.map((input) => ({
+        label: input.label,
+        value: input.id,
+        dataType: input.dataType,
+        objectSample: input.objectSample,
+        previewValue: dynamicPreviewMap.get(input.id)
+      }))
+    ],
+    [dynamicInputs, dynamicPreviewMap]
+  );
+
   const builderConfig = useMemo(
     () =>
       createPageBuilderConfig({
         bindingOptions,
-        resolveBinding: (text?: string, bindingId?: string) => {
+        resolveBinding: (text?: string, bindingId?: string, propertyPath?: string[]) => {
           if (bindingId) {
             if (dynamicPreviewMap.has(bindingId)) {
-              return dynamicPreviewMap.get(bindingId) ?? '';
+              const resolvedValue = resolvePropertyPathValue(dynamicPreviewMap.get(bindingId), propertyPath);
+              if (typeof resolvedValue !== 'undefined') {
+                return formatScalar(resolvedValue);
+              }
             }
-            return `{{${dynamicLabelMap.get(bindingId) ?? bindingId}}}`;
+            const label = dynamicLabelMap.get(bindingId) ?? bindingId;
+            return `{{${formatBindingPlaceholder(label, propertyPath)}}}`;
           }
           return text || 'Text';
         }
@@ -482,16 +537,81 @@ export const PageBuilderPage = () => {
   const handleDynamicInputChange = useCallback(
     (inputId: string, updates: Partial<PageDynamicInput>) => {
       setDynamicInputs((current) => {
-        const next = current.map((input) =>
-          input.id === inputId ? { ...input, ...updates, label: updates.label ?? input.label } : input
-        );
+        const next = current.map((input) => {
+          if (input.id !== inputId) {
+            return input;
+          }
+          const nextDataType = updates.dataType ?? input.dataType;
+          const nextInput: PageDynamicInput = {
+            ...input,
+            ...updates,
+            label: updates.label ?? input.label
+          };
+          if (nextDataType !== 'object') {
+            nextInput.objectSample = undefined;
+          }
+          return nextInput;
+        });
         scheduleDraftPersist(builderState, next);
         return next;
       });
+      if (updates.dataType && updates.dataType !== 'object') {
+        setObjectSampleDrafts((current) => {
+          if (!(inputId in current)) {
+            return current;
+          }
+          const next = { ...current };
+          delete next[inputId];
+          return next;
+        });
+        setObjectSampleErrors((current) => {
+          if (!(inputId in current)) {
+            return current;
+          }
+          const next = { ...current };
+          delete next[inputId];
+          return next;
+        });
+      }
       setHasUnsavedChanges(true);
-      logPageBuilderEvent('Dynamic input updated', { inputId, updates: Object.keys(updates) });
+      logPageBuilderEvent('Dynamic input updated', {
+        inputId,
+        updates: Object.keys(updates),
+        nextType: updates.dataType
+      });
     },
     [builderState, scheduleDraftPersist]
+  );
+
+  const handleObjectSampleDraftChange = useCallback(
+    (inputId: string, draft: string) => {
+      setObjectSampleDrafts((current) => ({ ...current, [inputId]: draft }));
+      if (!draft.trim()) {
+        handleDynamicInputChange(inputId, { objectSample: undefined });
+        setObjectSampleErrors((current) => ({ ...current, [inputId]: '' }));
+        logPageBuilderEvent('Object sample cleared', { inputId });
+        return;
+      }
+      try {
+        const parsed = JSON.parse(draft);
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+          throw new Error('Object sample must be a plain object');
+        }
+        handleDynamicInputChange(inputId, { objectSample: parsed });
+        setObjectSampleErrors((current) => ({ ...current, [inputId]: '' }));
+        logPageBuilderEvent('Object sample parsed', { inputId, keys: Object.keys(parsed as Record<string, unknown>) });
+      } catch (error) {
+        setObjectSampleErrors((current) => ({
+          ...current,
+          [inputId]: error instanceof Error ? error.message : 'Invalid JSON object'
+        }));
+        logPageBuilderEvent('Object sample parsing failed', {
+          inputId,
+          message: error instanceof Error ? error.message : 'Unknown error'
+        });
+      }
+    },
+    [handleDynamicInputChange]
   );
 
   const handleRemoveInput = useCallback(
@@ -739,8 +859,30 @@ export const PageBuilderPage = () => {
                     <option value="string">String</option>
                     <option value="number">Number</option>
                     <option value="boolean">Boolean</option>
+                    <option value="object">Object</option>
                   </select>
                 </label>
+                {input.dataType === 'object' ? (
+                  <label className="mt-2 block text-xs uppercase tracking-wide text-bw-platinum/60">
+                    Object sample
+                    <textarea
+                      className="mt-1 h-28 w-full rounded-lg border border-white/10 bg-bw-ink px-2 py-1 font-mono text-xs text-white"
+                      value={objectSampleDrafts[input.id] ?? formatObjectSampleDraft(input.objectSample as Record<string, unknown> | undefined)}
+                      onChange={(event) => handleObjectSampleDraftChange(input.id, event.target.value)}
+                      placeholder={`{
+  "title": "Headline",
+  "cta": { "label": "Join" }
+}`}
+                    />
+                    {objectSampleErrors[input.id] ? (
+                      <p className="mt-1 text-[0.65rem] text-red-300">{objectSampleErrors[input.id]}</p>
+                    ) : (
+                      <p className="mt-1 text-[0.65rem] text-bw-platinum/70">
+                        Provide JSON to describe available fields. Nested objects become selectable in bindings.
+                      </p>
+                    )}
+                  </label>
+                ) : null}
                 <button
                   type="button"
                   className="mt-2 text-xs text-red-300"

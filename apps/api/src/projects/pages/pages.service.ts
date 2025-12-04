@@ -6,7 +6,7 @@ import { projectPages, projects, ProjectPage } from '@buildweaver/db';
 import { CreateProjectPageDto } from './dto/create-project-page.dto';
 import { UpdateProjectPageDto } from './dto/update-project-page.dto';
 import { PageDynamicInputDto } from './dto/page-dynamic-input.dto';
-import { PageBuilderState, PageDynamicInput } from '@buildweaver/libs';
+import { PageBuilderState, PageDynamicInput, ScalarValue } from '@buildweaver/libs';
 import { resolvePageSlug } from './slug.util';
 
 @Injectable()
@@ -117,22 +117,62 @@ export class ProjectPagesService {
   private normalizeInputs(inputs: Array<PageDynamicInput | PageDynamicInputDto>): PageDynamicInput[] {
     const seen = new Set<string>();
     return inputs
-      .map((input) => ({
-        id: input.id ?? randomUUID(),
-        label: input.label.trim(),
-        description: input.description?.trim(),
-        dataType: input.dataType ?? 'string'
-      }))
+      .map((input, index) => {
+        const id = input.id ?? randomUUID();
+        const label = input.label.trim();
+        const dataType = input.dataType ?? 'string';
+        const objectSample = this.coerceObjectSample(dataType, 'objectSample' in input ? input.objectSample : undefined, {
+          id,
+          label,
+          index
+        });
+        return {
+          id,
+          label,
+          description: input.description?.trim(),
+          dataType,
+          objectSample
+        } satisfies PageDynamicInput;
+      })
       .filter((input) => {
         if (!input.label) {
+          this.logger.warn('Dynamic input discarded due to empty label', { inputId: input.id });
           return false;
         }
         if (seen.has(input.id)) {
+          this.logger.warn('Dynamic input discarded due to duplicate id', { inputId: input.id });
           return false;
         }
         seen.add(input.id);
         return true;
       });
+  }
+
+  private coerceObjectSample(
+    dataType: PageDynamicInput['dataType'],
+    sample: unknown,
+    meta: { id: string; label: string; index: number }
+  ): Record<string, ScalarValue> | undefined {
+    if (dataType !== 'object' || !sample) {
+      return undefined;
+    }
+    if (!isPlainObject(sample)) {
+      this.logger.warn('Object sample ignored — expected plain object', {
+        inputId: meta.id,
+        label: meta.label,
+        index: meta.index,
+        receivedType: typeof sample
+      });
+      return undefined;
+    }
+    const sanitized = sanitizeObjectSample(sample);
+    this.logger.log('Object sample parsed for dynamic input', {
+      inputId: meta.id,
+      label: meta.label,
+      index: meta.index,
+      keys: Object.keys(sanitized ?? {})
+    });
+    return sanitized;
   }
 
   private buildDefaultSection(): { type: string; props: Record<string, unknown> } {
@@ -182,3 +222,48 @@ export class ProjectPagesService {
     return `content=${content},zones=${zones}`;
   }
 }
+
+const MAX_SAMPLE_DEPTH = 5;
+
+const isPlainObject = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+const sanitizeScalarValue = (value: unknown, depth = 0): ScalarValue | undefined => {
+  if (depth > MAX_SAMPLE_DEPTH) {
+    return undefined;
+  }
+  if (value === null) {
+    return null;
+  }
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+    return value as ScalarValue;
+  }
+  if (Array.isArray(value)) {
+    const entries = value
+      .map((entry) => sanitizeScalarValue(entry, depth + 1))
+      .filter((entry): entry is ScalarValue => typeof entry !== 'undefined');
+    return entries as unknown as ScalarValue;
+  }
+  if (isPlainObject(value)) {
+    const sanitized: Record<string, ScalarValue> = {};
+    Object.entries(value).forEach(([key, entry]) => {
+      const cleaned = sanitizeScalarValue(entry, depth + 1);
+      if (typeof cleaned !== 'undefined') {
+        sanitized[key] = cleaned;
+      }
+    });
+    return sanitized as ScalarValue;
+  }
+  return undefined;
+};
+
+const sanitizeObjectSample = (sample: Record<string, unknown>): Record<string, ScalarValue> | undefined => {
+  const sanitized: Record<string, ScalarValue> = {};
+  Object.entries(sample).forEach(([key, value]) => {
+    const cleaned = sanitizeScalarValue(value);
+    if (typeof cleaned !== 'undefined') {
+      sanitized[key] = cleaned;
+    }
+  });
+  return Object.keys(sanitized).length ? sanitized : undefined;
+};

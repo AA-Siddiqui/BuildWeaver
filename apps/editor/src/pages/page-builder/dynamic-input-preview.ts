@@ -24,7 +24,7 @@ const logEvent = (logger: PreviewLogHandler | undefined, message: string, detail
   }
 };
 
-export const buildDynamicInputPreviewMap = ({ graph, pageId, inputs, logger }: BuildPreviewMapParams): Map<string, string> => {
+export const buildDynamicInputPreviewMap = ({ graph, pageId, inputs, logger }: BuildPreviewMapParams): Map<string, ScalarValue> => {
   if (!graph || !pageId) {
     logEvent(logger, 'Live preview evaluation skipped', {
       reason: !graph ? 'missing-graph' : 'missing-page',
@@ -50,7 +50,7 @@ export const buildDynamicInputPreviewMap = ({ graph, pageId, inputs, logger }: B
       functions: graph.functions ?? []
     });
     const pageNodeId = `page-${pageId}`;
-    const map = new Map<string, string>();
+    const map = new Map<string, ScalarValue>();
 
     inputs.forEach((input) => {
       const binding = resolver.getHandleBinding(pageNodeId, input.id);
@@ -63,8 +63,9 @@ export const buildDynamicInputPreviewMap = ({ graph, pageId, inputs, logger }: B
         });
         return;
       }
-      const formatted = formatScalar(binding.value as ScalarValue);
-      map.set(input.id, formatted);
+      const rawValue = binding.value as ScalarValue;
+      const formatted = formatScalar(rawValue);
+      map.set(input.id, rawValue);
       logEvent(logger, 'Live preview resolved', {
         pageId,
         inputId: input.id,

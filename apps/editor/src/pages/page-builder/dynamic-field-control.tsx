@@ -1,18 +1,114 @@
 import type { CustomField, Field, FieldProps } from '@measured/puck';
 import type { ReactNode } from 'react';
-import { useEffect, useId, useMemo } from 'react';
+import { useCallback, useEffect, useId, useMemo } from 'react';
 import {
   BindingOption,
+  DynamicBindingState,
   DynamicBindingValue,
   createDynamicBindingState,
   getBindableOptions,
   getStaticFallbackValue,
   isDynamicBindingValue,
-  logDynamicFieldEvent
+  logDynamicFieldEvent,
+  sanitizePropertyPath
 } from './dynamic-binding';
 import { PropertyFilterGuard } from './property-search';
+import type { ScalarValue } from '@buildweaver/libs';
 
 const VARIABLE_ICON = '{ }';
+
+const MAX_PROPERTY_DEPTH = 4;
+
+const isObjectValue = (value: ScalarValue | undefined): value is Record<string, ScalarValue> =>
+  Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+
+const getObjectSource = (option?: BindingOption): Record<string, ScalarValue> | undefined => {
+  if (!option) {
+    return undefined;
+  }
+  if (isObjectValue(option.previewValue)) {
+    return option.previewValue;
+  }
+  if (isObjectValue(option.objectSample)) {
+    return option.objectSample;
+  }
+  return undefined;
+};
+
+type PropertyLevel = {
+  depth: number;
+  options: string[];
+  selected?: string;
+};
+
+const buildPropertyLevels = (source: Record<string, ScalarValue> | undefined, path: string[]): PropertyLevel[] => {
+  const levels: PropertyLevel[] = [];
+  let current: Record<string, ScalarValue> | undefined = source;
+  for (let depth = 0; depth < MAX_PROPERTY_DEPTH; depth += 1) {
+    if (!current) {
+      break;
+    }
+    const keys = Object.keys(current).sort();
+    if (!keys.length) {
+      break;
+    }
+    const desired = path[depth];
+    const selected = desired && keys.includes(desired) ? desired : '';
+    levels.push({ depth, options: keys, selected });
+    if (!selected) {
+      break;
+    }
+    const nextValue = current[selected];
+    current = isObjectValue(nextValue) ? (nextValue as Record<string, ScalarValue>) : undefined;
+  }
+  return levels;
+};
+
+const deriveDefaultPropertyPath = (source: Record<string, ScalarValue> | undefined): string[] | undefined => {
+  if (!source) {
+    return undefined;
+  }
+  const [firstKey] = Object.keys(source);
+  if (!firstKey) {
+    return undefined;
+  }
+  return [firstKey];
+};
+
+const normalizePropertyPathForSource = (
+  source: Record<string, ScalarValue> | undefined,
+  path?: string[]
+): string[] | undefined => {
+  const sanitized = sanitizePropertyPath(path);
+  if (!sanitized) {
+    return undefined;
+  }
+  const nextPath: string[] = [];
+  let current: Record<string, ScalarValue> | undefined = source;
+  for (let depth = 0; depth < sanitized.length && depth < MAX_PROPERTY_DEPTH; depth += 1) {
+    const segment = sanitized[depth];
+    if (!current || !Object.prototype.hasOwnProperty.call(current, segment)) {
+      break;
+    }
+    nextPath.push(segment);
+    const value = current[segment];
+    current = isObjectValue(value) ? (value as Record<string, ScalarValue>) : undefined;
+  }
+  return nextPath.length ? nextPath : undefined;
+};
+
+const propertyPathsEqual = (left?: string[], right?: string[]): boolean => {
+  if (!left && !right) {
+    return true;
+  }
+  if (!left || !right) {
+    return false;
+  }
+  if (left.length !== right.length) {
+    return false;
+  }
+  return left.every((segment, index) => segment === right[index]);
+};
 
 export type StaticControlRendererProps = {
   inputId: string;
@@ -59,9 +155,23 @@ export const DynamicFieldControl = ({
   const fallbackInputId = `${resolvedId}-fallback`;
   const bindingSelectId = `${resolvedId}-binding`;
   const dynamicChoices = useMemo(() => getBindableOptions(bindingOptions), [bindingOptions]);
+  const optionMap = useMemo(() => new Map(bindingOptions.map((option) => [option.value, option])), [bindingOptions]);
   const isDynamic = isDynamicBindingValue(value);
+  const dynamicState = isDynamic ? (value as DynamicBindingState) : undefined;
   const staticValue = getStaticFallbackValue(value);
-  const currentBindingId = isDynamic ? value.bindingId : '';
+  const currentBindingId = dynamicState?.bindingId ?? '';
+  const selectedOption = optionMap.get(currentBindingId);
+  const propertySource = useMemo(() => getObjectSource(selectedOption), [selectedOption]);
+  const propertyPathSignature = dynamicState ? JSON.stringify(dynamicState.propertyPath ?? []) : '';
+  const normalizedPropertyPath = useMemo(
+    () => (dynamicState ? sanitizePropertyPath(dynamicState.propertyPath) ?? [] : []),
+    [dynamicState, propertyPathSignature]
+  );
+  const propertyLevels = useMemo(
+    () => buildPropertyLevels(propertySource, normalizedPropertyPath),
+    [propertySource, normalizedPropertyPath]
+  );
+  const shouldShowPropertySelector = Boolean(isDynamic && selectedOption?.dataType === 'object');
   const hasDynamicChoices = dynamicChoices.length > 0;
   const dynamicButtonDisabled = readOnly || !hasDynamicChoices;
 
@@ -79,6 +189,33 @@ export const DynamicFieldControl = ({
     logDynamicFieldEvent('Dynamic binding defaulted', { fieldKey, bindingId: fallbackBindingId });
     onChange(createDynamicBindingState(fallbackBindingId, staticValue));
   }, [currentBindingId, dynamicChoices, fieldKey, hasDynamicChoices, isDynamic, onChange, readOnly, staticValue]);
+
+  useEffect(() => {
+    if (!shouldShowPropertySelector || !currentBindingId) {
+      return;
+    }
+    const normalized = normalizePropertyPathForSource(propertySource, dynamicState?.propertyPath);
+    let nextPath = normalized;
+    if ((!nextPath || !nextPath.length) && propertySource) {
+      nextPath = deriveDefaultPropertyPath(propertySource);
+    }
+    if (!propertyPathsEqual(nextPath, dynamicState?.propertyPath)) {
+      logDynamicFieldEvent('Object binding path synchronized', {
+        fieldKey,
+        bindingId: currentBindingId,
+        nextPath
+      });
+      onChange(createDynamicBindingState(currentBindingId, staticValue, nextPath));
+    }
+  }, [
+    currentBindingId,
+    dynamicState?.propertyPath,
+    onChange,
+    propertySource,
+    shouldShowPropertySelector,
+    staticValue,
+    fieldKey
+  ]);
 
   const handleToggleMode = () => {
     if (dynamicButtonDisabled) {
@@ -106,6 +243,24 @@ export const DynamicFieldControl = ({
     logDynamicFieldEvent('Dynamic source updated', { fieldKey, bindingId: nextId });
     onChange(createDynamicBindingState(nextId, staticValue));
   };
+
+  const handlePropertyPathSelect = useCallback(
+    (depth: number, segment: string) => {
+      if (!isDynamic || !currentBindingId) {
+        return;
+      }
+      const trimmedPath = normalizedPropertyPath.slice(0, depth);
+      const nextPath = segment ? [...trimmedPath, segment] : trimmedPath;
+      logDynamicFieldEvent('Object property segment selected', {
+        fieldKey,
+        bindingId: currentBindingId,
+        depth,
+        nextPath
+      });
+      onChange(createDynamicBindingState(currentBindingId, staticValue, nextPath));
+    },
+    [currentBindingId, fieldKey, isDynamic, normalizedPropertyPath, onChange, staticValue]
+  );
 
   const handleStaticValueChange = (next: string) => {
     if (isDynamic) {
@@ -175,6 +330,42 @@ export const DynamicFieldControl = ({
                 <p className="text-xs text-gray-500">Add dynamic inputs to bind this field.</p>
               ) : null}
             </div>
+            {shouldShowPropertySelector ? (
+              <div className="space-y-2 rounded-lg border border-gray-200/80 bg-gray-50/60 p-3">
+                <p className="text-[0.6rem] uppercase tracking-[0.3em] text-gray-400">Select object property</p>
+                {propertySource ? (
+                  propertyLevels.length ? (
+                    propertyLevels.map((level) => (
+                      <select
+                        key={`property-level-${level.depth}`}
+                        className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-bw-amber focus:outline-none"
+                        value={level.selected ?? ''}
+                        aria-label={level.depth === 0 ? 'Select object property' : `Select nested property level ${level.depth + 1}`}
+                        onChange={(event) => handlePropertyPathSelect(level.depth, event.target.value)}
+                      >
+                        <option value="">{level.depth === 0 ? 'Choose a property' : 'Choose nested property'}</option>
+                        {level.options.map((option) => (
+                          <option key={`${level.depth}-${option}`} value={option}>
+                            {option}
+                          </option>
+                        ))}
+                      </select>
+                    ))
+                  ) : (
+                    <p className="text-xs text-gray-500">Object sample has no properties to bind.</p>
+                  )
+                ) : (
+                  <p className="text-xs text-gray-500">Provide a sample JSON for this object input to expose its fields.</p>
+                )}
+                {normalizedPropertyPath.length ? (
+                  <p className="text-[0.65rem] text-gray-500">
+                    Binding path: <code className="font-mono text-xs">{normalizedPropertyPath.join('.')}</code>
+                  </p>
+                ) : (
+                  <p className="text-[0.65rem] text-gray-500">Select a property to finish binding this field.</p>
+                )}
+              </div>
+            ) : null}
             <div className="space-y-1 rounded-xl border border-dashed border-gray-200/80 p-3">
               <p className="text-[0.6rem] uppercase tracking-[0.3em] text-gray-400">Fallback value</p>
               {staticControl}

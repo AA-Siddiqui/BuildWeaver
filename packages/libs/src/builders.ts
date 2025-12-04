@@ -186,11 +186,14 @@ export interface FunctionReturnNodeData {
   returnId: string;
 }
 
+export type PageDynamicInputDataType = 'string' | 'number' | 'boolean' | 'object';
+
 export interface PageDynamicInput {
   id: string;
   label: string;
   description?: string;
-  dataType: 'string' | 'number' | 'boolean';
+  dataType: PageDynamicInputDataType;
+  objectSample?: Record<string, ScalarValue>;
 }
 
 export interface PageNodeData {
