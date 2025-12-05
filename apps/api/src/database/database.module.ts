@@ -1,4 +1,4 @@
-import { Global, Module } from '@nestjs/common';
+import { Global, Logger, Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { Pool } from 'pg';
 import { drizzle } from 'drizzle-orm/node-postgres';
@@ -14,9 +14,14 @@ import { DatabaseService } from './database.service';
       provide: PG_POOL,
       inject: [ConfigService],
       useFactory: (config: ConfigService) => {
-        const connectionString = config.get<string>('DATABASE_URL');
-        if (!connectionString) {
-          throw new Error('DATABASE_URL is not configured');
+        const connectionString =
+          config.get<string>('DATABASE_URL') ??
+          config.get<string>('DB_URL') ??
+          'postgres://postgres:postgres@localhost:5432/buildweaver';
+
+        if (!config.get<string>('DATABASE_URL') && !config.get<string>('DB_URL')) {
+          const logger = new Logger('DatabaseModule');
+          logger.warn('DATABASE_URL is not configured. Falling back to local Postgres connection string.');
         }
 
         return new Pool({
