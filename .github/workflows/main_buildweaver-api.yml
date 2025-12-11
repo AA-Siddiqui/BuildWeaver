@@ -45,13 +45,12 @@ jobs:
           BCRYPT_ROUNDS=12
           JWT_SECRET=a393d0ab095a2c4dd25e262dcd46e06e
           EOF
-          tar -czf deployment.tar.gz -C deployment .
 
       - name: Upload artifact for deployment job
         uses: actions/upload-artifact@v4
         with:
           name: api-deployment
-          path: deployment.tar.gz
+          path: deployment
 
   deploy:
     runs-on: ubuntu-latest
@@ -65,12 +64,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: api-deployment
-          path: .
-
-      - name: Extract deployment bundle
-        run: |
-          mkdir -p deployment
-          tar -xzf deployment.tar.gz -C deployment
+          path: deployment
       
       - name: Login to Azure
         uses: azure/login@v2
