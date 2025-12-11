@@ -36,7 +36,7 @@ jobs:
 
       - name: Create deployment bundle
         run: |
-          pnpm --filter @buildweaver/api deploy deployment
+          pnpm --filter @buildweaver/api deploy deployment --shamefully-hoist
           cd deployment
           cat <<'EOF' > .env
           DATABASE_URL=postgresql://neondb_owner:npg_qEJ8KiCHxro7@ep-lingering-moon-a1qroz6s-pooler.ap-southeast-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require
@@ -45,12 +45,13 @@ jobs:
           BCRYPT_ROUNDS=12
           JWT_SECRET=a393d0ab095a2c4dd25e262dcd46e06e
           EOF
+          tar -czf deployment.tar.gz -C deployment .
 
       - name: Upload artifact for deployment job
         uses: actions/upload-artifact@v4
         with:
           name: api-deployment
-          path: deployment
+          path: deployment.tar.gz
 
   deploy:
     runs-on: ubuntu-latest
@@ -64,7 +65,12 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: api-deployment
-          path: deployment
+          path: .
+
+      - name: Extract deployment bundle
+        run: |
+          mkdir -p deployment
+          tar -xzf deployment.tar.gz -C deployment
       
       - name: Login to Azure
         uses: azure/login@v2
