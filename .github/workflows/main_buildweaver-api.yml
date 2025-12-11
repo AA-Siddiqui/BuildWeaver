@@ -31,13 +31,13 @@ jobs:
 
       - name: pnpm install and build
         run: |
-          pnpm --filter @buildweaver/api add tslib mime@1
+          pnpm --filter @buildweaver/api add tslib mime@1.6.0
           pnpm install --frozen-lockfile
           pnpm build
 
       - name: Create deployment bundle
         run: |
-          pnpm --filter @buildweaver/api deploy deployment --shamefully-hoist
+          pnpm --filter @buildweaver/api deploy deployment
           cd deployment
           cat <<'EOF' > .env
           DATABASE_URL=postgresql://neondb_owner:npg_qEJ8KiCHxro7@ep-lingering-moon-a1qroz6s-pooler.ap-southeast-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require
