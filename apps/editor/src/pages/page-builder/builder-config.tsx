@@ -23,6 +23,12 @@ import {
   createDynamicTextField,
   createDynamicTextareaField
 } from './dynamic-field-control';
+import {
+  ListSlotContextProvider,
+  popListSlotRuntimeContext,
+  pushListSlotRuntimeContext,
+  type ListSlotContextValue
+} from './list-slot-context';
 
 type BuilderConfigParams = {
   bindingOptions: BindingOption[];
@@ -110,10 +116,19 @@ type ResolvedListEntry = {
   icon?: string | null;
 };
 
+type ListRenderableEntry = {
+  resolved: ResolvedListEntry;
+  raw?: ScalarValue;
+};
+
+type ListRenderMode = 'builtIn' | 'custom';
+
 type ListProps = StyleableProps<{
   items?: ListItem[];
   variant?: DynamicBindingValue;
   dataSource?: DynamicBindingValue;
+  renderMode?: DynamicBindingValue;
+  customItemSlot?: SlotRenderer;
 }>;
 
 type CardProps = StyleableProps<{
@@ -391,15 +406,18 @@ export const createPageBuilderConfig = ({ bindingOptions, resolveBinding, resolv
     }
     return undefined;
   };
-  const normalizeListEntry = (entry: ScalarValue, index: number): ResolvedListEntry => {
+  const normalizeListEntry = (entry: ScalarValue, index: number): ListRenderableEntry => {
     if (entry === null || typeof entry === 'undefined') {
-      return { text: `Item ${index + 1}` };
+      return { resolved: { text: `Item ${index + 1}` }, raw: entry };
     }
     if (typeof entry === 'string' || typeof entry === 'number' || typeof entry === 'boolean') {
-      return { text: String(entry) };
+      return { resolved: { text: String(entry) }, raw: entry };
     }
     if (Array.isArray(entry)) {
-      return { text: entry.map((value) => stringifyScalarValue(value as ScalarValue)).join(', ') };
+      return {
+        resolved: { text: entry.map((value) => stringifyScalarValue(value as ScalarValue)).join(', ') },
+        raw: entry
+      };
     }
     if (typeof entry === 'object') {
       const record = entry as Record<string, ScalarValue>;
@@ -407,11 +425,11 @@ export const createPageBuilderConfig = ({ bindingOptions, resolveBinding, resolv
         pickRecordValue(record, ['title', 'name', 'label', 'heading', 'text']) ?? `Item ${index + 1}`;
       const description = pickRecordValue(record, ['description', 'summary', 'body', 'content', 'details']);
       const icon = pickRecordValue(record, ['icon', 'emoji']);
-      return { text, description, icon };
+      return { resolved: { text, description, icon }, raw: entry };
     }
-    return { text: `Item ${index + 1}` };
+    return { resolved: { text: `Item ${index + 1}` }, raw: entry };
   };
-  const resolveListEntries = (value: DynamicBindingValue | undefined): ResolvedListEntry[] | undefined => {
+  const resolveListEntries = (value: DynamicBindingValue | undefined): ListRenderableEntry[] | undefined => {
     const scalarValue = resolveScalarField(value);
     if (!Array.isArray(scalarValue)) {
       return undefined;
@@ -930,7 +948,8 @@ export const createPageBuilderConfig = ({ bindingOptions, resolveBinding, resolv
       label: 'List',
       defaultProps: {
         variant: 'bullet',
-        gap: '12px'
+        gap: '12px',
+        renderMode: 'builtIn'
       },
       fields: enhanceFields({
         variant: createDynamicSelectField({
@@ -943,14 +962,30 @@ export const createPageBuilderConfig = ({ bindingOptions, resolveBinding, resolv
             { label: 'Plain', value: 'plain' }
           ]
         }),
+        renderMode: createDynamicSelectField({
+          fieldKey: 'renderMode',
+          bindingOptions,
+          label: 'Render mode',
+          helperText: 'Switch to custom slot to lay out each entry with other components.',
+          options: [
+            { label: 'Built-in list', value: 'builtIn' },
+            { label: 'Custom slot', value: 'custom' }
+          ]
+        }),
         dataSource: createDynamicTextField({
           fieldKey: 'dataSource',
           bindingOptions,
           label: 'Dynamic list',
           placeholder: 'Select a list input',
-          helperText: 'Bind to a list input to render each entry automatically. Manual items are ignored when active.',
+          helperText:
+            'Bind to a list input to render each entry automatically. Manual items are ignored when active and custom slots receive each entry individually.',
           allowedDataTypes: ['list']
         }),
+        customItemSlot: {
+          type: 'slot',
+          label: 'Custom item slot',
+          allow: allowAllComponents
+        },
         items: {
           type: 'array',
           label: 'Items',
@@ -966,7 +1001,17 @@ export const createPageBuilderConfig = ({ bindingOptions, resolveBinding, resolv
       }),
       render: (props) => {
         const { styleProps, rest } = splitStyleProps(props);
-        const { items = [], variant = 'bullet', dataSource, customAttributes, customCss, id, renderWhen } = rest as ListProps;
+        const {
+          items = [],
+          variant = 'bullet',
+          dataSource,
+          renderMode = 'builtIn',
+          customItemSlot,
+          customAttributes,
+          customCss,
+          id,
+          renderWhen
+        } = rest as ListProps;
         if (!shouldRenderComponent('List', id, renderWhen)) {
           return <></>;
         }
@@ -976,11 +1021,24 @@ export const createPageBuilderConfig = ({ bindingOptions, resolveBinding, resolv
         const resolvedVariant = ['bullet', 'numbered', 'plain'].includes(resolvedVariantRaw)
           ? (resolvedVariantRaw as 'bullet' | 'numbered' | 'plain')
           : 'bullet';
-        const resolvedItems: ResolvedListEntry[] = items.map((item) => ({
-          text: resolveFieldValue(item.text),
-          description: resolveFieldValue(item.description),
-          icon: resolveFieldValue(item.icon)
-        }));
+        const resolvedRenderModeRaw = resolveFieldValue(renderMode);
+        const resolvedRenderMode: ListRenderMode = resolvedRenderModeRaw === 'custom' ? 'custom' : 'builtIn';
+        const dataSourceBindingId = isDynamicBindingValue(dataSource) ? dataSource.bindingId : undefined;
+        const resolvedItems: ListRenderableEntry[] = items.map((item, index) => {
+          const resolvedEntry: ResolvedListEntry = {
+            text: resolveFieldValue(item.text),
+            description: resolveFieldValue(item.description),
+            icon: resolveFieldValue(item.icon)
+          };
+          return {
+            resolved: resolvedEntry,
+            raw: {
+              text: resolvedEntry.text ?? `Item ${index + 1}`,
+              description: resolvedEntry.description ?? null,
+              icon: resolvedEntry.icon ?? null
+            }
+          };
+        });
         const dynamicEntries = resolveListEntries(dataSource);
         if (dynamicEntries) {
           logRenderControlEvent(
@@ -992,6 +1050,81 @@ export const createPageBuilderConfig = ({ bindingOptions, resolveBinding, resolv
           );
         }
         const listEntries = dynamicEntries && dynamicEntries.length ? dynamicEntries : resolvedItems;
+
+        if (resolvedRenderMode === 'custom') {
+          if (!customItemSlot) {
+            logRenderControlEvent('List custom render mode missing slot content', { componentId: id });
+            return (
+              <>
+                <div
+                  style={inlineStyle}
+                  className="rounded-xl border border-dashed border-bw-amber/60 bg-white/90 p-4 text-sm text-gray-600"
+                  {...attributeProps}
+                >
+                  Add a component to the custom list slot to start designing each entry.
+                </div>
+                {renderScopedCss(id, customCss)}
+              </>
+            );
+          }
+          if (!listEntries.length) {
+            logRenderControlEvent('List custom render mode has no entries to render', {
+              componentId: id,
+              sourceBindingId: dataSourceBindingId
+            });
+            return (
+              <>
+                <div
+                  style={inlineStyle}
+                  className="rounded-xl border border-dashed border-gray-200 bg-white/90 p-4 text-sm text-gray-600"
+                  {...attributeProps}
+                >
+                  Connect a data source or add manual list items to preview custom entries.
+                </div>
+                {renderScopedCss(id, customCss)}
+              </>
+            );
+          }
+          logRenderControlEvent('Rendering list with custom slot content', {
+            componentId: id,
+            entries: listEntries.length,
+            sourceBindingId: dataSourceBindingId
+          });
+          return (
+            <>
+              <div style={inlineStyle} className="space-y-4" {...attributeProps}>
+                {listEntries.map((entry, index) => {
+                  const slotContext: ListSlotContextValue = {
+                    listComponentId: id,
+                    sourceBindingId: dataSourceBindingId,
+                    currentIndex: index,
+                    itemValue: entry.raw,
+                    resolvedEntry: entry.resolved
+                  };
+                  let slotNode: ReactNode;
+                  pushListSlotRuntimeContext(slotContext);
+                  try {
+                    slotNode = (
+                      <ListSlotContextProvider value={slotContext}>
+                        {renderSlot(customItemSlot, 'Design custom list item', 140)}
+                      </ListSlotContextProvider>
+                    );
+                  } finally {
+                    popListSlotRuntimeContext();
+                  }
+                  return (
+                    <div key={`${entry.resolved.text ?? 'list-item'}-${index}`} className="rounded-xl border border-gray-100/80 p-3">
+                      {slotNode}
+                    </div>
+                  );
+                })}
+              </div>
+              {renderScopedCss(id, customCss)}
+            </>
+          );
+        }
+
+        const renderedEntries = listEntries.map((entry) => entry.resolved);
         const listClass =
           resolvedVariant === 'numbered'
             ? 'list-decimal pl-6'
@@ -1013,7 +1146,7 @@ export const createPageBuilderConfig = ({ bindingOptions, resolveBinding, resolv
           return (
             <>
               <div style={inlineStyle} className="space-y-3" {...attributeProps}>
-                {listEntries.map((item, index) => (
+                {renderedEntries.map((item, index) => (
                   <div key={`${item?.text ?? index}-${index}`} className="border-l-2 border-bw-amber/30 pl-4 text-gray-700">
                     <div className="flex items-start gap-2">
                       {item?.icon ? <span className="text-lg leading-none text-bw-amber">{item.icon}</span> : null}
@@ -1032,7 +1165,7 @@ export const createPageBuilderConfig = ({ bindingOptions, resolveBinding, resolv
         return (
           <>
             <ul style={inlineStyle} className={listClass} {...attributeProps}>
-              {listEntries.map((item, index) => renderItem(item, index))}
+              {renderedEntries.map((item, index) => renderItem(item, index))}
             </ul>
             {renderScopedCss(id, customCss)}
           </>

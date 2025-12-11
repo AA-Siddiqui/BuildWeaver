@@ -17,6 +17,12 @@ import { PROPERTY_SEARCH_FIELD_KEY, resetPropertySearchState } from './page-buil
 import { buildDynamicInputPreviewMap } from './page-builder/dynamic-input-preview';
 import { createPreviewSnapshotToken } from './page-builder/preview-bridge';
 import { formatBindingPlaceholder, resolvePropertyPathValue } from './page-builder/dynamic-binding';
+import { ListScopeBindingProvider } from './page-builder/list-scope-binding-context';
+import { buildListScopeBindingLookup } from './page-builder/list-scope-registry';
+import {
+  projectListSlotPropertyPath,
+  resolveListSlotScopedValue
+} from './page-builder/list-slot-context';
 import { formatScalar } from '../components/logic/preview';
 
 const randomId = () => {
@@ -30,6 +36,22 @@ const logPageBuilderEvent = (message: string, details?: Record<string, unknown>)
   if (typeof console !== 'undefined') {
     console.info(`[PageBuilder] ${message}`, details ?? '');
   }
+};
+
+const summarizeScalarValue = (value?: ScalarValue) => {
+  if (value === null || typeof value === 'undefined') {
+    return value ?? null;
+  }
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+    return value;
+  }
+  if (Array.isArray(value)) {
+    return `[array:${value.length}]`;
+  }
+  if (typeof value === 'object') {
+    return `[object:${Object.keys(value as Record<string, unknown>).length}]`;
+  }
+  return value;
 };
 
 const formatObjectSampleDraft = (sample?: Record<string, unknown>): string => {
@@ -431,14 +453,26 @@ export const PageBuilderPage = () => {
         bindingOptions,
         resolveBinding: (text?: string, bindingId?: string, propertyPath?: string[]) => {
           if (bindingId) {
+            const scopedValue = resolveListSlotScopedValue(bindingId, propertyPath);
+            if (typeof scopedValue !== 'undefined') {
+              logPageBuilderEvent('Resolved list scope binding', {
+                bindingId,
+                propertyPath,
+                preview: summarizeScalarValue(scopedValue)
+              });
+              return formatScalar(scopedValue);
+            }
+          }
+          const normalizedPath = projectListSlotPropertyPath(bindingId, propertyPath);
+          if (bindingId) {
             if (dynamicPreviewMap.has(bindingId)) {
-              const resolvedValue = resolvePropertyPathValue(dynamicPreviewMap.get(bindingId), propertyPath);
+              const resolvedValue = resolvePropertyPathValue(dynamicPreviewMap.get(bindingId), normalizedPath);
               if (typeof resolvedValue !== 'undefined') {
                 return formatScalar(resolvedValue);
               }
             }
             const label = dynamicLabelMap.get(bindingId) ?? bindingId;
-            return `{{${formatBindingPlaceholder(label, propertyPath)}}}`;
+            return `{{${formatBindingPlaceholder(label, normalizedPath)}}}`;
           }
           return text || 'Text';
         },
@@ -446,12 +480,34 @@ export const PageBuilderPage = () => {
           if (!bindingId) {
             return undefined;
           }
+          const scopedValue = resolveListSlotScopedValue(bindingId, propertyPath);
+          if (typeof scopedValue !== 'undefined') {
+            logPageBuilderEvent('Provided scoped binding value', {
+              bindingId,
+              propertyPath,
+              preview: summarizeScalarValue(scopedValue)
+            });
+            return scopedValue;
+          }
+          const normalizedPath = projectListSlotPropertyPath(bindingId, propertyPath);
           const rawValue = dynamicPreviewMap.get(bindingId);
-          return resolvePropertyPathValue(rawValue, propertyPath);
+          return resolvePropertyPathValue(rawValue, normalizedPath);
         }
       }),
     [bindingOptions, dynamicLabelMap, dynamicPreviewMap]
   );
+
+  const listScopeBindingLookup = useMemo(
+    () => buildListScopeBindingLookup(builderState, dynamicPreviewMap),
+    [builderState, dynamicPreviewMap]
+  );
+
+  useEffect(() => {
+    logPageBuilderEvent('List scope binding lookup refreshed', {
+      pageId,
+      componentsWithScope: listScopeBindingLookup.size
+    });
+  }, [listScopeBindingLookup, pageId]);
 
   useLayoutEffect(() => {
     builderHistoryRef.current.observe(getCurrentBuilderSnapshot(), {
@@ -1026,7 +1082,9 @@ export const PageBuilderPage = () => {
           ) : (
             <div className="border border-gray-200 bg-white p-6 shadow-lg">
               {/* Puck only reads the initial data prop, so key forces a remount when server data changes. */}
-              <Puck key={puckSessionKey} config={builderConfig} data={builderState} onChange={handleBuilderChange} />
+              <ListScopeBindingProvider lookup={listScopeBindingLookup}>
+                <Puck key={puckSessionKey} config={builderConfig} data={builderState} onChange={handleBuilderChange} />
+              </ListScopeBindingProvider>
             </div>
           )}
         </div>

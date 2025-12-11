@@ -8,6 +8,11 @@ export type BindingOption = {
 	listItemType?: PageDynamicListItemType;
 	listObjectSample?: Record<string, ScalarValue>;
 	previewValue?: ScalarValue;
+	scope?: {
+		type: 'listItem';
+		listComponentId: string;
+		sourceBindingId?: string;
+	};
 };
 
 export type BindingResolver = (text?: string, bindingId?: string, propertyPath?: string[]) => string;

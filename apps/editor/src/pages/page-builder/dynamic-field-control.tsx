@@ -1,4 +1,5 @@
 import type { CustomField, Field, FieldProps } from '@measured/puck';
+import { usePuck } from '@measured/puck';
 import type { ReactNode } from 'react';
 import { useCallback, useEffect, useId, useMemo } from 'react';
 import {
@@ -14,6 +15,7 @@ import {
 } from './dynamic-binding';
 import { PropertyFilterGuard } from './property-search';
 import type { PageDynamicInputDataType, PageDynamicListItemType, ScalarValue } from '@buildweaver/libs';
+import { useListScopeBindingOptions } from './list-scope-binding-context';
 
 const VARIABLE_ICON = '{ }';
 
@@ -178,19 +180,36 @@ export const DynamicFieldControl = ({
   const resolvedId = id ?? generatedId;
   const fallbackInputId = `${resolvedId}-fallback`;
   const bindingSelectId = `${resolvedId}-binding`;
-  const optionMap = useMemo(() => new Map(bindingOptions.map((option) => [option.value, option])), [bindingOptions]);
+  let puckStore: ReturnType<typeof usePuck> | undefined;
+  try {
+    puckStore = usePuck();
+  } catch {
+    puckStore = undefined;
+  }
+  const selectedComponentId = (puckStore?.selectedItem?.props as { id?: string } | undefined)?.id;
+  const scopedBindingOptions = useListScopeBindingOptions(selectedComponentId);
+  const mergedBindingOptions = useMemo(() => {
+    if (!scopedBindingOptions.length) {
+      return bindingOptions;
+    }
+    const uniqueScoped = scopedBindingOptions.filter(
+      (option) => !bindingOptions.some((baseOption) => baseOption.value === option.value)
+    );
+    return [...uniqueScoped, ...bindingOptions];
+  }, [bindingOptions, scopedBindingOptions]);
+  const optionMap = useMemo(() => new Map(mergedBindingOptions.map((option) => [option.value, option])), [mergedBindingOptions]);
   const allowedTypes = allowedDataTypes?.filter(Boolean);
   const filteredOptions = useMemo(() => {
     if (!allowedTypes?.length) {
-      return bindingOptions;
+      return mergedBindingOptions;
     }
-    return bindingOptions.filter((option) => {
+    return mergedBindingOptions.filter((option) => {
       if (!option.value || !option.dataType) {
         return true;
       }
       return allowedTypes.includes(option.dataType);
     });
-  }, [allowedTypes, bindingOptions]);
+  }, [allowedTypes, mergedBindingOptions]);
   const rawDynamicChoices = useMemo(() => getBindableOptions(filteredOptions), [filteredOptions]);
   const isDynamic = isDynamicBindingValue(value);
   const dynamicState = isDynamic ? (value as DynamicBindingState) : undefined;

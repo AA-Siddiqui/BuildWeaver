@@ -1,7 +1,13 @@
 import { render, screen } from '@testing-library/react';
 import type { ScalarValue } from '@buildweaver/libs';
-import { createDynamicBindingState } from './dynamic-binding';
+import { createDynamicBindingState, resolvePropertyPathValue } from './dynamic-binding';
 import { createPageBuilderConfig, mergeSectionBackgrounds } from './builder-config';
+import {
+  LIST_SCOPE_BINDING_PREFIX,
+  projectListSlotPropertyPath,
+  resolveListSlotScopedValue,
+  useListSlotContext
+} from './list-slot-context';
 
 describe('mergeSectionBackgrounds', () => {
   const gradient = 'linear-gradient(45deg, #111827 0%, #F9E7B2 100%)';
@@ -224,5 +230,190 @@ describe('List component dynamic data', () => {
     );
     expect(screen.getByText('Manual entry')).toBeInTheDocument();
     expect(screen.getByText('Fallback')).toBeInTheDocument();
+  });
+});
+
+describe('List custom slot rendering', () => {
+  const customDynamicList: ScalarValue = [
+    { title: 'First article', description: 'Alpha state' },
+    { title: 'Second article', description: 'Beta state' }
+  ];
+  const baseBindingOptions = [
+    { label: 'Dynamic list', value: 'dynamic-list', dataType: 'list' as const, listItemType: 'object' as const }
+  ];
+
+  const createResolvers = () => ({
+    resolveBinding: (text?: string, bindingId?: string, propertyPath?: string[]) => {
+      if (bindingId !== 'dynamic-list') {
+        return text ?? '';
+      }
+      const normalizedPath = projectListSlotPropertyPath(bindingId, propertyPath);
+      const resolvedValue = resolvePropertyPathValue(customDynamicList, normalizedPath);
+      if (typeof resolvedValue === 'undefined') {
+        return text ?? '';
+      }
+      if (typeof resolvedValue === 'string') {
+        return resolvedValue;
+      }
+      if (typeof resolvedValue === 'number' || typeof resolvedValue === 'boolean') {
+        return String(resolvedValue);
+      }
+      return text ?? '';
+    },
+    resolveBindingValue: (bindingId?: string, propertyPath?: string[]) => {
+      if (bindingId !== 'dynamic-list') {
+        return undefined;
+      }
+      const normalizedPath = projectListSlotPropertyPath(bindingId, propertyPath);
+      return resolvePropertyPathValue(customDynamicList, normalizedPath);
+    }
+  });
+
+  const createConfig = () => {
+    const resolvers = createResolvers();
+    return createPageBuilderConfig({
+      bindingOptions: baseBindingOptions,
+      resolveBinding: resolvers.resolveBinding,
+      resolveBindingValue: resolvers.resolveBindingValue
+    });
+  };
+
+  const SlotProbe = () => {
+    const { currentIndex, itemValue } = useListSlotContext();
+    const title =
+      itemValue && typeof itemValue === 'object' && !Array.isArray(itemValue)
+        ? ((itemValue as Record<string, ScalarValue>).title as string)
+        : undefined;
+    return <div data-testid={`custom-slot-${currentIndex}`}>{title ?? `Item ${currentIndex + 1}`}</div>;
+  };
+
+  it('renders custom slot entries with context data', () => {
+    const config = createConfig();
+    const listComponent = config.components?.List;
+    if (!listComponent?.render) {
+      throw new Error('List component is not registered');
+    }
+    render(
+      <>
+        {listComponent.render({
+          id: 'list-custom-slot',
+          renderMode: 'custom',
+          dataSource: createDynamicBindingState('dynamic-list', '[]'),
+          customItemSlot: () => <SlotProbe />
+        } as unknown as Parameters<NonNullable<typeof listComponent.render>>[0])}
+      </>
+    );
+    expect(screen.getByTestId('custom-slot-0')).toHaveTextContent('First article');
+    expect(screen.getByTestId('custom-slot-1')).toHaveTextContent('Second article');
+  });
+
+  it('applies current list index to nested bindings inside slots', () => {
+    const config = createConfig();
+    const listComponent = config.components?.List;
+    const heading = config.components?.Heading;
+    if (!listComponent?.render || !heading?.render) {
+      throw new Error('Required components are not registered');
+    }
+    const slotRenderer = () => (
+      <>
+        {heading.render({
+          id: 'slot-heading',
+          content: createDynamicBindingState('dynamic-list', '[]', ['0', 'title'])
+        } as unknown as Parameters<NonNullable<typeof heading.render>>[0])}
+      </>
+    );
+    render(
+      <>
+        {listComponent.render({
+          id: 'list-custom-slot-heading',
+          renderMode: 'custom',
+          dataSource: createDynamicBindingState('dynamic-list', '[]'),
+          customItemSlot: slotRenderer
+        } as unknown as Parameters<NonNullable<typeof listComponent.render>>[0])}
+      </>
+    );
+    expect(screen.getByText('First article')).toBeInTheDocument();
+    expect(screen.getByText('Second article')).toBeInTheDocument();
+  });
+
+  it('shows helpers when slot configuration is incomplete', () => {
+    const config = createConfig();
+    const listComponent = config.components?.List;
+    if (!listComponent?.render) {
+      throw new Error('List component is not registered');
+    }
+    const { rerender } = render(
+      <>
+        {listComponent.render({
+          id: 'list-missing-slot',
+          renderMode: 'custom',
+          dataSource: createDynamicBindingState('dynamic-list', '[]')
+        } as unknown as Parameters<NonNullable<typeof listComponent.render>>[0])}
+      </>
+    );
+    expect(screen.getByText('Add a component to the custom list slot to start designing each entry.')).toBeInTheDocument();
+    rerender(
+      <>
+        {listComponent.render({
+          id: 'list-empty-slot',
+          renderMode: 'custom',
+          customItemSlot: () => <SlotProbe />
+        } as unknown as Parameters<NonNullable<typeof listComponent.render>>[0])}
+      </>
+    );
+    expect(
+      screen.getByText('Connect a data source or add manual list items to preview custom entries.')
+    ).toBeInTheDocument();
+  });
+
+  it('renders current list item scoped bindings inside custom slots', () => {
+    const listComponentId = 'list-scoped';
+    const dynamicBindingId = 'dynamic-items';
+    const scopedBindingId = `${LIST_SCOPE_BINDING_PREFIX}${listComponentId}`;
+    const config = createPageBuilderConfig({
+      bindingOptions: [
+        { label: 'Dynamic items', value: dynamicBindingId, dataType: 'list', listItemType: 'number' },
+        { label: 'Current list item', value: scopedBindingId, dataType: 'number' }
+      ],
+      resolveBinding: (text?: string, bindingId?: string, propertyPath?: string[]) => {
+        const scopedValue = resolveListSlotScopedValue(bindingId, propertyPath);
+        if (typeof scopedValue !== 'undefined') {
+          return typeof scopedValue === 'string' ? scopedValue : String(scopedValue);
+        }
+        return text ?? bindingId ?? '';
+      },
+      resolveBindingValue: (bindingId?: string) => {
+        if (bindingId === dynamicBindingId) {
+          return [1, 2, 4, 5];
+        }
+        return undefined;
+      }
+    });
+    const listComponent = config.components?.List;
+    const heading = config.components?.Heading;
+    if (!listComponent?.render || !heading?.render) {
+      throw new Error('Required components are not registered');
+    }
+    const slotRenderer = () => (
+      <>
+        {heading.render({
+          id: 'slot-heading',
+          content: createDynamicBindingState(scopedBindingId, 'fallback'),
+          customAttributes: [{ id: 'slot-attr', name: 'data-testid', value: 'slot-value' }]
+        } as unknown as Parameters<NonNullable<typeof heading.render>>[0])}
+      </>
+    );
+    render(
+      <>
+        {listComponent.render({
+          id: listComponentId,
+          renderMode: 'custom',
+          dataSource: createDynamicBindingState(dynamicBindingId, '[]'),
+          customItemSlot: slotRenderer
+        } as unknown as Parameters<NonNullable<typeof listComponent.render>>[0])}
+      </>
+    );
+    const resolvedValues = screen.getAllByTestId('slot-value').map((node) => node.textContent);
+    expect(resolvedValues).toEqual(['1', '2', '4', '5']);
   });
 });
