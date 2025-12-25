@@ -1,0 +1,46 @@
+name: Docker Health Check
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+
+jobs:
+  docker-healthcheck:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: docker build -t buildweaver-api .
+
+      - name: Run container
+        run: |
+          docker run -d \
+            -e DATABASE_URL=postgresql://neondb_owner:npg_qEJ8KiCHxro7@ep-flat-cherry-a1fuvihz-pooler.ap-southeast-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require \
+            -e VITE_API_BASE_URL=http://localhost:3000 \
+            -e PORT=3000 \
+            -e EDITOR_ORIGIN=http://localhost:5173 \
+            -e BCRYPT_ROUNDS=12 \
+            -e JWT_SECRET=change-me \
+            --name buildweaver-api-test \
+            -p 3000:3000 \
+            buildweaver-api
+
+      - name: Wait for health endpoint or timeout
+        run: |
+          END_TIME=$((SECONDS+180))
+          until curl -fs http://localhost:3000/health; do
+            if [ $SECONDS -ge $END_TIME ]; then
+              echo "Timeout waiting for health endpoint"
+              docker logs buildweaver-api-test
+              exit 1
+            fi
+            sleep 5
+          done
+
+      - name: Stop container
+        if: always()
+        run: docker rm -f buildweaver-api-test
