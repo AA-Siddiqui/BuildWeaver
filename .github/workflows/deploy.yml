@@ -50,5 +50,5 @@ jobs:
                       JWT_SECRET="${{secrets.JWT_SECRET}}" \
             --min-replicas 1 \
             --max-replicas 1 \
-            --cpu 1 \
-            --memory 1.5Gi
+            --cpu 0.5 \
+            --memory 1.0Gi
