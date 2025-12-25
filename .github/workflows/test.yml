@@ -18,16 +18,7 @@ jobs:
 
       - name: Run container
         run: |
-          docker run -d \
-            -e DATABASE_URL=postgresql://neondb_owner:npg_qEJ8KiCHxro7@ep-flat-cherry-a1fuvihz-pooler.ap-southeast-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require \
-            -e VITE_API_BASE_URL=http://localhost:3000 \
-            -e PORT=3000 \
-            -e EDITOR_ORIGIN=http://localhost:5173 \
-            -e BCRYPT_ROUNDS=12 \
-            -e JWT_SECRET=change-me \
-            --name buildweaver-api-test \
-            -p 3000:3000 \
-            buildweaver-api
+          docker run -d --name buildweaver-api-test -p 3000:3000 -e DATABASE_URL=postgresql://neondb_owner:npg_qEJ8KiCHxro7@ep-flat-cherry-a1fuvihz-pooler.ap-southeast-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require -e VITE_API_BASE_URL=http://localhost:3000 -e PORT=3000 -e EDITOR_ORIGIN=http://localhost:5173 -e BCRYPT_ROUNDS=12 -e JWT_SECRET=change-me buildweaver-api
 
       - name: Wait for health endpoint or timeout
         run: |
