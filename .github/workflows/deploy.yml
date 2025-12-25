@@ -1,0 +1,56 @@
+name: Docker Deploy to Azure Container Apps
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      RESOURCE_GROUP: BuildWeaver
+      ACR_NAME: buildweaverapi
+      CONTAINER_APP_ENV: BuildWeaver-API-Env
+      CONTAINER_APP_NAME: buildweaver-api
+      LOCATION: southeastasia
+      IMAGE_TAG: ${{ github.sha }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Login to Azure
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Login to ACR
+        run: az acr login --name $ACR_NAME
+
+      - name: Build and push Docker image
+        run: |
+          docker build -t $ACR_NAME.azurecr.io/$CONTAINER_APP_NAME:$IMAGE_TAG .
+          docker push $ACR_NAME.azurecr.io/$CONTAINER_APP_NAME:$IMAGE_TAG
+
+      - name: Deploy to Azure Container App
+        run: |
+          az containerapp create \
+            --name $CONTAINER_APP_NAME \
+            --resource-group $RESOURCE_GROUP \
+            --environment $CONTAINER_APP_ENV \
+            --image $ACR_NAME.azurecr.io/$CONTAINER_APP_NAME:$IMAGE_TAG \
+            --target-port 3000 \
+            --ingress external \
+            --env-vars DATABASE_URL="${{secrets.DATABASE_URL}}" \
+                      VITE_API_BASE_URL="${{secrets.VITE_API_BASE_URL}}" \
+                      PORT="3000" \
+                      EDITOR_ORIGIN="${{secrets.EDITOR_ORIGIN}}" \
+                      BCRYPT_ROUNDS="${{secrets.BCRYPT_ROUNDS}}" \
+                      JWT_SECRET="${{secrets.JWT_SECRET}}" \
+            --location $LOCATION \
+            --min-replicas 1 \
+            --max-replicas 1 \
+            --cpu 1 \
+            --memory 1.5Gi \
+            --yes
