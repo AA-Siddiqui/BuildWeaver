@@ -6,15 +6,11 @@ WORKDIR /app
 # Enable pnpm
 RUN corepack enable
 
-# Copy dependency files first for caching
-COPY package.json pnpm-lock.yaml ./
-COPY pnpm-workspace.yaml ./
+# Copy the rest of the repo
+COPY . .
 
 # Install dependencies
 RUN pnpm install
-
-# Copy the rest of the repo
-COPY . .
 
 # Build
 RUN pnpm build
