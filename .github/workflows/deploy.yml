@@ -48,9 +48,7 @@ jobs:
                       EDITOR_ORIGIN="${{secrets.EDITOR_ORIGIN}}" \
                       BCRYPT_ROUNDS="${{secrets.BCRYPT_ROUNDS}}" \
                       JWT_SECRET="${{secrets.JWT_SECRET}}" \
-            --location $LOCATION \
             --min-replicas 1 \
             --max-replicas 1 \
             --cpu 1 \
-            --memory 1.5Gi \
-            --yes
+            --memory 1.5Gi
