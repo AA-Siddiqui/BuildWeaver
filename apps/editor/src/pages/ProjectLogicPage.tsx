@@ -22,6 +22,7 @@ import type {
   FunctionNodeData,
   LogicEditorNode,
   LogicEditorNodeData,
+  PageDocument,
   PageNodeData,
   ProjectGraphSnapshot,
   UserDefinedFunction
@@ -45,6 +46,7 @@ import { SnapshotHistory } from '../lib/snapshotHistory';
 import { processEditorShortcut } from '../lib/editorShortcuts';
 import { useDeleteNodesShortcut } from '../hooks/useDeleteNodesShortcut';
 import { LogicNavigationProvider } from '../components/logic/LogicNavigationContext';
+import { PageRouteRegistryProvider } from '../components/logic/PageRouteRegistryContext';
 import { deriveDefaultPageName, normalizeRouteSegment } from '../lib/routes';
 import {
   FlowEdge,
@@ -298,6 +300,68 @@ const LogicEditorView = () => {
     staleTime: 5 * 60 * 1000
   });
 
+  const pagesQuery = useQuery({
+    queryKey: ['project-pages', projectId],
+    queryFn: () => projectPagesApi.list(projectId!),
+    enabled: Boolean(projectId),
+    staleTime: 60 * 1000
+  });
+
+  useEffect(() => {
+    if (pagesQuery.isSuccess) {
+      logicLogger.debug('Project pages hydrated for logic editor', {
+        projectId,
+        pages: pagesQuery.data.pages.length
+      });
+    }
+  }, [pagesQuery.data?.pages.length, pagesQuery.isSuccess, projectId]);
+
+  useEffect(() => {
+    if (pagesQuery.isError) {
+      const message = pagesQuery.error instanceof Error ? pagesQuery.error.message : 'Unknown error';
+      logicLogger.error('Failed to load project pages for logic editor', { projectId, message });
+    }
+  }, [pagesQuery.error, pagesQuery.isError, projectId]);
+
+  const pageRouteSummary = useMemo(
+    () => collectPageRoutes(nodes, pagesQuery.data?.pages ?? []),
+    [nodes, pagesQuery.data?.pages]
+  );
+
+  const knownPageRoutes = pageRouteSummary.routes;
+
+  const isRouteAvailable = useCallback(
+    (candidate?: string, currentPageId?: string) => {
+      const normalized = normalizeRouteSegment(candidate ?? '');
+      if (!normalized) {
+        return false;
+      }
+      const owners = pageRouteSummary.ownership[normalized];
+      if (!owners || owners.length === 0) {
+        return true;
+      }
+      if (currentPageId) {
+        return owners.every((ownerId) => ownerId === currentPageId);
+      }
+      return false;
+    },
+    [pageRouteSummary]
+  );
+
+  const pageRouteRegistryValue = useMemo(
+    () => ({
+      routes: knownPageRoutes,
+      isRouteAvailable
+    }),
+    [isRouteAvailable, knownPageRoutes]
+  );
+
+  const pageRoutesErrorMessage = pagesQuery.isError
+    ? pagesQuery.error instanceof Error
+      ? pagesQuery.error.message
+      : 'Unable to load page routes'
+    : '';
+
   useEffect(() => {
     if (graphQuery.data?.graph) {
       const hydratedNodes = toFlowNodes(graphQuery.data.graph.nodes);
@@ -540,6 +604,17 @@ const LogicEditorView = () => {
       const pageCount = nodes.filter((node: FlowNode) => node.type === 'page').length;
       const resolvedName = options?.name?.trim() || deriveDefaultPageName(pageCount);
       const resolvedSlug = normalizeRouteSegment(options?.slug ?? '', resolvedName);
+      if (!isRouteAvailable(resolvedSlug)) {
+        const message = `Route /${resolvedSlug} already exists`;
+        setFeedback(message);
+        setTimeout(() => setFeedback(''), 3000);
+        logicLogger.warn('Page creation blocked due to duplicate route', {
+          projectId,
+          route: resolvedSlug,
+          knownRoutes: knownPageRoutes.length
+        });
+        return;
+      }
       try {
         const { page } = await createPageMutation.mutateAsync({ name: resolvedName, slug: resolvedSlug });
         logicLogger.info('Page node created via API', { projectId, pageId: page.id, slug: page.slug });
@@ -550,7 +625,7 @@ const LogicEditorView = () => {
         // Error already surfaced via mutation onError handler.
       }
     },
-    [createPageMutation, nodes, projectId, setNodes]
+    [createPageMutation, isRouteAvailable, knownPageRoutes, nodes, projectId, setNodes]
   );
 
   const handleAddFunctionNode = useCallback(
@@ -1054,6 +1129,9 @@ const LogicEditorView = () => {
         onEditFunction={handleEditFunction}
         onDeleteFunction={handleDeleteFunction}
         onAddFunctionNode={(functionId) => handleAddFunctionNode(functionId)}
+        pageRoutes={knownPageRoutes}
+        isPageRoutesLoading={pagesQuery.isLoading}
+        pageRoutesError={pageRoutesErrorMessage || undefined}
       />
       <div className="flex flex-1 flex-col">
         <header className="flex items-center justify-between border-b border-white/5 bg-bw-ink/80 px-6 py-4 text-white">
@@ -1094,10 +1172,11 @@ const LogicEditorView = () => {
           )}
           <div ref={reactFlowWrapper} className="relative h-full">
             <PreviewResolverProvider resolver={previewResolver}>
-              <LogicNavigationProvider value={{ openPageBuilder: handleNavigateToBuilder }}>
-                <FunctionRegistryProvider functions={functions}>
-                  <LogicEdgeActionsProvider value={edgeActions}>
-                    <ReactFlow
+              <PageRouteRegistryProvider value={pageRouteRegistryValue}>
+                <LogicNavigationProvider value={{ openPageBuilder: handleNavigateToBuilder }}>
+                  <FunctionRegistryProvider functions={functions}>
+                    <LogicEdgeActionsProvider value={edgeActions}>
+                      <ReactFlow
                       nodes={nodes}
                       edges={edges}
                       nodeTypes={nodeTypes}
@@ -1118,11 +1197,12 @@ const LogicEditorView = () => {
                     >
                       <MiniMap pannable zoomable className="!bg-bw-ink/80" />
                       <Controls />
-                      <Background gap={16} color="#ffffff33" />
-                    </ReactFlow>
-                  </LogicEdgeActionsProvider>
-                </FunctionRegistryProvider>
-              </LogicNavigationProvider>
+                        <Background gap={16} color="#ffffff33" />
+                      </ReactFlow>
+                    </LogicEdgeActionsProvider>
+                  </FunctionRegistryProvider>
+                </LogicNavigationProvider>
+              </PageRouteRegistryProvider>
             </PreviewResolverProvider>
             <div className="pointer-events-none absolute inset-0">
               {edgeCutGesture && (
@@ -1172,6 +1252,44 @@ export const ProjectLogicPage = () => (
     <LogicEditorView />
   </ReactFlowProvider>
 );
+
+type PageRouteSummary = {
+  routes: string[];
+  ownership: Record<string, string[]>;
+};
+
+export function collectPageRoutes(nodes: FlowNode[], remotePages: PageDocument[] = []): PageRouteSummary {
+  const routeOwners = new Map<string, Set<string>>();
+  const trackRoute = (candidate?: string, fallback?: string, ownerId?: string) => {
+    const normalized = normalizeRouteSegment(candidate ?? '', fallback);
+    if (!normalized) {
+      return;
+    }
+    if (!routeOwners.has(normalized)) {
+      routeOwners.set(normalized, new Set());
+    }
+    if (ownerId) {
+      routeOwners.get(normalized)?.add(ownerId);
+    }
+  };
+
+  remotePages.forEach((page) => trackRoute(page.slug, page.name, page.id));
+  nodes.forEach((node) => {
+    if (node.type !== 'page') {
+      return;
+    }
+    const pageData = node.data as Partial<PageNodeData> | undefined;
+    trackRoute(pageData?.routeSegment, pageData?.pageName, pageData?.pageId ?? node.id);
+  });
+
+  const routes = Array.from(routeOwners.keys()).sort((a, b) => a.localeCompare(b));
+  const ownership: Record<string, string[]> = {};
+  routes.forEach((route) => {
+    ownership[route] = Array.from(routeOwners.get(route) ?? []).sort((a, b) => a.localeCompare(b));
+  });
+
+  return { routes, ownership };
+}
 
 export { createPageNode, serializeNodes, serializeEdges };
 

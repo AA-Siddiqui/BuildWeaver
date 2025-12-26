@@ -52,4 +52,22 @@ describe('LogicNodePalette', () => {
     fireEvent.click(screen.getByText('Delete'));
     expect(handleDeleteFunction).toHaveBeenCalledWith('fn-1');
   });
+
+  it('renders page route list with provided routes', () => {
+    render(<LogicNodePalette onAddNode={jest.fn()} pageRoutes={['landing', 'about/team']} />);
+
+    expect(screen.getByText('/landing')).toBeInTheDocument();
+    expect(screen.getByText('/about/team')).toBeInTheDocument();
+  });
+
+  it('renders page route error state when provided', () => {
+    render(
+      <LogicNodePalette
+        onAddNode={jest.fn()}
+        pageRoutesError="Unable to load routes"
+      />
+    );
+
+    expect(screen.getByTestId('page-routes-error')).toHaveTextContent('Unable to load routes');
+  });
 });

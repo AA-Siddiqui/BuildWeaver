@@ -4,6 +4,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { PageNodeData } from '@buildweaver/libs';
 import { useLogicNavigation } from './LogicNavigationContext';
+import { usePageRouteRegistry } from './PageRouteRegistryContext';
 import { projectPagesApi } from '../../lib/api-client';
 import { normalizeRouteSegment } from '../../lib/routes';
 import { logicLogger } from '../../lib/logger';
@@ -21,6 +22,7 @@ export const PageNode = ({ data, selected }: NodeProps<PageNodeData>) => {
   const [draftName, setDraftName] = useState(data.pageName);
   const [draftRoute, setDraftRoute] = useState(data.routeSegment ?? '');
   const [formError, setFormError] = useState('');
+  const routeRegistry = usePageRouteRegistry();
 
   useEffect(() => {
     setDisplayName(data.pageName);
@@ -102,6 +104,16 @@ export const PageNode = ({ data, selected }: NodeProps<PageNodeData>) => {
       return;
     }
     const normalizedSlug = normalizeRouteSegment(draftRoute, trimmedName);
+    if (routeRegistry && !routeRegistry.isRouteAvailable(normalizedSlug, data.pageId)) {
+      const message = `Route /${normalizedSlug} already exists`;
+      setFormError(message);
+      logicLogger.warn('Page metadata update blocked due to duplicate route', {
+        projectId,
+        pageId: data.pageId,
+        route: normalizedSlug
+      });
+      return;
+    }
     setFormError('');
     try {
       await editMutation.mutateAsync({ name: trimmedName, slug: normalizedSlug });

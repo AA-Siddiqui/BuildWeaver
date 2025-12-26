@@ -19,6 +19,9 @@ interface LogicNodePaletteProps {
   extraItems?: Array<{ type: ExtendedPaletteNodeType; label: string; description: string }>;
   onAddExtraNode?: (type: ExtendedPaletteNodeType) => void;
   disablePageNode?: boolean;
+  pageRoutes?: string[];
+  isPageRoutesLoading?: boolean;
+  pageRoutesError?: string;
 }
 
 const basePaletteItems: Array<{ type: PaletteNodeType; label: string; description: string }> = [
@@ -42,7 +45,10 @@ export const LogicNodePalette = ({
   onAddFunctionNode,
   extraItems,
   onAddExtraNode,
-  disablePageNode
+  disablePageNode,
+  pageRoutes,
+  isPageRoutesLoading,
+  pageRoutesError
 }: LogicNodePaletteProps) => {
   const paletteItems = disablePageNode ? basePaletteItems.filter((item) => item.type !== 'page') : basePaletteItems;
 
@@ -62,6 +68,13 @@ export const LogicNodePalette = ({
       onAddFunctionNode?.(functionId);
     }
   };
+
+  const formattedRoutes = (pageRoutes ?? []).map((route) => {
+    if (!route) {
+      return '/';
+    }
+    return route.startsWith('/') ? route : `/${route}`;
+  });
 
   return (
     <aside className="flex w-72 max-h-screen overflow-y-scroll flex-col gap-4 border-r border-white/10 bg-bw-ink/90 p-4 text-sm text-white">
@@ -170,6 +183,32 @@ export const LogicNodePalette = ({
           <p className="rounded-xl border border-dashed border-white/20 px-3 py-4 text-center text-xs text-bw-platinum/70">
             No user functions yet.
           </p>
+        )}
+      </div>
+      <div className="space-y-3 rounded-2xl border border-white/10 bg-white/5 p-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-xs uppercase tracking-[0.3em] text-bw-amber">Routes in use</p>
+            <p className="text-[11px] text-bw-platinum/70">Keep routes unique per page</p>
+          </div>
+        </div>
+        {pageRoutesError ? (
+          <p className="text-xs text-red-300" data-testid="page-routes-error">
+            {pageRoutesError}
+          </p>
+        ) : isPageRoutesLoading ? (
+          <p className="text-xs text-bw-platinum/70">Loading routes…</p>
+        ) : formattedRoutes.length ? (
+          <ul className="space-y-1 text-xs text-bw-platinum/80">
+            {formattedRoutes.map((route) => (
+              <li key={route} className="flex items-center gap-2">
+                <span className="inline-flex h-1.5 w-1.5 rounded-full bg-bw-sand" />
+                <span>{route}</span>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="text-xs text-bw-platinum/70">No pages yet.</p>
         )}
       </div>
     </aside>

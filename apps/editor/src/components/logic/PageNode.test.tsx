@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { NodeProps } from 'reactflow';
 import type { PageNodeData, PageDocument } from '@buildweaver/libs';
 import { PageNode } from './PageNode';
+import { PageRouteRegistryProvider, PageRouteRegistryValue } from './PageRouteRegistryContext';
 import { projectPagesApi } from '../../lib/api-client';
 
 jest.mock('../../lib/api-client', () => ({
@@ -32,7 +33,7 @@ describe('PageNode', () => {
     jest.clearAllMocks();
   });
 
-  const renderPageNode = (overrides?: Partial<PageNodeData>) => {
+  const renderPageNode = (overrides?: Partial<PageNodeData>, registryOverrides?: Partial<PageRouteRegistryValue>) => {
     const baseData: PageNodeData = {
       kind: 'page',
       pageId: 'page-1',
@@ -47,10 +48,16 @@ describe('PageNode', () => {
     } as unknown as NodeProps<PageNodeData>;
 
     const queryClient = new QueryClient();
+    const registryValue: PageRouteRegistryValue = {
+      routes: registryOverrides?.routes ?? [],
+      isRouteAvailable: registryOverrides?.isRouteAvailable ?? (() => true)
+    };
 
     return render(
       <QueryClientProvider client={queryClient}>
-        <PageNode {...props} />
+        <PageRouteRegistryProvider value={registryValue}>
+          <PageNode {...props} />
+        </PageRouteRegistryProvider>
       </QueryClientProvider>
     );
   };
@@ -79,5 +86,18 @@ describe('PageNode', () => {
 
     expect(await screen.findByText('Docs')).toBeInTheDocument();
     expect(await screen.findByText('/docs')).toBeInTheDocument();
+  });
+
+  it('prevents editing to a duplicate route', async () => {
+    const registrySpy = jest.fn((route: string) => route !== 'docs');
+    renderPageNode(undefined, { routes: ['docs'], isRouteAvailable: registrySpy });
+
+    fireEvent.click(screen.getByText('Edit'));
+    fireEvent.change(screen.getByLabelText(/Name/i), { target: { value: 'Docs' } });
+    fireEvent.change(screen.getByLabelText(/Route/i), { target: { value: 'docs' } });
+    fireEvent.click(screen.getByRole('button', { name: /Save changes/i }));
+
+    expect(projectPagesApi.update).not.toHaveBeenCalled();
+    expect(await screen.findByText('Route /docs already exists')).toBeInTheDocument();
   });
 });
