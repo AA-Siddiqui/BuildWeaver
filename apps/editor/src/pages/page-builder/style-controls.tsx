@@ -756,6 +756,41 @@ type SharedFields = ReturnType<typeof createSharedFields> & PropertySearchFieldM
 export type StyleFieldKey = keyof SharedStyleFields;
 export type StyleFieldValues = Partial<Record<StyleFieldKey, DynamicBindingValue>>;
 
+const ZERO_SPACING = '0px' as const;
+export const STYLELESS_TEXT_COLOR = '#000000';
+export const STYLELESS_BACKGROUND_COLOR = '#FFFFFF';
+const STYLELESS_BORDER_COLOR = '#000000';
+
+export const STYLELESS_STYLE_DEFAULTS: StyleFieldValues = {
+  layoutDisplay: '',
+  layoutDirection: '',
+  layoutWrap: '',
+  justifyContent: '',
+  alignItems: '',
+  gap: ZERO_SPACING,
+  position: '',
+  textAlign: '',
+  fontSize: '',
+  fontWeight: '',
+  lineHeight: '',
+  width: '',
+  maxWidth: '',
+  minHeight: '',
+  margin: ZERO_SPACING,
+  marginX: ZERO_SPACING,
+  marginY: ZERO_SPACING,
+  padding: ZERO_SPACING,
+  paddingX: ZERO_SPACING,
+  paddingY: ZERO_SPACING,
+  borderRadius: ZERO_SPACING,
+  borderWidth: '',
+  boxShadow: '',
+  opacity: '1',
+  textColor: STYLELESS_TEXT_COLOR,
+  backgroundColor: STYLELESS_BACKGROUND_COLOR,
+  borderColor: STYLELESS_BORDER_COLOR
+};
+
 export type RenderControlValue = DynamicBindingValue | string | boolean | null | undefined;
 
 export type StyleableProps<T extends Record<string, unknown>> = T & StyleFieldValues & {
@@ -766,6 +801,23 @@ export type StyleableProps<T extends Record<string, unknown>> = T & StyleFieldVa
 };
 
 export const STYLE_FIELD_KEYS = Object.keys(createSharedStyleFields([])) as StyleFieldKey[];
+
+export const applyStylelessDefaults = <Props extends StyleableProps<Record<string, unknown>>>(
+  componentName: string,
+  props: Partial<Props>
+): Partial<Props> => {
+  const merged = {
+    ...(STYLELESS_STYLE_DEFAULTS as Partial<Props>),
+    ...(props ?? {})
+  };
+  const overriddenStyleKeys = Object.keys(props ?? {}).filter((key) => STYLE_FIELD_KEYS.includes(key as StyleFieldKey));
+  logStyleControlEvent('Applied styleless defaults', {
+    component: componentName,
+    overriddenStyleKeys,
+    totalStyleKeys: STYLE_FIELD_KEYS.length
+  });
+  return merged;
+};
 
 export const withStyleFields = <T extends Record<string, Field>>(fields: T, bindingOptions: BindingOption[]): T & SharedFields => ({
   [PROPERTY_SEARCH_FIELD_KEY]: createPropertySearchField(),
@@ -862,7 +914,11 @@ export const createInlineStyle = (
   assign('boxShadow', read('boxShadow'));
   assign('opacity', read('opacity') as CSSProperties['opacity']);
 
-  if (borderWidthValue && !style.borderStyle) {
+  const hasVisibleBorderWidth = Boolean(
+    borderWidthValue && !/^0(px)?$/i.test(borderWidthValue.trim())
+  );
+
+  if (hasVisibleBorderWidth && !style.borderStyle) {
     style.borderStyle = 'solid';
   }
 

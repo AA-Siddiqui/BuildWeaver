@@ -2,6 +2,7 @@ import { render, screen } from '@testing-library/react';
 import type { ScalarValue } from '@buildweaver/libs';
 import { createDynamicBindingState, resolvePropertyPathValue } from './dynamic-binding';
 import { createPageBuilderConfig, mergeSectionBackgrounds } from './builder-config';
+import { STYLELESS_STYLE_DEFAULTS, type StyleFieldKey } from './style-controls';
 import {
   LIST_SCOPE_BINDING_PREFIX,
   projectListSlotPropertyPath,
@@ -41,6 +42,29 @@ describe('mergeSectionBackgrounds', () => {
     expect(merged.backgroundImage).toBe(`url(${backgroundUrl})`);
     expect(merged.backgroundSize).toBe('cover');
     expect(merged.backgroundPosition).toBe('center');
+  });
+});
+
+describe('styleless default propagation', () => {
+  it('applies zeroed css defaults to every registered component', () => {
+    const config = createPageBuilderConfig({
+      bindingOptions: [],
+      resolveBinding: (text) => text ?? ''
+    });
+    const components = config.components ?? {};
+    const styleEntries = Object.entries(STYLELESS_STYLE_DEFAULTS) as Array<[
+      StyleFieldKey,
+      (typeof STYLELESS_STYLE_DEFAULTS)[StyleFieldKey]
+    ]>;
+    Object.entries(components).forEach(([, component]) => {
+      const defaults = (component.defaultProps ?? {}) as Record<string, unknown>;
+      styleEntries.forEach(([styleKey, expectedValue]) => {
+        expect(defaults[styleKey]).toBe(
+          expectedValue
+        );
+      });
+      expect(component.defaultProps).toBeDefined();
+    });
   });
 });
 

@@ -2,9 +2,11 @@ import type { Config, Field } from '@measured/puck';
 import type { CSSProperties, ReactNode } from 'react';
 import type { ScalarValue } from '@buildweaver/libs';
 import {
+  applyStylelessDefaults,
   buildAttributeProps,
   createInlineStyle,
   logStyleControlEvent,
+  STYLELESS_STYLE_DEFAULTS,
   splitStyleProps,
   withStyleFields,
   type StyleableProps
@@ -451,12 +453,10 @@ export const createPageBuilderConfig = ({ bindingOptions, resolveBinding, resolv
     Heading: {
       label: 'Heading',
       fields: headingFields(bindingOptions, enhanceFields),
-      defaultProps: {
+      defaultProps: applyStylelessDefaults<HeadingProps>('Heading', {
         content: 'Design with confidence',
-        size: 'h2',
-        fontSize: '2.25rem',
-        fontWeight: '600'
-      },
+        size: 'h2'
+      }),
       render: (props) => {
         const { styleProps, rest } = splitStyleProps(props);
         const { content, size = 'h2', bindingId, customAttributes, customCss, id, renderWhen } = rest as HeadingProps;
@@ -482,10 +482,9 @@ export const createPageBuilderConfig = ({ bindingOptions, resolveBinding, resolv
     Paragraph: {
       label: 'Paragraph',
       fields: paragraphFields(bindingOptions, enhanceFields),
-      defaultProps: {
-        content: 'Craft modern apps visually and let BuildWeaver handle the scaffolding.',
-        textColor: '#4B5563'
-      },
+      defaultProps: applyStylelessDefaults<ParagraphProps>('Paragraph', {
+        content: 'Craft modern apps visually and let BuildWeaver handle the scaffolding.'
+      }),
       render: (props) => {
         const { styleProps, rest } = splitStyleProps(props);
         const { content, bindingId, customAttributes, customCss, id, renderWhen } = rest as ParagraphProps;
@@ -506,13 +505,10 @@ export const createPageBuilderConfig = ({ bindingOptions, resolveBinding, resolv
     Button: {
       label: 'Button',
       fields: buttonFields(bindingOptions, enhanceFields),
-      defaultProps: {
+      defaultProps: applyStylelessDefaults<ButtonProps>('Button', {
         label: 'Primary action',
-        variant: 'primary',
-        paddingX: '16px',
-        paddingY: '12px',
-        borderRadius: '12px'
-      },
+        variant: 'primary'
+      }),
       render: (props) => {
         const { styleProps, rest } = splitStyleProps(props);
         const { label, variant = 'primary', bindingId, href, customAttributes, customCss, id, renderWhen } = rest as ButtonProps;
@@ -552,12 +548,7 @@ export const createPageBuilderConfig = ({ bindingOptions, resolveBinding, resolv
     },
     Section: {
       label: 'Section',
-      defaultProps: {
-        padding: '48px',
-        borderRadius: '12px',
-        backgroundColor: '#FFFFFF',
-        gap: '24px'
-      },
+      defaultProps: applyStylelessDefaults<SectionProps>('Section', {}),
       fields: enhanceFields({
         eyebrow: createDynamicTextField({ fieldKey: 'eyebrow', bindingOptions, label: 'Eyebrow', placeholder: 'Product update' }),
         heading: createDynamicTextField({ fieldKey: 'heading', bindingOptions, label: 'Heading', placeholder: 'Hero title' }),
@@ -613,12 +604,10 @@ export const createPageBuilderConfig = ({ bindingOptions, resolveBinding, resolv
     },
     Columns: {
       label: 'Columns',
-      defaultProps: {
+      defaultProps: applyStylelessDefaults<ColumnsProps>('Columns', {
         layout: 'equal',
-        stackAt: 'md',
-        layoutDisplay: 'grid',
-        gap: '24px'
-      },
+        stackAt: 'md'
+      }),
       fields: enhanceFields({
         layout: createDynamicSelectField({
           fieldKey: 'layout',
@@ -682,16 +671,13 @@ export const createPageBuilderConfig = ({ bindingOptions, resolveBinding, resolv
     },
     Conditional: {
       label: 'Conditional',
-      defaultProps: {
+      defaultProps: applyStylelessDefaults<ConditionalProps>('Conditional', {
         activeCaseKey: 'primary',
         cases: [
           { caseKey: 'primary', label: 'Primary view' },
           { caseKey: 'alternate', label: 'Alternate view' }
-        ],
-        padding: '24px',
-        borderRadius: '12px',
-        backgroundColor: '#FFFFFF'
-      },
+        ]
+      }),
       fields: enhanceFields({
         activeCaseKey: createDynamicSelectField({
           fieldKey: 'activeCaseKey',
@@ -815,10 +801,9 @@ export const createPageBuilderConfig = ({ bindingOptions, resolveBinding, resolv
     },
     Image: {
       label: 'Image',
-      defaultProps: {
-        src: 'https://placehold.co/800x500/FFF7E0/2B2B2B?text=Image',
-        borderRadius: '12px'
-      },
+      defaultProps: applyStylelessDefaults<ImageProps>('Image', {
+        src: 'https://placehold.co/800x500/FFF7E0/2B2B2B?text=Image'
+      }),
       fields: enhanceFields({
         src: createDynamicTextField({ fieldKey: 'src', bindingOptions, label: 'Source URL', placeholder: 'https://...' }),
         alt: createDynamicTextField({ fieldKey: 'alt', bindingOptions, label: 'Alt text' }),
@@ -883,12 +868,7 @@ export const createPageBuilderConfig = ({ bindingOptions, resolveBinding, resolv
     },
     Card: {
       label: 'Card',
-      defaultProps: {
-        padding: '32px',
-        borderRadius: '16px',
-        backgroundColor: '#FFFFFF',
-        boxShadow: '0 20px 45px rgba(15, 23, 42, 0.08)'
-      },
+      defaultProps: applyStylelessDefaults<CardProps>('Card', {}),
       fields: enhanceFields({
         eyebrow: createDynamicTextField({ fieldKey: 'eyebrow', bindingOptions, label: 'Eyebrow' }),
         heading: createDynamicTextField({ fieldKey: 'heading', bindingOptions, label: 'Heading' }),
@@ -946,11 +926,10 @@ export const createPageBuilderConfig = ({ bindingOptions, resolveBinding, resolv
     },
     List: {
       label: 'List',
-      defaultProps: {
+      defaultProps: applyStylelessDefaults<ListProps>('List', {
         variant: 'bullet',
-        gap: '12px',
         renderMode: 'builtIn'
-      },
+      }),
       fields: enhanceFields({
         variant: createDynamicSelectField({
           fieldKey: 'variant',
@@ -1174,11 +1153,7 @@ export const createPageBuilderConfig = ({ bindingOptions, resolveBinding, resolv
     },
     Divider: {
       label: 'Divider',
-      defaultProps: {
-        marginY: '24px',
-        borderColor: 'rgba(15, 23, 42, 0.08)',
-        borderWidth: '1px'
-      },
+      defaultProps: applyStylelessDefaults<StyleableProps<Record<string, never>>>('Divider', {}),
       fields: enhanceFields({}),
       render: (props) => {
         const { styleProps, rest } = splitStyleProps(props);
@@ -1197,9 +1172,9 @@ export const createPageBuilderConfig = ({ bindingOptions, resolveBinding, resolv
     },
     Spacer: {
       label: 'Spacer',
-      defaultProps: {
+      defaultProps: applyStylelessDefaults<SpacerProps>('Spacer', {
         height: '48px'
-      },
+      }),
       fields: enhanceFields({
         height: createDynamicSelectField({
           fieldKey: 'height',
@@ -1231,6 +1206,11 @@ export const createPageBuilderConfig = ({ bindingOptions, resolveBinding, resolv
       }
     }
   };
+
+  logRenderControlEvent('Page builder config initialized with styleless defaults', {
+    componentCount: Object.keys(components).length,
+    stylelessKeys: Object.keys(STYLELESS_STYLE_DEFAULTS)
+  });
 
   return {
     categories: {

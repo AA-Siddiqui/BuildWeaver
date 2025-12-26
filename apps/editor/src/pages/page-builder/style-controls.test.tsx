@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import {
+  applyStylelessDefaults,
   buildAttributeProps,
   createDefaultGradientConfig,
   createInlineStyle,
@@ -9,7 +10,9 @@ import {
   parseGradientValue,
   splitStyleProps,
   stringifyGradientConfig,
-  withStyleFields
+  STYLELESS_STYLE_DEFAULTS,
+  withStyleFields,
+  type StyleableProps
 } from './style-controls';
 import type { BindingOption } from './dynamic-binding';
 import { PROPERTY_SEARCH_FIELD_KEY, resetPropertySearchState } from './property-search';
@@ -100,6 +103,21 @@ describe('style-controls helpers', () => {
     const parsed = parseGradientValue(gradient);
     expect(parsed).not.toBeNull();
     expect(parsed?.stops[0]?.color).toContain('rgba(17, 24, 39, 0.5)');
+  });
+
+  it('applies styleless defaults with informative logging', () => {
+    type EmptyProps = StyleableProps<{ foo?: string }>;
+    const consoleSpy = jest.spyOn(console, 'info').mockImplementation(() => {});
+    const defaults = applyStylelessDefaults<EmptyProps>('TestComponent', { padding: '12px' });
+    expect(defaults.margin).toBe(STYLELESS_STYLE_DEFAULTS.margin);
+    expect(defaults.backgroundColor).toBe(STYLELESS_STYLE_DEFAULTS.backgroundColor);
+    expect(defaults.textColor).toBe(STYLELESS_STYLE_DEFAULTS.textColor);
+    expect(defaults.padding).toBe('12px');
+    expect(consoleSpy).toHaveBeenCalledWith(
+      expect.stringContaining('[PageBuilder:StyleControls]'),
+      expect.objectContaining({ component: 'TestComponent' })
+    );
+    consoleSpy.mockRestore();
   });
 });
 
