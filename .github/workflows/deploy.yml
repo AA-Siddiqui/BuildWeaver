@@ -13,7 +13,6 @@ jobs:
       ACR_NAME: buildweaverapi
       CONTAINER_APP_ENV: BuildWeaver-API-Env
       CONTAINER_APP_NAME: buildweaver-api
-      LOCATION: southeastasia
       IMAGE_TAG: ${{ github.sha }}
 
     steps:
@@ -35,20 +34,48 @@ jobs:
 
       - name: Deploy to Azure Container App
         run: |
-          az containerapp create \
-            --name $CONTAINER_APP_NAME \
-            --resource-group $RESOURCE_GROUP \
-            --environment $CONTAINER_APP_ENV \
-            --image $ACR_NAME.azurecr.io/$CONTAINER_APP_NAME:$IMAGE_TAG \
-            --target-port 3000 \
-            --ingress external \
-            --env-vars DATABASE_URL="${{secrets.DATABASE_URL}}" \
-                      VITE_API_BASE_URL="${{secrets.VITE_API_BASE_URL}}" \
-                      PORT="3000" \
-                      EDITOR_ORIGIN="${{secrets.EDITOR_ORIGIN}}" \
-                      BCRYPT_ROUNDS="${{secrets.BCRYPT_ROUNDS}}" \
-                      JWT_SECRET="${{secrets.JWT_SECRET}}" \
-            --min-replicas 1 \
-            --max-replicas 1 \
-            --cpu 0.5 \
-            --memory 1.0Gi
+          if az containerapp show \
+            --name "$CONTAINER_APP_NAME" \
+            --resource-group "$RESOURCE_GROUP" \
+            >/dev/null 2>&1; then
+
+            az containerapp update \
+              --name "$CONTAINER_APP_NAME" \
+              --resource-group "$RESOURCE_GROUP" \
+              --image "$ACR_NAME.azurecr.io/$CONTAINER_APP_NAME:$IMAGE_TAG"
+              
+          else
+
+            az containerapp create \
+              --name $CONTAINER_APP_NAME \
+              --resource-group $RESOURCE_GROUP \
+              --environment $CONTAINER_APP_ENV \
+              --image $ACR_NAME.azurecr.io/$CONTAINER_APP_NAME:$IMAGE_TAG \
+              --target-port 3000 \
+              --ingress external \
+              --env-vars DATABASE_URL="${{secrets.DATABASE_URL}}" \
+                        VITE_API_BASE_URL="${{secrets.VITE_API_BASE_URL}}" \
+                        PORT="3000" \
+                        EDITOR_ORIGIN="${{secrets.EDITOR_ORIGIN}}" \
+                        BCRYPT_ROUNDS="${{secrets.BCRYPT_ROUNDS}}" \
+                        JWT_SECRET="${{secrets.JWT_SECRET}}" \
+              --min-replicas 1 \
+              --max-replicas 1 \
+              --cpu 0.5 \
+              --memory 1.0Gi
+              
+          fi
+      
+      - name: "Delete all images except current commit"
+        run: |
+          az acr repository show-tags \
+            --name "$ACR_NAME" \
+            --repository "$CONTAINER_APP_NAME" \
+            --output tsv | \
+          grep -v "^$IMAGE_TAG$" | \
+          while read tag; do
+            az acr repository delete \
+              --name "$ACR_NAME" \
+              --image "$CONTAINER_APP_NAME:$tag" \
+              --yes
+          done
