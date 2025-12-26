@@ -45,6 +45,7 @@ import { projectGraphQueryKey, invalidateProjectGraphCache } from '../lib/query-
 import { SnapshotHistory } from '../lib/snapshotHistory';
 import { processEditorShortcut } from '../lib/editorShortcuts';
 import { useDeleteNodesShortcut } from '../hooks/useDeleteNodesShortcut';
+import { useNodePaletteVisibility } from '../hooks/useNodePaletteVisibility';
 import { LogicNavigationProvider } from '../components/logic/LogicNavigationContext';
 import { PageRouteRegistryProvider } from '../components/logic/PageRouteRegistryContext';
 import { deriveDefaultPageName, normalizeRouteSegment } from '../lib/routes';
@@ -173,6 +174,10 @@ const LogicEditorView = () => {
   );
   const nodeDragHistoryRef = useRef(new DragHistoryBuffer<GraphSnapshot>());
   const pendingDragFlushRef = useRef(false);
+  const { isVisible: isNodePaletteVisible, toggle: toggleNodePaletteVisibility } = useNodePaletteVisibility({
+    projectId,
+    initialVisible: true
+  });
 
   const flushDragSnapshot = useCallback(() => {
     nodeDragHistoryRef.current.end((snapshot, context) => {
@@ -1090,6 +1095,19 @@ const LogicEditorView = () => {
     return `Project ${projectId}`;
   }, [projectId]);
 
+  const paletteWrapperStyle = useMemo(
+    () => ({ width: isNodePaletteVisible ? '18rem' : 0 }),
+    [isNodePaletteVisible]
+  );
+
+  const paletteInnerClassName = useMemo(
+    () =>
+      `h-full w-72 transition-transform duration-[250ms] ease-in-out will-change-transform ${
+        isNodePaletteVisible ? 'translate-x-0' : '-translate-x-full'
+      }`,
+    [isNodePaletteVisible]
+  );
+
   const handleNavigateToBuilder = useCallback(
     async (pageId: string) => {
       if (!projectId) {
@@ -1121,119 +1139,152 @@ const LogicEditorView = () => {
 
   return (
     <>
-      <div className="flex h-screen">
-      <LogicNodePalette
-        onAddNode={handlePaletteAdd}
-        userFunctions={functions.map((fn) => ({ id: fn.id, name: fn.name, returnsValue: fn.returnsValue }))}
-        onCreateFunction={handleCreateFunction}
-        onEditFunction={handleEditFunction}
-        onDeleteFunction={handleDeleteFunction}
-        onAddFunctionNode={(functionId) => handleAddFunctionNode(functionId)}
-        pageRoutes={knownPageRoutes}
-        isPageRoutesLoading={pagesQuery.isLoading}
-        pageRoutesError={pageRoutesErrorMessage || undefined}
-      />
-      <div className="flex flex-1 flex-col">
-        <header className="flex items-center justify-between border-b border-white/5 bg-bw-ink/80 px-6 py-4 text-white">
-          <div>
-            <p className="text-xs uppercase tracking-[0.3em] text-bw-amber">Logic editor</p>
-            <p className="text-lg font-semibold">{headerContent}</p>
+      <div className="flex h-screen overflow-hidden">
+        <div
+          className="relative shrink-0 overflow-hidden transition-[width] duration-[250ms] ease-in-out"
+          style={paletteWrapperStyle}
+          aria-hidden={!isNodePaletteVisible}
+          data-testid="node-palette-wrapper"
+        >
+          <div className={paletteInnerClassName}>
+            <LogicNodePalette
+              onAddNode={handlePaletteAdd}
+              userFunctions={functions.map((fn) => ({ id: fn.id, name: fn.name, returnsValue: fn.returnsValue }))}
+              onCreateFunction={handleCreateFunction}
+              onEditFunction={handleEditFunction}
+              onDeleteFunction={handleDeleteFunction}
+              onAddFunctionNode={(functionId) => handleAddFunctionNode(functionId)}
+              pageRoutes={knownPageRoutes}
+              isPageRoutesLoading={pagesQuery.isLoading}
+              pageRoutesError={pageRoutesErrorMessage || undefined}
+            />
           </div>
-          <div className="flex items-center gap-3 text-sm">
-            <button
-              type="button"
-              onClick={deleteSelection}
-              disabled={selectedNodeIds.length === 0}
-              className="rounded-xl border border-white/20 px-4 py-2 text-bw-platinum transition hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              Delete selection
-            </button>
-            {feedback && <span className="text-bw-platinum/70">{feedback}</span>}
-            <button
-              type="button"
-              onClick={handleSave}
-              disabled={!hasUnsavedChanges || isSaving}
-              className="rounded-xl bg-bw-sand px-4 py-2 font-semibold text-bw-ink transition hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {saveMutation.isPending ? 'Saving…' : 'Save flow'}
-            </button>
-          </div>
-        </header>
-        <div className="relative flex-1">
-          {isLoading && (
-            <div className="absolute inset-0 z-10 flex items-center justify-center bg-bw-ink/80 text-sm text-bw-platinum/70">
-              Loading graph…
+        </div>
+        <div className="flex flex-1 flex-col">
+          <header className="flex items-center justify-between border-b border-white/5 bg-bw-ink/80 px-6 py-4 text-white">
+            <div>
+              <p className="text-xs uppercase tracking-[0.3em] text-bw-amber">Logic editor</p>
+              <p className="text-lg font-semibold">{headerContent}</p>
             </div>
-          )}
-          {graphQuery.isError && !isLoading && (
-            <div className="absolute inset-0 z-10 flex items-center justify-center bg-bw-ink/80 text-sm text-red-300">
-              {(graphQuery.error as Error)?.message ?? 'Unable to load graph'}
+            <div className="flex items-center gap-3 text-sm">
+              <button
+                type="button"
+                onClick={() => toggleNodePaletteVisibility('header-control')}
+                aria-pressed={isNodePaletteVisible}
+                aria-label={isNodePaletteVisible ? 'Hide node palette sidebar' : 'Show node palette sidebar'}
+                data-testid="toggle-node-palette"
+                className="rounded-xl border border-white/15 bg-white/5 px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-bw-platinum/90 transition hover:-translate-y-0.5"
+                title={isNodePaletteVisible ? 'Hide node palette' : 'Show node palette'}
+              >
+                {isNodePaletteVisible ? 'Hide Sidebar' : 'Show Sidebar'}
+              </button>
+              <button
+                type="button"
+                onClick={deleteSelection}
+                disabled={selectedNodeIds.length === 0}
+                className="rounded-xl border border-white/20 px-4 py-2 text-bw-platinum transition hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                Delete selection
+              </button>
+              {feedback && <span className="text-bw-platinum/70">{feedback}</span>}
+              <button
+                type="button"
+                onClick={handleSave}
+                disabled={!hasUnsavedChanges || isSaving}
+                className="rounded-xl bg-bw-sand px-4 py-2 font-semibold text-bw-ink transition hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {saveMutation.isPending ? 'Saving…' : 'Save flow'}
+              </button>
             </div>
-          )}
-          <div ref={reactFlowWrapper} className="relative h-full">
-            <PreviewResolverProvider resolver={previewResolver}>
-              <PageRouteRegistryProvider value={pageRouteRegistryValue}>
-                <LogicNavigationProvider value={{ openPageBuilder: handleNavigateToBuilder }}>
-                  <FunctionRegistryProvider functions={functions}>
-                    <LogicEdgeActionsProvider value={edgeActions}>
-                      <ReactFlow
-                      nodes={nodes}
-                      edges={edges}
-                      nodeTypes={nodeTypes}
-                      edgeTypes={edgeTypes}
-                      defaultEdgeOptions={{ type: 'severable' }}
-                      fitView
-                      onNodesChange={handleNodesChange}
-                      onEdgesChange={handleEdgesChange}
-                      onConnect={handleConnect}
-                      isValidConnection={isHandleAvailable}
-                      onDrop={handleDrop}
-                      onDragOver={handleDragOver}
-                      onSelectionChange={handleSelectionChange}
-                      panOnDrag
-                      panOnScroll
-                      zoomOnScroll
-                      connectionLineStyle={connectionLineStyle}
-                    >
-                      <MiniMap pannable zoomable className="!bg-bw-ink/80" />
-                      <Controls />
-                        <Background gap={16} color="#ffffff33" />
-                      </ReactFlow>
-                    </LogicEdgeActionsProvider>
-                  </FunctionRegistryProvider>
-                </LogicNavigationProvider>
-              </PageRouteRegistryProvider>
-            </PreviewResolverProvider>
-            <div className="pointer-events-none absolute inset-0">
-              {edgeCutGesture && (
-                <svg className="h-full w-full" data-testid="edge-cut-overlay">
-                  <line
-                    x1={edgeCutGesture.startScreen.x}
-                    y1={edgeCutGesture.startScreen.y}
-                    x2={edgeCutGesture.currentScreen.x}
-                    y2={edgeCutGesture.currentScreen.y}
-                    stroke="#D34E4E"
-                    strokeWidth={2}
-                    strokeDasharray="6 4"
+          </header>
+          <div className="relative flex-1">
+            {!isNodePaletteVisible && (
+              <div className="pointer-events-none absolute left-4 top-4 z-20">
+                <button
+                  type="button"
+                  onClick={() => toggleNodePaletteVisibility('canvas-floating-control')}
+                  className="pointer-events-auto rounded-full border border-white/20 bg-bw-ink/90 px-4 py-2 text-xs font-semibold text-white shadow-lg transition hover:-translate-y-0.5"
+                  aria-label="Show node palette"
+                  data-testid="floating-node-palette-toggle"
+                >
+                  Show Sidebar
+                </button>
+              </div>
+            )}
+            {isLoading && (
+              <div className="absolute inset-0 z-10 flex items-center justify-center bg-bw-ink/80 text-sm text-bw-platinum/70">
+                Loading graph…
+              </div>
+            )}
+            {graphQuery.isError && !isLoading && (
+              <div className="absolute inset-0 z-10 flex items-center justify-center bg-bw-ink/80 text-sm text-red-300">
+                {(graphQuery.error as Error)?.message ?? 'Unable to load graph'}
+              </div>
+            )}
+            <div ref={reactFlowWrapper} className="relative h-full">
+              <PreviewResolverProvider resolver={previewResolver}>
+                <PageRouteRegistryProvider value={pageRouteRegistryValue}>
+                  <LogicNavigationProvider value={{ openPageBuilder: handleNavigateToBuilder }}>
+                    <FunctionRegistryProvider functions={functions}>
+                      <LogicEdgeActionsProvider value={edgeActions}>
+                        <ReactFlow
+                          nodes={nodes}
+                          edges={edges}
+                          nodeTypes={nodeTypes}
+                          edgeTypes={edgeTypes}
+                          defaultEdgeOptions={{ type: 'severable' }}
+                          fitView
+                          onNodesChange={handleNodesChange}
+                          onEdgesChange={handleEdgesChange}
+                          onConnect={handleConnect}
+                          isValidConnection={isHandleAvailable}
+                          onDrop={handleDrop}
+                          onDragOver={handleDragOver}
+                          onSelectionChange={handleSelectionChange}
+                          panOnDrag
+                          panOnScroll
+                          zoomOnScroll
+                          connectionLineStyle={connectionLineStyle}
+                        >
+                          <MiniMap pannable zoomable className="!bg-bw-ink/80" />
+                          <Controls />
+                          <Background gap={16} color="#ffffff33" />
+                        </ReactFlow>
+                      </LogicEdgeActionsProvider>
+                    </FunctionRegistryProvider>
+                  </LogicNavigationProvider>
+                </PageRouteRegistryProvider>
+              </PreviewResolverProvider>
+              <div className="pointer-events-none absolute inset-0">
+                {edgeCutGesture && (
+                  <svg className="h-full w-full" data-testid="edge-cut-overlay">
+                    <line
+                      x1={edgeCutGesture.startScreen.x}
+                      y1={edgeCutGesture.startScreen.y}
+                      x2={edgeCutGesture.currentScreen.x}
+                      y2={edgeCutGesture.currentScreen.y}
+                      stroke="#D34E4E"
+                      strokeWidth={2}
+                      strokeDasharray="6 4"
+                    />
+                  </svg>
+                )}
+                {marqueeGesture && (
+                  <div
+                    data-testid="marquee-overlay"
+                    className="absolute border border-bw-sand/80 bg-bw-sand/20"
+                    style={{
+                      left: Math.min(marqueeGesture.startScreen.x, marqueeGesture.currentScreen.x),
+                      top: Math.min(marqueeGesture.startScreen.y, marqueeGesture.currentScreen.y),
+                      width: Math.abs(marqueeGesture.startScreen.x - marqueeGesture.currentScreen.x),
+                      height: Math.abs(marqueeGesture.startScreen.y - marqueeGesture.currentScreen.y)
+                    }}
                   />
-                </svg>
-              )}
-              {marqueeGesture && (
-                <div
-                  data-testid="marquee-overlay"
-                  className="absolute border border-bw-sand/80 bg-bw-sand/20"
-                  style={{
-                    left: Math.min(marqueeGesture.startScreen.x, marqueeGesture.currentScreen.x),
-                    top: Math.min(marqueeGesture.startScreen.y, marqueeGesture.currentScreen.y),
-                    width: Math.abs(marqueeGesture.startScreen.x - marqueeGesture.currentScreen.x),
-                    height: Math.abs(marqueeGesture.startScreen.y - marqueeGesture.currentScreen.y)
-                  }}
-                />
-              )}
+                )}
+              </div>
             </div>
           </div>
         </div>
-      </div>
       </div>
       {activeFunction && (
         <FunctionEditorModal
