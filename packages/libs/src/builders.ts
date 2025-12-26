@@ -38,7 +38,16 @@ export interface DummyNodeData {
   sample: DummySampleValue;
 }
 
-export type ArithmeticOperation = 'add' | 'subtract' | 'multiply' | 'divide' | 'modulo' | 'average' | 'min' | 'max';
+export type ArithmeticOperation =
+  | 'add'
+  | 'subtract'
+  | 'multiply'
+  | 'divide'
+  | 'exponent'
+  | 'modulo'
+  | 'average'
+  | 'min'
+  | 'max';
 
 export interface ArithmeticOperand {
   id: string;

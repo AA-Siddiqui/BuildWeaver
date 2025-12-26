@@ -157,12 +157,26 @@ export const evaluateArithmeticPreview = (
     return operand.sampleValue ?? null;
   });
   if (!requireSamples<number>(operandValues)) {
+    const missingOperands = data.operands
+      .map((operand, index) => ({ operand, value: operandValues[index] }))
+      .filter(({ value }) => value === null || value === undefined)
+      .map(({ operand }) => operand.id);
+    logicLogger.warn('Arithmetic preview awaiting operands', {
+      operation: data.operation,
+      missingOperands
+    });
     return {
       state: 'unknown',
       heading: 'Awaiting Inputs',
       summary: 'Provide numeric samples to preview the result.'
     };
   }
+
+  logicLogger.debug('Arithmetic preview inputs ready', {
+    operation: data.operation,
+    operands: operandValues,
+    precision: data.precision
+  });
 
   try {
     const [first, ...rest] = operandValues;
@@ -178,10 +192,43 @@ export const evaluateArithmeticPreview = (
         result = operandValues.reduce((acc, value) => acc * value, 1);
         break;
       case 'divide':
-        result = rest.reduce((acc, value) => (value === 0 ? acc : acc / value), first);
+        result = rest.reduce((acc, value, index) => {
+          if (value === 0) {
+            logicLogger.warn('Division by zero skipped in arithmetic preview', {
+              operation: data.operation,
+              operandId: data.operands[index + 1]?.id
+            });
+            return acc;
+          }
+          return acc / value;
+        }, first);
         break;
+      case 'exponent': {
+        if (rest.length === 0) {
+          logicLogger.warn('Exponent operation missing exponent operand', { operation: data.operation });
+          break;
+        }
+        if (rest.length > 1) {
+          logicLogger.warn('Exponent operation received extra operands', {
+            operation: data.operation,
+            operandCount: operandValues.length
+          });
+        }
+        const exponent = rest[0];
+        result = Math.pow(first, exponent);
+        break;
+      }
       case 'modulo':
-        result = rest.reduce((acc, value) => (value === 0 ? acc : acc % value), first);
+        result = rest.reduce((acc, value, index) => {
+          if (value === 0) {
+            logicLogger.warn('Modulo by zero skipped in arithmetic preview', {
+              operation: data.operation,
+              operandId: data.operands[index + 1]?.id
+            });
+            return acc;
+          }
+          return acc % value;
+        }, first);
         break;
       case 'average':
         result = operandValues.reduce((acc, value) => acc + value, 0) / operandValues.length;
@@ -196,7 +243,24 @@ export const evaluateArithmeticPreview = (
         result = first;
     }
 
+    if (!Number.isFinite(result)) {
+      logicLogger.warn('Arithmetic preview produced a non-finite result', {
+        operation: data.operation,
+        operands: operandValues
+      });
+      return {
+        state: 'error',
+        heading: 'Invalid Result',
+        summary: 'Result is not finite.'
+      };
+    }
+
     const rounded = Number(result.toFixed(data.precision));
+    logicLogger.debug('Arithmetic preview resolved', {
+      operation: data.operation,
+      result: rounded,
+      precision: data.precision
+    });
     return {
       state: 'ready',
       heading: 'Result',
@@ -204,7 +268,10 @@ export const evaluateArithmeticPreview = (
       value: rounded
     };
   } catch (error) {
-    logicLogger.error('Failed to generate arithmetic preview', { error: (error as Error).message });
+    logicLogger.error('Failed to generate arithmetic preview', {
+      error: (error as Error).message,
+      operation: data.operation
+    });
     return {
       state: 'error',
       heading: 'Error',

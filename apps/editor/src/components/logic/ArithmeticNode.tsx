@@ -140,6 +140,7 @@ export const ArithmeticNode = ({ id, data }: NodeProps<ArithmeticNodeData>) => {
             <option value="subtract">Subtract</option>
             <option value="multiply">Multiply</option>
             <option value="divide">Divide</option>
+            <option value="exponent">Exponent</option>
             <option value="modulo">Modulo</option>
             <option value="average">Average</option>
             <option value="min">Min</option>

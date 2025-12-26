@@ -46,4 +46,9 @@ describe('ArithmeticNode component', () => {
     expect(screen.getByText('Divisor')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Add operand/i })).not.toBeInTheDocument();
   });
+
+  it('provides an exponent option in the operation selector', () => {
+    renderNode(baseData);
+    expect(screen.getByRole('option', { name: 'Exponent' })).toBeInTheDocument();
+  });
 });

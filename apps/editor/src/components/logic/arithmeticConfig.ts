@@ -22,6 +22,11 @@ const ARITHMETIC_OPERATION_CONFIG: Record<ArithmeticNodeData['operation'], Arith
   average: DEFAULT_CONFIG,
   min: DEFAULT_CONFIG,
   max: DEFAULT_CONFIG,
+  exponent: {
+    minOperands: 2,
+    maxOperands: 2,
+    labels: ['Base', 'Exponent']
+  },
   modulo: {
     minOperands: 2,
     maxOperands: 2,

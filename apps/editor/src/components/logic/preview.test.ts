@@ -66,6 +66,25 @@ describe('logic previews', () => {
     expect(evaluateArithmeticPreview(arithmetic).state).toBe('unknown');
   });
 
+  it('computes exponent arithmetic previews', () => {
+    const arithmetic: ArithmeticNodeData = {
+      kind: 'arithmetic',
+      label: 'Math',
+      description: 'Exponent',
+      operation: 'exponent',
+      precision: 2,
+      operands: [
+        { id: 'base', label: 'Base', sampleValue: 2 },
+        { id: 'exp', label: 'Exponent', sampleValue: 3 }
+      ]
+    };
+
+    const preview = evaluateArithmeticPreview(arithmetic);
+    expect(preview.state).toBe('ready');
+    expect(preview.summary).toBe('8');
+    expect(preview.value).toBe(8);
+  });
+
   it('handles string concat preview', () => {
     const stringNode: StringNodeData = {
       kind: 'string',

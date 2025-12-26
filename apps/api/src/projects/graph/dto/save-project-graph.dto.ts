@@ -26,6 +26,7 @@ const LOGIC_OPERATIONS = [
   'subtract',
   'multiply',
   'divide',
+  'exponent',
   'modulo',
   'average',
   'min',
