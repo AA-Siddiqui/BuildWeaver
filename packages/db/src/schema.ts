@@ -1,6 +1,12 @@
 import { relations, sql } from 'drizzle-orm';
 import { pgTable, uuid, text, timestamp, jsonb, uniqueIndex } from 'drizzle-orm/pg-core';
-import { PageBuilderState, PageDynamicInput, ProjectGraphSnapshot } from '@buildweaver/libs';
+import {
+  BuilderComponentDefinition,
+  ComponentBindingReference,
+  PageBuilderState,
+  PageDynamicInput,
+  ProjectGraphSnapshot
+} from '@buildweaver/libs';
 
 export const users = pgTable('users', {
   id: uuid('id').defaultRandom().primaryKey(),
@@ -56,6 +62,29 @@ export const projectGraphs = pgTable(
   })
 );
 
+export const projectComponents = pgTable(
+  'project_components',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    projectId: uuid('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    slug: text('slug').notNull(),
+    definition: jsonb('definition').$type<BuilderComponentDefinition>().notNull().default(sql`'{}'::jsonb`),
+    bindingReferences: jsonb('binding_references')
+      .$type<ComponentBindingReference[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow().$onUpdate(() => new Date())
+  },
+  (table) => ({
+    projectSlugUnique: uniqueIndex('project_components_project_slug_idx').on(table.projectId, table.slug),
+    projectNameUnique: uniqueIndex('project_components_project_name_idx').on(table.projectId, table.name)
+  })
+);
+
 export const usersRelations = relations(users, ({ many }) => ({
   projects: many(projects)
 }));
@@ -66,7 +95,8 @@ export const projectsRelations = relations(projects, ({ one, many }) => ({
     references: [users.id]
   }),
   pages: many(projectPages),
-  graph: one(projectGraphs)
+  graph: one(projectGraphs),
+  components: many(projectComponents)
 }));
 
 export const projectPagesRelations = relations(projectPages, ({ one }) => ({
@@ -83,6 +113,13 @@ export const projectGraphsRelations = relations(projectGraphs, ({ one }) => ({
   })
 }));
 
+export const projectComponentsRelations = relations(projectComponents, ({ one }) => ({
+  project: one(projects, {
+    fields: [projectComponents.projectId],
+    references: [projects.id]
+  })
+}));
+
 export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;
 export type Project = typeof projects.$inferSelect;
@@ -91,3 +128,5 @@ export type ProjectPage = typeof projectPages.$inferSelect;
 export type NewProjectPage = typeof projectPages.$inferInsert;
 export type ProjectGraph = typeof projectGraphs.$inferSelect;
 export type NewProjectGraph = typeof projectGraphs.$inferInsert;
+export type ProjectComponent = typeof projectComponents.$inferSelect;
+export type NewProjectComponent = typeof projectComponents.$inferInsert;

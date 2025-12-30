@@ -17,6 +17,8 @@ export type {
   PageDynamicInput,
   PageBuilderState,
   ProjectGraphSnapshot,
+  ProjectComponentDocument,
+  ComponentBindingReference,
   LogicEditorNodeData,
   LogicEditorNode,
   LogicEditorEdge,

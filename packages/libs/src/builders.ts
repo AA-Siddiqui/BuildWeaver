@@ -281,3 +281,23 @@ export interface PageDocument {
   createdAt: string;
   updatedAt: string;
 }
+
+export type BuilderComponentDefinition = Record<string, unknown>;
+
+export type ComponentBindingReference = {
+  bindingId: string;
+  propertyPath?: string[];
+  componentId?: string;
+  componentType?: string;
+};
+
+export interface ProjectComponentDocument {
+  id: string;
+  projectId: string;
+  name: string;
+  slug: string;
+  definition: BuilderComponentDefinition;
+  bindingReferences: ComponentBindingReference[];
+  createdAt: string;
+  updatedAt: string;
+}

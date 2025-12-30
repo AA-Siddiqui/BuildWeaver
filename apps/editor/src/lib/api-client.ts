@@ -1,6 +1,13 @@
 import { useAuthStore } from '../stores/auth-store';
 import { AuthUser, Project } from '../types/api';
-import type { PageBuilderState, PageDocument, PageDynamicInput, ProjectGraphSnapshot } from '../types/api';
+import type {
+  ComponentBindingReference,
+  PageBuilderState,
+  PageDocument,
+  PageDynamicInput,
+  ProjectComponentDocument,
+  ProjectGraphSnapshot
+} from '../types/api';
 
 interface ApiSuccess<T> {
   success: true;
@@ -121,4 +128,23 @@ export const projectPagesApi = {
       method: 'PUT',
       body: serialize(body)
     })
+};
+
+type CreateComponentPayload = {
+  name: string;
+  slug?: string;
+  definition: Record<string, unknown>;
+  bindingReferences?: ComponentBindingReference[];
+};
+
+export const projectComponentsApi = {
+  list: (projectId: string) =>
+    apiFetch<{ components: ProjectComponentDocument[] }>(`/projects/${projectId}/components`),
+  create: (projectId: string, body: CreateComponentPayload) =>
+    apiFetch<{ component: ProjectComponentDocument }>(`/projects/${projectId}/components`, {
+      method: 'POST',
+      body: serialize(body)
+    }),
+  get: (projectId: string, componentId: string) =>
+    apiFetch<{ component: ProjectComponentDocument }>(`/projects/${projectId}/components/${componentId}`)
 };

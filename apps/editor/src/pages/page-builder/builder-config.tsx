@@ -1,6 +1,6 @@
-import type { Config, Field } from '@measured/puck';
-import type { CSSProperties, ReactNode } from 'react';
-import type { ScalarValue } from '@buildweaver/libs';
+import type { ComponentData, Config, Field } from '@measured/puck';
+import { Fragment, type CSSProperties, type ReactNode } from 'react';
+import type { ProjectComponentDocument, ScalarValue } from '@buildweaver/libs';
 import {
   applyStylelessDefaults,
   buildAttributeProps,
@@ -31,11 +31,13 @@ import {
   pushListSlotRuntimeContext,
   type ListSlotContextValue
 } from './list-slot-context';
+import { normalizeComponentDefinition } from './component-library';
 
 type BuilderConfigParams = {
   bindingOptions: BindingOption[];
   resolveBinding: BindingResolver;
   resolveBindingValue?: (bindingId?: string, propertyPath?: string[]) => ScalarValue | undefined;
+  componentLibrary?: ProjectComponentDocument[];
 };
 
 type SlotRenderer = ((props?: { className?: string; minEmptyHeight?: number }) => ReactNode) | undefined;
@@ -169,7 +171,7 @@ type ConditionalProps = StyleableProps<{
   cases?: ConditionalCaseConfig[];
 }>;
 
-const COMPONENT_ORDER = [
+const BASE_COMPONENT_ORDER = [
   'Section',
   'Columns',
   'Conditional',
@@ -182,8 +184,6 @@ const COMPONENT_ORDER = [
   'Divider',
   'Spacer'
 ] as const;
-
-const allowAllComponents = COMPONENT_ORDER.filter(Boolean);
 
 const renderSlot = (slot?: SlotRenderer, emptyLabel = 'Drag components here', minEmptyHeight = 60) => {
   if (slot) {
@@ -357,7 +357,12 @@ const buttonFields = (
     href: createDynamicTextField({ fieldKey: 'href', bindingOptions, label: 'Href', placeholder: 'https://example.com' })
   });
 
-export const createPageBuilderConfig = ({ bindingOptions, resolveBinding, resolveBindingValue }: BuilderConfigParams): Config => {
+export const createPageBuilderConfig = ({
+  bindingOptions,
+  resolveBinding,
+  resolveBindingValue,
+  componentLibrary = []
+}: BuilderConfigParams): Config => {
   const enhanceFields = (fields: Record<string, Field>) => withStyleFields(fields, bindingOptions);
   const resolveFieldValue = (
     value: DynamicBindingValue | string | undefined,
@@ -449,6 +454,9 @@ export const createPageBuilderConfig = ({ bindingOptions, resolveBinding, resolv
     }
     return isVisible;
   };
+  const libraryComponentKeys = componentLibrary.map((component) => `Library:${component.slug}`);
+  const allowAllComponents = [...BASE_COMPONENT_ORDER, ...libraryComponentKeys];
+
   const components: Config['components'] = {
     Heading: {
       label: 'Heading',
@@ -1207,6 +1215,108 @@ export const createPageBuilderConfig = ({ bindingOptions, resolveBinding, resolv
     }
   };
 
+  const isComponentDataValue = (value: unknown): value is ComponentData =>
+    Boolean(value && typeof value === 'object' && 'type' in (value as Record<string, unknown>) && 'props' in (value as Record<string, unknown>));
+
+  const renderLibraryContent = (content: unknown, trail: Set<string>): ReactNode => {
+    if (!content) {
+      return null;
+    }
+    const entries = Array.isArray(content)
+      ? content
+      : content instanceof Map
+        ? Array.from(content.values())
+        : [];
+    return entries
+      .filter((entry): entry is ComponentData => isComponentDataValue(entry))
+      .map((entry, index) => <Fragment key={`library-child-${index}`}>{renderLibraryComponentNode(entry, new Set(trail))}</Fragment>);
+  };
+
+  const renderLibraryComponentNode = (node: ComponentData | undefined, trail: Set<string> = new Set()): ReactNode => {
+    if (!node) {
+      return null;
+    }
+    const typeKey = node.type as string;
+    const guardKey = `${typeKey}:${(node.props as Record<string, unknown>)?.id ?? ''}`;
+    if (trail.has(guardKey)) {
+      logRenderControlEvent('Library render prevented due to recursion', { typeKey, guardKey });
+      return null;
+    }
+    trail.add(guardKey);
+    const definition = components[typeKey];
+    if (!definition?.render) {
+      logRenderControlEvent('Library component missing renderer', { typeKey });
+      return null;
+    }
+    const preparedProps: Record<string, unknown> = { ...(node.props ?? {}) };
+    const fieldDefinitions = definition.fields ?? {};
+    Object.entries(fieldDefinitions).forEach(([fieldKey, field]) => {
+      const currentValue = preparedProps[fieldKey];
+      if (!currentValue) {
+        return;
+      }
+      if (field.type === 'slot') {
+        preparedProps[fieldKey] = () => renderLibraryContent(currentValue, trail);
+        return;
+      }
+      if (field.type === 'array' && 'arrayFields' in field && Array.isArray(currentValue)) {
+        preparedProps[fieldKey] = (currentValue as Array<Record<string, unknown>>).map((entry) => {
+          const nextEntry: Record<string, unknown> = { ...entry };
+          Object.entries(field.arrayFields ?? {}).forEach(([childKey, childField]) => {
+            if (childField.type === 'slot' && childKey in nextEntry) {
+              nextEntry[childKey] = () => renderLibraryContent(nextEntry[childKey], trail);
+            }
+          });
+          return nextEntry;
+        });
+      }
+    });
+    return definition.render(preparedProps as Parameters<NonNullable<typeof definition.render>>[0]);
+  };
+
+  componentLibrary.forEach((component) => {
+    const typeKey = `Library:${component.slug}`;
+    const normalizedDefinition = normalizeComponentDefinition(component.definition as ComponentData | undefined);
+    const defaultDefinition = normalizedDefinition ? JSON.parse(JSON.stringify(normalizedDefinition)) : undefined;
+    type LibraryComponentProps = StyleableProps<{
+      definition?: ComponentData;
+      definitionId: string;
+      name: string;
+    }>;
+
+    components[typeKey] = {
+      label: component.name,
+      defaultProps: applyStylelessDefaults<LibraryComponentProps>('LibraryComponent', {
+        definition: defaultDefinition as ComponentData | undefined,
+        definitionId: component.id,
+        name: component.name
+      }),
+      fields: enhanceFields({}),
+      render: (props) => {
+        const { styleProps, rest } = splitStyleProps(props);
+        const { definition, customAttributes, customCss, id, renderWhen, name } = rest as LibraryComponentProps;
+        if (!shouldRenderComponent(typeKey, id, renderWhen)) {
+          return <></>;
+        }
+        const inlineStyle = createInlineStyle(styleProps, resolveStyleValue);
+        const attributeProps = attachNodeIdentity(id, buildAttributeProps(customAttributes));
+        const rendered = renderLibraryComponentNode((definition as ComponentData | undefined) ?? normalizedDefinition, new Set([typeKey]));
+        return (
+          <>
+            <div style={inlineStyle} className="relative" {...attributeProps}>
+              {rendered || (
+                <div className="rounded-lg border border-dashed border-gray-200 bg-gray-50 p-4 text-sm text-gray-600">
+                  Saved component "{name || component.name}" has no previewable content yet.
+                </div>
+              )}
+            </div>
+            {renderScopedCss(id, customCss)}
+          </>
+        );
+      }
+    };
+  });
+
   logRenderControlEvent('Page builder config initialized with styleless defaults', {
     componentCount: Object.keys(components).length,
     stylelessKeys: Object.keys(STYLELESS_STYLE_DEFAULTS)
@@ -1217,7 +1327,15 @@ export const createPageBuilderConfig = ({ bindingOptions, resolveBinding, resolv
       layout: { title: 'Layout', components: ['Section', 'Columns', 'Conditional', 'Divider', 'Spacer'] },
       content: { title: 'Content', components: ['Heading', 'Paragraph', 'Card', 'List'] },
       media: { title: 'Media', components: ['Image'] },
-      actions: { title: 'Actions', components: ['Button'] }
+      actions: { title: 'Actions', components: ['Button'] },
+      ...(libraryComponentKeys.length
+        ? {
+            library: {
+              title: 'Library',
+              components: libraryComponentKeys
+            }
+          }
+        : {})
     },
     components
   } satisfies Config;

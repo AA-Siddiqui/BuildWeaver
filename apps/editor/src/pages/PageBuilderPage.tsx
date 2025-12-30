@@ -7,7 +7,7 @@ import type { ComponentData, Content, Data } from '@measured/puck';
 import '@measured/puck/puck.css';
 import type { PageBuilderState, PageDocument, PageDynamicInput } from '../types/api';
 import type { ScalarValue } from '@buildweaver/libs';
-import { projectGraphApi, projectPagesApi } from '../lib/api-client';
+import { projectComponentsApi, projectGraphApi, projectPagesApi } from '../lib/api-client';
 import { projectGraphQueryKey, invalidateProjectGraphCache } from '../lib/query-helpers';
 import { SnapshotHistory } from '../lib/snapshotHistory';
 import { processEditorShortcut } from '../lib/editorShortcuts';
@@ -23,6 +23,8 @@ import {
   projectListSlotPropertyPath,
   resolveListSlotScopedValue
 } from './page-builder/list-slot-context';
+import { ComponentLibraryProvider, type SaveComponentRequest } from './page-builder/component-library-context';
+import { COMPONENT_ACTIONS_FIELD_KEY } from './page-builder/component-library';
 import { formatScalar } from '../components/logic/preview';
 
 const randomId = () => {
@@ -153,7 +155,7 @@ const summarizeBuilderData = (state?: Data) => ({
   zoneCount: getZoneCount(state?.zones as Record<string, Content> | Map<string, Content> | undefined)
 });
 
-const INTERNAL_PROP_KEYS = new Set<string>([PROPERTY_SEARCH_FIELD_KEY]);
+const INTERNAL_PROP_KEYS = new Set<string>([PROPERTY_SEARCH_FIELD_KEY, COMPONENT_ACTIONS_FIELD_KEY]);
 
 const sanitizeComponentProps = (props: ComponentData['props']) => {
   const cleaned: ComponentData['props'] = { ...props };
@@ -301,6 +303,15 @@ export const PageBuilderPage = () => {
     refetchOnWindowFocus: 'always'
   });
 
+  const componentsQuery = useQuery({
+    queryKey: ['project-components', projectId],
+    queryFn: () => projectComponentsApi.list(projectId!),
+    enabled: Boolean(projectId),
+    staleTime: 0,
+    refetchOnMount: 'always',
+    refetchOnWindowFocus: 'always'
+  });
+
   const hydrateFromPage = useCallback(
     (incomingPage: PageDocument) => {
       const hydratedState = toPuckValue(incomingPage.builderState);
@@ -381,6 +392,16 @@ export const PageBuilderPage = () => {
   }, [graphQuery.error, graphQuery.isError, pageId, projectId]);
 
   useEffect(() => {
+    if (componentsQuery.isError) {
+      logPageBuilderEvent('Failed to load project component library', {
+        pageId,
+        projectId,
+        error: (componentsQuery.error as Error)?.message ?? 'Unknown error'
+      });
+    }
+  }, [componentsQuery.error, componentsQuery.isError, pageId, projectId]);
+
+  useEffect(() => {
     if (graphQuery.isFetching) {
       logPageBuilderEvent('Fetching project graph for live previews', {
         pageId,
@@ -447,6 +468,50 @@ export const PageBuilderPage = () => {
     [dynamicInputs, dynamicPreviewMap]
   );
 
+  const componentLibrary = componentsQuery.data?.components ?? [];
+
+  const saveComponentMutation = useMutation({
+    mutationFn: (request: SaveComponentRequest) => {
+      if (!projectId) {
+        throw new Error('Missing project id');
+      }
+      logPageBuilderEvent('Saving component to project library', {
+        pageId,
+        projectId,
+        targetId: request.targetId,
+        name: request.name,
+        bindings: request.bindingReferences.length
+      });
+      return projectComponentsApi.create(projectId, {
+        name: request.name,
+        definition: request.definition as unknown as Record<string, unknown>,
+        bindingReferences: request.bindingReferences
+      });
+    },
+    onSuccess: async ({ component }) => {
+      logPageBuilderEvent('Component saved to project library', {
+        projectId,
+        componentId: component.id,
+        bindings: component.bindingReferences?.length ?? 0
+      });
+      await queryClient.invalidateQueries({ queryKey: ['project-components', projectId] });
+    },
+    onError: (error: unknown) => {
+      logPageBuilderEvent('Component save failed', {
+        projectId,
+        pageId,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
+  });
+
+  const handleSaveComponent = useCallback(
+    async (request: SaveComponentRequest) => {
+      await saveComponentMutation.mutateAsync(request);
+    },
+    [saveComponentMutation]
+  );
+
   const builderConfig = useMemo(
     () =>
       createPageBuilderConfig({
@@ -492,9 +557,22 @@ export const PageBuilderPage = () => {
           const normalizedPath = projectListSlotPropertyPath(bindingId, propertyPath);
           const rawValue = dynamicPreviewMap.get(bindingId);
           return resolvePropertyPathValue(rawValue, normalizedPath);
-        }
+        },
+        componentLibrary
       }),
-    [bindingOptions, dynamicLabelMap, dynamicPreviewMap]
+    [bindingOptions, componentLibrary, dynamicLabelMap, dynamicPreviewMap]
+  );
+
+  const componentLibraryContextValue = useMemo(
+    () => ({
+      builderState,
+      bindingOptions,
+      componentLibrary,
+      isSavingComponent: saveComponentMutation.isPending,
+      saveComponent: handleSaveComponent,
+      log: (message: string, details?: Record<string, unknown>) => logPageBuilderEvent(message, details)
+    }),
+    [bindingOptions, builderState, componentLibrary, handleSaveComponent, saveComponentMutation.isPending]
   );
 
   const listScopeBindingLookup = useMemo(
@@ -1082,9 +1160,11 @@ export const PageBuilderPage = () => {
           ) : (
             <div className="border border-gray-200 bg-white p-6 shadow-lg">
               {/* Puck only reads the initial data prop, so key forces a remount when server data changes. */}
-              <ListScopeBindingProvider lookup={listScopeBindingLookup}>
-                <Puck key={puckSessionKey} config={builderConfig} data={builderState} onChange={handleBuilderChange} />
-              </ListScopeBindingProvider>
+              <ComponentLibraryProvider value={componentLibraryContextValue}>
+                <ListScopeBindingProvider lookup={listScopeBindingLookup}>
+                  <Puck key={puckSessionKey} config={builderConfig} data={builderState} onChange={handleBuilderChange} />
+                </ListScopeBindingProvider>
+              </ComponentLibraryProvider>
             </div>
           )}
         </div>

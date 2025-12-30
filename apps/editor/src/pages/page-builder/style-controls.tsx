@@ -10,6 +10,8 @@ import {
   type StaticControlRendererProps
 } from './dynamic-field-control';
 import { PropertyFilterGuard, PropertySearchFieldControl, PROPERTY_SEARCH_FIELD_KEY } from './property-search';
+import { ComponentActionsField } from './component-actions-field';
+import { COMPONENT_ACTIONS_FIELD_KEY } from './component-library';
 
 const STYLE_LOG_PREFIX = '[PageBuilder:StyleControls]';
 const ATTRIBUTE_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_.:-]*$/;
@@ -821,6 +823,11 @@ export const applyStylelessDefaults = <Props extends StyleableProps<Record<strin
 
 export const withStyleFields = <T extends Record<string, Field>>(fields: T, bindingOptions: BindingOption[]): T & SharedFields => ({
   [PROPERTY_SEARCH_FIELD_KEY]: createPropertySearchField(),
+  [COMPONENT_ACTIONS_FIELD_KEY]: {
+    type: 'custom',
+    label: 'Component',
+    render: (props) => <ComponentActionsField {...props} />
+  },
   ...fields,
   ...createSharedFields(bindingOptions)
 });
