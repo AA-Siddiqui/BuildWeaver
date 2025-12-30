@@ -1,9 +1,18 @@
 import type { ComponentData, Data } from '@measured/puck';
 import type { ComponentBindingReference } from '@buildweaver/libs';
-import { isDynamicBindingValue } from './dynamic-binding';
+import { isDynamicBindingValue, type DynamicBindingValue } from './dynamic-binding';
 import { PROPERTY_SEARCH_FIELD_KEY } from './property-search';
 
 export const COMPONENT_ACTIONS_FIELD_KEY = '__uiComponentActions';
+
+const COMPONENT_LIBRARY_LOG_PREFIX = '[PageBuilder:ComponentLibrary]';
+
+const logComponentLibraryEvent = (message: string, details?: Record<string, unknown>) => {
+  if (typeof console === 'undefined' || typeof console.info !== 'function') {
+    return;
+  }
+  console.info(`${COMPONENT_LIBRARY_LOG_PREFIX} ${message}`, details ?? '');
+};
 
 const INTERNAL_PROP_KEYS = new Set<string>([PROPERTY_SEARCH_FIELD_KEY, COMPONENT_ACTIONS_FIELD_KEY]);
 
@@ -127,6 +136,38 @@ export const normalizeComponentDefinition = (component: ComponentData | undefine
   return sanitizeComponent(component);
 };
 
+export const buildBindingSignature = (ref: ComponentBindingReference): string => {
+  const path = ref.propertyPath?.join('.') ?? '';
+  const component = ref.componentId ?? '';
+  return `${ref.bindingId}:${path}:${component}`;
+};
+
+type ParameterOverrideValue = DynamicBindingValue | string | undefined;
+
+export const mergeParameterOverrides = (
+  parameters: ComponentBindingReference[],
+  propOverrides: Record<string, unknown> | undefined,
+  existingOverrides: Record<string, ParameterOverrideValue> = {},
+  log = logComponentLibraryEvent
+): Record<string, ParameterOverrideValue> => {
+  const merged: Record<string, ParameterOverrideValue> = { ...existingOverrides };
+  parameters.forEach((parameter) => {
+    const signature = buildBindingSignature(parameter);
+    const candidate = propOverrides?.[signature] as ParameterOverrideValue;
+    if (typeof candidate !== 'undefined') {
+      merged[signature] = candidate;
+      log?.('Parameter override captured from props', { signature });
+      return;
+    }
+    if (signature in merged) {
+      log?.('Parameter override using existing value', { signature });
+    } else {
+      log?.('Parameter override missing; using template default', { signature });
+    }
+  });
+  return merged;
+};
+
 export const collectDynamicBindings = (component: ComponentData | undefined): ComponentBindingReference[] => {
   if (!component) {
     return [];
@@ -185,4 +226,73 @@ export const cloneComponentDefinition = (component: ComponentData | undefined): 
     return undefined;
   }
   return cloneComponent(component);
+};
+
+export const applyParameterOverrides = (
+  definition: ComponentData | undefined,
+  overrides: Record<string, DynamicBindingValue | string | undefined>,
+  parameters: ComponentBindingReference[]
+): ComponentData | undefined => {
+  if (!definition || !parameters.length) {
+    return definition;
+  }
+  const parameterSignatures = new Set(parameters.map(buildBindingSignature));
+  const appliedSignatures = new Set<string>();
+
+  function applyOverrideToValue(value: unknown, context: { componentId?: string; componentType?: string }): unknown {
+    if (isDynamicBindingValue(value)) {
+      const ref: ComponentBindingReference = {
+        bindingId: value.bindingId,
+        propertyPath: value.propertyPath,
+        componentId: context.componentId,
+        componentType: context.componentType
+      };
+      const signature = buildBindingSignature(ref);
+      if (!parameterSignatures.has(signature)) {
+        logComponentLibraryEvent('Dynamic value encountered without parameter flag', { signature });
+        return value;
+      }
+      const override = overrides[signature];
+      if (typeof override === 'undefined') {
+        logComponentLibraryEvent('Parameter override missing; keeping source binding', { signature });
+        return value;
+      }
+      appliedSignatures.add(signature);
+      logComponentLibraryEvent('Parameter override applied', { signature });
+      return override as DynamicBindingValue | string;
+    }
+    if (isComponentData(value)) {
+      return walkComponent(value);
+    }
+    if (Array.isArray(value)) {
+      return value.map((entry) => applyOverrideToValue(entry, context));
+    }
+    if (value && typeof value === 'object') {
+      const next: Record<string, unknown> = {};
+      Object.entries(value as Record<string, unknown>).forEach(([key, entry]) => {
+        next[key] = applyOverrideToValue(entry, context);
+      });
+      return next;
+    }
+    return value;
+  }
+
+  function walkComponent(node: ComponentData): ComponentData {
+    const cloned = cloneComponent(node);
+    const componentId = (cloned.props as Record<string, unknown>)?.id as string | undefined;
+    cloned.props = applyOverrideToValue(cloned.props, {
+      componentId,
+      componentType: cloned.type
+    }) as ComponentData['props'];
+    return cloned;
+  }
+
+  const result = walkComponent(definition);
+  if (appliedSignatures.size === 0) {
+    logComponentLibraryEvent('No parameter overrides applied', {
+      parameters: parameters.length,
+      availableOverrides: Object.keys(overrides ?? {}).length
+    });
+  }
+  return result;
 };

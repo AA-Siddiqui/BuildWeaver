@@ -1,6 +1,6 @@
 import { BuilderComponentDefinition, ComponentBindingReference } from '@buildweaver/libs';
 import { Type } from 'class-transformer';
-import { IsArray, IsNotEmpty, IsObject, IsOptional, IsString, ValidateNested } from 'class-validator';
+import { IsArray, IsBoolean, IsNotEmpty, IsObject, IsOptional, IsString, ValidateNested } from 'class-validator';
 
 export class ComponentBindingReferenceDto implements ComponentBindingReference {
   @IsString()
@@ -19,6 +19,10 @@ export class ComponentBindingReferenceDto implements ComponentBindingReference {
   @IsOptional()
   @IsString()
   componentType?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  exposeAsParameter?: boolean;
 }
 
 export class CreateProjectComponentDto {

@@ -56,6 +56,16 @@ describe('ProjectComponentsService normalization', () => {
     expect(refs[0]?.propertyPath).toEqual(['name']);
   });
 
+  it('marks exposeAsParameter only when truthy', () => {
+    const service = createService();
+    const refs = normalizeBindings(service, [
+      { bindingId: 'author', exposeAsParameter: true },
+      { bindingId: 'title', exposeAsParameter: 'true' as unknown as boolean }
+    ]);
+    expect(refs[0]?.exposeAsParameter).toBe(true);
+    expect(refs[1]?.exposeAsParameter).toBe(false);
+  });
+
   it('defaults invalid definitions to empty object', () => {
     const service = createService();
     const definition = (service as unknown as { normalizeDefinition: (d: unknown, meta: { name: string; projectId: string }) => unknown }).normalizeDefinition('not-an-object', {

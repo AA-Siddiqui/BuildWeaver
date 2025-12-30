@@ -480,7 +480,8 @@ export const PageBuilderPage = () => {
         projectId,
         targetId: request.targetId,
         name: request.name,
-        bindings: request.bindingReferences.length
+        bindings: request.bindingReferences.length,
+        parameters: request.bindingReferences.filter((ref) => ref.exposeAsParameter).length
       });
       return projectComponentsApi.create(projectId, {
         name: request.name,

@@ -122,7 +122,8 @@ export class ProjectComponentsService {
         const entry: ComponentBindingReference = {
           bindingId,
           componentId: ref.componentId?.trim() || undefined,
-          componentType: ref.componentType?.trim() || undefined
+          componentType: ref.componentType?.trim() || undefined,
+          exposeAsParameter: ref.exposeAsParameter === true
         };
         if (propertyPath) {
           entry.propertyPath = propertyPath;

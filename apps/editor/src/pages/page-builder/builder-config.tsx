@@ -31,7 +31,12 @@ import {
   pushListSlotRuntimeContext,
   type ListSlotContextValue
 } from './list-slot-context';
-import { normalizeComponentDefinition } from './component-library';
+import {
+  normalizeComponentDefinition,
+  buildBindingSignature,
+  applyParameterOverrides,
+  mergeParameterOverrides
+} from './component-library';
 
 type BuilderConfigParams = {
   bindingOptions: BindingOption[];
@@ -1278,10 +1283,28 @@ export const createPageBuilderConfig = ({
     const typeKey = `Library:${component.slug}`;
     const normalizedDefinition = normalizeComponentDefinition(component.definition as ComponentData | undefined);
     const defaultDefinition = normalizedDefinition ? JSON.parse(JSON.stringify(normalizedDefinition)) : undefined;
+    const parameterizedBindings = (component.bindingReferences ?? []).filter((ref) => ref.exposeAsParameter);
+    const parameterFields: Record<string, Field> = {};
+    const defaultParamOverrides: Record<string, DynamicBindingValue | string | undefined> = {};
+
+    parameterizedBindings.forEach((ref, index) => {
+      const signature = buildBindingSignature(ref);
+      defaultParamOverrides[signature] = undefined;
+      const labelFromOption = bindingOptions.find((option) => option.value === ref.bindingId)?.label;
+      const label = `Parameter ${index + 1}: ${labelFromOption ?? ref.bindingId}`;
+      parameterFields[signature] = createDynamicTextField({
+        fieldKey: signature,
+        bindingOptions,
+        label,
+        helperText: 'Provide a binding for this saved component parameter'
+      });
+    });
+
     type LibraryComponentProps = StyleableProps<{
       definition?: ComponentData;
       definitionId: string;
       name: string;
+      paramOverrides?: Record<string, DynamicBindingValue | string | undefined>;
     }>;
 
     components[typeKey] = {
@@ -1289,18 +1312,31 @@ export const createPageBuilderConfig = ({
       defaultProps: applyStylelessDefaults<LibraryComponentProps>('LibraryComponent', {
         definition: defaultDefinition as ComponentData | undefined,
         definitionId: component.id,
-        name: component.name
+        name: component.name,
+        paramOverrides: defaultParamOverrides
       }),
-      fields: enhanceFields({}),
+      fields: enhanceFields(parameterFields),
       render: (props) => {
         const { styleProps, rest } = splitStyleProps(props);
-        const { definition, customAttributes, customCss, id, renderWhen, name } = rest as LibraryComponentProps;
+        const { definition, customAttributes, customCss, id, renderWhen, name, paramOverrides = {} } =
+          rest as LibraryComponentProps;
         if (!shouldRenderComponent(typeKey, id, renderWhen)) {
           return <></>;
         }
         const inlineStyle = createInlineStyle(styleProps, resolveStyleValue);
         const attributeProps = attachNodeIdentity(id, buildAttributeProps(customAttributes));
-        const rendered = renderLibraryComponentNode((definition as ComponentData | undefined) ?? normalizedDefinition, new Set([typeKey]));
+        const mergedOverrides = mergeParameterOverrides(
+          parameterizedBindings,
+          rest as Record<string, unknown>,
+          paramOverrides,
+          (message, details) => logRenderControlEvent(message, { componentId: id, ...details })
+        );
+        const preparedDefinition = applyParameterOverrides(
+          (definition as ComponentData | undefined) ?? normalizedDefinition,
+          mergedOverrides,
+          parameterizedBindings
+        );
+        const rendered = renderLibraryComponentNode(preparedDefinition, new Set([typeKey]));
         return (
           <>
             <div style={inlineStyle} className="relative" {...attributeProps}>

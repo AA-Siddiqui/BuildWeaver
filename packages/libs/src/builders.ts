@@ -289,6 +289,7 @@ export type ComponentBindingReference = {
   propertyPath?: string[];
   componentId?: string;
   componentType?: string;
+  exposeAsParameter?: boolean;
 };
 
 export interface ProjectComponentDocument {

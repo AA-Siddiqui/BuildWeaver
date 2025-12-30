@@ -1,9 +1,15 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { CustomField, FieldProps } from '@measured/puck';
 import { usePuck } from '@measured/puck';
 import type { ComponentData } from '@measured/puck';
 import { useComponentLibrary } from './component-library-context';
-import { collectDynamicBindings, findComponentById, normalizeComponentDefinition, COMPONENT_ACTIONS_FIELD_KEY } from './component-library';
+import {
+  collectDynamicBindings,
+  findComponentById,
+  normalizeComponentDefinition,
+  COMPONENT_ACTIONS_FIELD_KEY,
+  buildBindingSignature
+} from './component-library';
 import { PropertyFilterGuard } from './property-search';
 
 const formatBindingLabel = (label?: string, propertyPath?: string[]) => {
@@ -35,12 +41,23 @@ export const ComponentActionsField = ({ readOnly }: FieldProps<CustomField<null>
   );
   const [componentName, setComponentName] = useState('');
   const [feedback, setFeedback] = useState('');
+  const [parameterizedBindings, setParameterizedBindings] = useState<Set<string>>(new Set());
 
   const bindingLookup = useMemo(
     () => new Map(bindingOptions.map((option) => [option.value, option.label])),
     [bindingOptions]
   );
   const dynamicBindings = useMemo(() => collectDynamicBindings(selectedComponent), [selectedComponent]);
+
+  useEffect(() => {
+    const initial = new Set<string>();
+    dynamicBindings.forEach((binding) => {
+      if (binding.exposeAsParameter) {
+        initial.add(buildBindingSignature(binding));
+      }
+    });
+    setParameterizedBindings(initial);
+  }, [dynamicBindings]);
 
   const handleSave = async () => {
     if (readOnly) {
@@ -64,14 +81,18 @@ export const ComponentActionsField = ({ readOnly }: FieldProps<CustomField<null>
     log?.('Saving component from selection', {
       targetId: selectedId,
       name: desiredName,
-      bindings: dynamicBindings.length
+      bindings: dynamicBindings.length,
+      parameters: parameterizedBindings.size
     });
     try {
       await saveComponent({
         name: desiredName,
         targetId: selectedId,
         definition: normalizedDefinition,
-        bindingReferences: dynamicBindings
+        bindingReferences: dynamicBindings.map((binding) => ({
+          ...binding,
+          exposeAsParameter: parameterizedBindings.has(buildBindingSignature(binding))
+        }))
       });
       setFeedback('Component saved to library.');
     } catch (error) {
@@ -120,14 +141,40 @@ export const ComponentActionsField = ({ readOnly }: FieldProps<CustomField<null>
           {dynamicBindings.length === 0 ? (
             <p className="text-xs text-gray-600">No dynamic data detected in this selection.</p>
           ) : (
-            <ul className="space-y-1 text-xs text-gray-800">
-              {dynamicBindings.map((binding) => {
-                const label = bindingLookup.get(binding.bindingId) ?? binding.bindingId;
-                const display = formatBindingLabel(label, binding.propertyPath);
-                const key = `${binding.bindingId}-${binding.propertyPath?.join('.') ?? 'root'}`;
-                return <li key={key}>• {display}</li>;
-              })}
-            </ul>
+              <ul className="space-y-2 text-xs text-gray-800">
+                {dynamicBindings.map((binding) => {
+                  const label = bindingLookup.get(binding.bindingId) ?? binding.bindingId;
+                  const display = formatBindingLabel(label, binding.propertyPath);
+                  const key = buildBindingSignature(binding);
+                  const checked = parameterizedBindings.has(key);
+                  return (
+                    <li key={key} className="flex items-start justify-between gap-2 rounded-md border border-gray-100 px-2 py-1.5">
+                      <span>• {display}</span>
+                      <label className="flex items-center gap-1 text-[0.68rem] font-semibold text-gray-700">
+                        <input
+                          type="checkbox"
+                          className="rounded border-gray-300 text-bw-amber focus:ring-bw-amber"
+                          checked={checked}
+                          onChange={(event) => {
+                            setParameterizedBindings((current) => {
+                              const next = new Set(current);
+                              if (event.target.checked) {
+                                next.add(key);
+                              } else {
+                                next.delete(key);
+                              }
+                              return next;
+                            });
+                          }}
+                          disabled={readOnly || isSavingComponent}
+                          aria-label="Expose as component parameter"
+                        />
+                        Make parameter
+                      </label>
+                    </li>
+                  );
+                })}
+              </ul>
           )}
         </div>
       </div>
