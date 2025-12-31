@@ -13,7 +13,7 @@ export const AppLayout = ({ children }: AppLayoutProps) => {
   const queryClient = useQueryClient();
   const user = useAuthStore((state) => state.user);
   const logout = useAuthStore((state) => state.logout);
-  const hideHeader = location.pathname.startsWith('/app/');
+  const hideHeader = location.pathname.startsWith('/app/') || location.pathname.startsWith('/workspace');
   const isPreviewRoute = location.pathname.endsWith('/preview');
 
   const handleLogout = () => {
