@@ -17,7 +17,7 @@ describe('App', () => {
         </MemoryRouter>
       </QueryClientProvider>
     );
-    expect(screen.getByText(/Build production-grade apps/i)).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: /Go to Workspace/i })).toBeInTheDocument();
+    expect(screen.getByText(/Build Apps/i)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /Start Building Free/i })).toBeInTheDocument();
   });
 });
