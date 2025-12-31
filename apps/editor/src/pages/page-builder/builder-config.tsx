@@ -35,8 +35,11 @@ import {
   normalizeComponentDefinition,
   buildBindingSignature,
   applyParameterOverrides,
-  mergeParameterOverrides
+  mergeParameterOverrides,
+  resolveComponentRootId,
+  isSlotBindingReference
 } from './component-library';
+import { ENABLE_SLOT_PARAMETERS, logFeatureFlagEvent } from './feature-flags';
 
 type BuilderConfigParams = {
   bindingOptions: BindingOption[];
@@ -1282,8 +1285,22 @@ export const createPageBuilderConfig = ({
   componentLibrary.forEach((component) => {
     const typeKey = `Library:${component.slug}`;
     const normalizedDefinition = normalizeComponentDefinition(component.definition as ComponentData | undefined);
+    const rootId = resolveComponentRootId(normalizedDefinition);
     const defaultDefinition = normalizedDefinition ? JSON.parse(JSON.stringify(normalizedDefinition)) : undefined;
-    const parameterizedBindings = (component.bindingReferences ?? []).filter((ref) => ref.exposeAsParameter);
+    const parameterizedBindings = (component.bindingReferences ?? []).filter((ref) => {
+      if (!ref.exposeAsParameter) {
+        return false;
+      }
+      const isSlot = isSlotBindingReference(ref, rootId);
+      if (isSlot && !ENABLE_SLOT_PARAMETERS) {
+        logFeatureFlagEvent('Omitting slot parameter from library component', {
+          componentId: component.id,
+          signature: buildBindingSignature(ref)
+        });
+        return false;
+      }
+      return true;
+    });
     const parameterFields: Record<string, Field> = {};
     const defaultParamOverrides: Record<string, DynamicBindingValue | string | undefined> = {};
 

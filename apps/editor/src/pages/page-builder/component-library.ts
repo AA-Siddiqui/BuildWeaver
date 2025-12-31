@@ -1,6 +1,7 @@
 import type { ComponentData, Data } from '@measured/puck';
 import type { ComponentBindingReference } from '@buildweaver/libs';
 import { isDynamicBindingValue, type DynamicBindingValue } from './dynamic-binding';
+import { ENABLE_SLOT_PARAMETERS, logFeatureFlagEvent } from './feature-flags';
 import { PROPERTY_SEARCH_FIELD_KEY } from './property-search';
 
 export const COMPONENT_ACTIONS_FIELD_KEY = '__uiComponentActions';
@@ -140,6 +141,27 @@ export const buildBindingSignature = (ref: ComponentBindingReference): string =>
   const path = ref.propertyPath?.join('.') ?? '';
   const component = ref.componentId ?? '';
   return `${ref.bindingId}:${path}:${component}`;
+};
+
+export const resolveComponentRootId = (component: ComponentData | undefined): string | undefined => {
+  if (!component) {
+    return undefined;
+  }
+  const id = (component.props as Record<string, unknown>)?.id;
+  return typeof id === 'string' && id.trim().length ? id : undefined;
+};
+
+export const isSlotBindingReference = (ref: ComponentBindingReference, rootId?: string | null): boolean => {
+  const hasRoot = Boolean(rootId && String(rootId).trim().length);
+  const hasComponent = Boolean(ref.componentId && ref.componentId.trim().length);
+  if (!hasRoot || !hasComponent) {
+    return false;
+  }
+  const isSlot = ref.componentId !== rootId;
+  if (isSlot && !ENABLE_SLOT_PARAMETERS) {
+    logFeatureFlagEvent('Slot parameter encountered while flag disabled', { signature: buildBindingSignature(ref) });
+  }
+  return isSlot;
 };
 
 type ParameterOverrideValue = DynamicBindingValue | string | undefined;

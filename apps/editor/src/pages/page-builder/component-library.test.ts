@@ -1,6 +1,11 @@
 import type { ComponentData } from '@measured/puck';
 import type { ComponentBindingReference } from '@buildweaver/libs';
-import { applyParameterOverrides, buildBindingSignature, mergeParameterOverrides } from './component-library';
+import {
+  applyParameterOverrides,
+  buildBindingSignature,
+  mergeParameterOverrides,
+  isSlotBindingReference
+} from './component-library';
 import { createDynamicBindingState } from './dynamic-binding';
 
 describe('component library helpers', () => {
@@ -76,5 +81,10 @@ describe('component library helpers', () => {
     const result = applyParameterOverrides(definition, overrides, parameters);
     const slotContent = (result?.props as { contentSlot?: Array<{ props: { content: { bindingId: string } } }> }).contentSlot;
     expect(slotContent?.[0]?.props.content.bindingId).toBe('article.title');
+  });
+
+  it('treats bindings without componentId as non-slot', () => {
+    const ref: ComponentBindingReference = { bindingId: 'title', componentId: undefined };
+    expect(isSlotBindingReference(ref, 'hero-1')).toBe(false);
   });
 });

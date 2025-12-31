@@ -8,9 +8,13 @@ import {
   findComponentById,
   normalizeComponentDefinition,
   COMPONENT_ACTIONS_FIELD_KEY,
-  buildBindingSignature
+  buildBindingSignature,
+  resolveComponentRootId,
+  isSlotBindingReference
 } from './component-library';
 import { PropertyFilterGuard } from './property-search';
+import { ENABLE_SLOT_PARAMETERS, logFeatureFlagEvent } from './feature-flags';
+import { ComponentBindingReference } from '@buildweaver/libs';
 
 const formatBindingLabel = (label?: string, propertyPath?: string[]) => {
   if (!propertyPath || !propertyPath.length) {
@@ -39,6 +43,7 @@ export const ComponentActionsField = ({ readOnly }: FieldProps<CustomField<null>
     () => normalizeComponentDefinition(selectedComponent),
     [selectedComponent]
   );
+  const selectedRootId = useMemo(() => resolveComponentRootId(selectedComponent), [selectedComponent]);
   const [componentName, setComponentName] = useState('');
   const [feedback, setFeedback] = useState('');
   const [parameterizedBindings, setParameterizedBindings] = useState<Set<string>>(new Set());
@@ -47,17 +52,28 @@ export const ComponentActionsField = ({ readOnly }: FieldProps<CustomField<null>
     () => new Map(bindingOptions.map((option) => [option.value, option.label])),
     [bindingOptions]
   );
-  const dynamicBindings = useMemo(() => collectDynamicBindings(selectedComponent), [selectedComponent]);
+  
+  const dynamicBindings = useMemo(() => collectDynamicBindings(selectedComponent).filter((binding: ComponentBindingReference) => {
+    const isSlot = isSlotBindingReference(binding, selectedRootId);
+    const slotDisabled = isSlot && !ENABLE_SLOT_PARAMETERS;
+    return !slotDisabled;
+  }), [selectedComponent]); // LATER: May need selectedRootId here, check later
 
   useEffect(() => {
     const initial = new Set<string>();
     dynamicBindings.forEach((binding) => {
+      const signature = buildBindingSignature(binding);
+      const isSlot = isSlotBindingReference(binding, selectedRootId);
+      if (isSlot && !ENABLE_SLOT_PARAMETERS && binding.exposeAsParameter) {
+        log?.('Slot parameter stripped due to flag', { signature, selectedRootId });
+        return;
+      }
       if (binding.exposeAsParameter) {
-        initial.add(buildBindingSignature(binding));
+        initial.add(signature);
       }
     });
     setParameterizedBindings(initial);
-  }, [dynamicBindings]);
+  }, [dynamicBindings, log, selectedRootId]);
 
   const handleSave = async () => {
     if (readOnly) {
@@ -91,7 +107,16 @@ export const ComponentActionsField = ({ readOnly }: FieldProps<CustomField<null>
         definition: normalizedDefinition,
         bindingReferences: dynamicBindings.map((binding) => ({
           ...binding,
-          exposeAsParameter: parameterizedBindings.has(buildBindingSignature(binding))
+          exposeAsParameter: (() => {
+            const signature = buildBindingSignature(binding);
+            const isSlot = isSlotBindingReference(binding, selectedRootId);
+            const desired = parameterizedBindings.has(signature);
+            if (isSlot && !ENABLE_SLOT_PARAMETERS) {
+              log?.('Slot parameter blocked by feature flag', { signature, selectedRootId });
+              return false;
+            }
+            return desired;
+          })()
         }))
       });
       setFeedback('Component saved to library.');
@@ -141,40 +166,48 @@ export const ComponentActionsField = ({ readOnly }: FieldProps<CustomField<null>
           {dynamicBindings.length === 0 ? (
             <p className="text-xs text-gray-600">No dynamic data detected in this selection.</p>
           ) : (
-              <ul className="space-y-2 text-xs text-gray-800">
-                {dynamicBindings.map((binding) => {
-                  const label = bindingLookup.get(binding.bindingId) ?? binding.bindingId;
-                  const display = formatBindingLabel(label, binding.propertyPath);
-                  const key = buildBindingSignature(binding);
-                  const checked = parameterizedBindings.has(key);
-                  return (
-                    <li key={key} className="flex items-start justify-between gap-2 rounded-md border border-gray-100 px-2 py-1.5">
-                      <span>• {display}</span>
-                      <label className="flex items-center gap-1 text-[0.68rem] font-semibold text-gray-700">
-                        <input
-                          type="checkbox"
-                          className="rounded border-gray-300 text-bw-amber focus:ring-bw-amber"
-                          checked={checked}
-                          onChange={(event) => {
-                            setParameterizedBindings((current) => {
-                              const next = new Set(current);
-                              if (event.target.checked) {
-                                next.add(key);
-                              } else {
-                                next.delete(key);
-                              }
-                              return next;
-                            });
-                          }}
-                          disabled={readOnly || isSavingComponent}
-                          aria-label="Expose as component parameter"
-                        />
-                        Make parameter
-                      </label>
-                    </li>
-                  );
-                })}
-              </ul>
+            <ul className="space-y-2 text-xs text-gray-800">
+              {dynamicBindings.map((binding) => {
+                const label = bindingLookup.get(binding.bindingId) ?? binding.bindingId;
+                const display = formatBindingLabel(label, binding.propertyPath);
+                const key = buildBindingSignature(binding);
+                const checked = parameterizedBindings.has(key);
+                const isSlot = isSlotBindingReference(binding, selectedRootId);
+                const slotDisabled = isSlot && !ENABLE_SLOT_PARAMETERS;
+                if (slotDisabled) {
+                  logFeatureFlagEvent('Slot parameter toggle disabled in save panel', {
+                    signature: key,
+                    selectedRootId
+                  });
+                }
+                return (
+                  <li key={key} className="flex items-start justify-between gap-2 rounded-md border border-gray-100 px-2 py-1.5">
+                    <span>• {display}</span>
+                    <label className="flex items-center gap-1 text-[0.68rem] font-semibold text-gray-700">
+                      <input
+                        type="checkbox"
+                        className="rounded border-gray-300 text-bw-amber focus:ring-bw-amber"
+                        checked={checked}
+                        onChange={(event) => {
+                          setParameterizedBindings((current) => {
+                            const next = new Set(current);
+                            if (event.target.checked) {
+                              next.add(key);
+                            } else {
+                              next.delete(key);
+                            }
+                            return next;
+                          });
+                        }}
+                        disabled={readOnly || isSavingComponent || slotDisabled}
+                        aria-label="Expose as component parameter"
+                      />
+                      {slotDisabled ? 'Slot parameters disabled' : 'Make parameter'}
+                    </label>
+                  </li>
+                );
+              })}
+            </ul>
           )}
         </div>
       </div>
