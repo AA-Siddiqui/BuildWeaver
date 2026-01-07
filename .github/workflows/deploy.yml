@@ -66,13 +66,12 @@ jobs:
               
           fi
       
-      - name: "Delete all images except current commit"
+      - name: "Delete all images"
         run: |
           az acr repository show-tags \
             --name "$ACR_NAME" \
             --repository "$CONTAINER_APP_NAME" \
             --output tsv | \
-          grep -v "^$IMAGE_TAG$" | \
           while read tag; do
             az acr repository delete \
               --name "$ACR_NAME" \
