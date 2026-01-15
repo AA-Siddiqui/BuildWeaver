@@ -5,6 +5,10 @@ import { projectGraphs, projectPages, projects, ProjectPage } from '@buildweaver
 import {
   DummyNodeData,
   FunctionNodeData,
+  DatabaseField,
+  DatabaseSchema,
+  DatabaseTable,
+  DatabaseRelationship,
   LogicEditorEdge,
   LogicEditorNode,
   LogicEditorNodeType,
@@ -25,7 +29,8 @@ export class ProjectGraphService {
     'conditional',
     'logical',
     'relational',
-    'function'
+    'function',
+    'database'
   ];
 
   constructor(private readonly database: DatabaseService) {}
@@ -51,7 +56,9 @@ export class ProjectGraphService {
       .where(eq(projectPages.projectId, projectId));
 
     const composed = this.composeGraph(graph, pages);
-    this.logger.debug(`Loaded graph nodes=${composed.nodes.length} edges=${composed.edges.length}`);
+    this.logger.debug(
+      `Loaded graph nodes=${composed.nodes.length} edges=${composed.edges.length} functions=${composed.functions.length} databases=${composed.databases?.length ?? 0}`
+    );
     this.logPageNodeInputSummary(projectId, composed.nodes);
     return composed;
   }
@@ -71,6 +78,7 @@ export class ProjectGraphService {
     const declaredFunctionIds = new Set(normalizedPayload.functions.map((fn) => fn.id).filter(Boolean));
     const sanitizedFunctions = this.sanitizeFunctions(normalizedPayload.functions, pageIds, declaredFunctionIds);
     const allowedFunctionIds = new Set(sanitizedFunctions.map((fn) => fn.id));
+    const sanitizedDatabases = this.sanitizeDatabases(normalizedPayload.databases);
 
     const rejectedNodes: { id: string; type: string; reason: string }[] = [];
     const sanitizedNodes = normalizedPayload.nodes.filter((node) => {
@@ -90,7 +98,12 @@ export class ProjectGraphService {
       }
       return allowed;
     });
-    const snapshot: ProjectGraphSnapshot = { nodes: sanitizedNodes, edges: sanitizedEdges, functions: sanitizedFunctions };
+    const snapshot: ProjectGraphSnapshot = {
+      nodes: sanitizedNodes,
+      edges: sanitizedEdges,
+      functions: sanitizedFunctions,
+      databases: sanitizedDatabases
+    };
     if (rejectedNodes.length) {
       this.logger.warn(
         `Rejected ${rejectedNodes.length} nodes during graph persist project=${projectId} details=${JSON.stringify(rejectedNodes)}`
@@ -102,7 +115,7 @@ export class ProjectGraphService {
       );
     }
     this.logger.debug(
-      `Sanitized logic graph nodes=${sanitizedNodes.length}/${normalizedPayload.nodes.length} edges=${sanitizedEdges.length}/${normalizedPayload.edges.length} functions=${sanitizedFunctions.length}/${normalizedPayload.functions.length}`
+      `Sanitized logic graph nodes=${sanitizedNodes.length}/${normalizedPayload.nodes.length} edges=${sanitizedEdges.length}/${normalizedPayload.edges.length} functions=${sanitizedFunctions.length}/${normalizedPayload.functions.length} databases=${sanitizedDatabases.length}/${(normalizedPayload.databases ?? []).length}`
     );
 
     const existing = await this.db
@@ -119,7 +132,7 @@ export class ProjectGraphService {
 
     const composed = this.composeGraph(snapshot, pages);
     this.logger.log(
-      `Graph persisted for project=${projectId} nodes=${composed.nodes.length} edges=${composed.edges.length} functions=${composed.functions.length}`
+      `Graph persisted for project=${projectId} nodes=${composed.nodes.length} edges=${composed.edges.length} functions=${composed.functions.length} databases=${composed.databases?.length ?? 0}`
     );
     return composed;
   }
@@ -224,6 +237,97 @@ export class ProjectGraphService {
       .filter((fn): fn is UserDefinedFunction => Boolean(fn));
   }
 
+  private sanitizeDatabases(databases?: DatabaseSchema[] | null): DatabaseSchema[] {
+    if (!Array.isArray(databases)) {
+      return [];
+    }
+
+    return databases
+      .filter((schema): schema is DatabaseSchema => Boolean(schema))
+      .map((schema, schemaIndex) => {
+        const schemaId = schema.id || `db-${schemaIndex}`;
+        const tables = Array.isArray(schema.tables)
+          ? schema.tables.map((table, tableIndex): DatabaseTable => {
+              const tableId = table?.id || `${schemaId}-table-${tableIndex}`;
+              const fields = Array.isArray(table?.fields)
+                ? this.sanitizeDatabaseFields(tableId, table.fields)
+                : this.sanitizeDatabaseFields(tableId, []);
+              return {
+                ...table,
+                id: tableId,
+                name: typeof table?.name === 'string' && table.name.trim() ? table.name.trim() : `table_${tableIndex + 1}`,
+                fields,
+                position: table?.position
+              } satisfies DatabaseTable;
+            })
+          : [];
+
+        const tableIds = new Set(tables.map((table) => table.id));
+        const relationships = Array.isArray(schema.relationships)
+          ? schema.relationships
+              .filter((relationship) =>
+                relationship?.sourceTableId && relationship?.targetTableId
+                  ? tableIds.has(relationship.sourceTableId) && tableIds.has(relationship.targetTableId)
+                  : false
+              )
+              .map(
+                (relationship, relationshipIndex): DatabaseRelationship => ({
+                  ...relationship,
+                  id: relationship.id || `${schemaId}-rel-${relationshipIndex}`,
+                  cardinality: relationship.cardinality === 'one' ? 'one' : 'many',
+                  modality: relationship.modality === 1 ? 1 : 0
+                })
+              )
+          : [];
+
+        const connection = schema.connection
+          ? {
+              host: schema.connection.host ?? 'localhost',
+              port: typeof schema.connection.port === 'number' ? schema.connection.port : 5432,
+              database: schema.connection.database ?? '',
+              user: schema.connection.user ?? '',
+              password: schema.connection.password ?? '',
+              ssl: Boolean(schema.connection.ssl)
+            }
+          : undefined;
+
+        return {
+          ...schema,
+          id: schemaId,
+          name: schema.name?.trim() || `Database ${schemaIndex + 1}`,
+          tables,
+          relationships,
+          connection
+        } satisfies DatabaseSchema;
+      });
+  }
+
+  private sanitizeDatabaseFields(tableId: string, fields: DatabaseField[]): DatabaseField[] {
+    const ensured = (fields ?? []).map((field: DatabaseField, fieldIndex) => ({
+      ...field,
+      id: field?.id || `${tableId}-field-${fieldIndex}`,
+      name: field?.name?.trim() || `field_${fieldIndex + 1}`,
+      type: field?.type ?? 'uuid',
+      nullable: Boolean(field?.nullable),
+      unique: Boolean(field?.unique),
+      defaultValue: field?.defaultValue ?? undefined,
+      isId: Boolean(field?.isId)
+    }));
+    const hasIdField = ensured.some((field) => field.isId);
+    if (!hasIdField) {
+      ensured.unshift({
+        id: `${tableId}-id`,
+        name: 'id',
+        type: 'uuid',
+        nullable: false,
+        unique: true,
+        isId: true,
+        defaultValue: undefined
+      });
+    }
+    return ensured.map((field) => (field.isId ? { ...field, nullable: false, unique: true } : field));
+  }
+
   private composeGraph(graph: ProjectGraphSnapshot, pages: ProjectPage[]): ProjectGraphSnapshot {
     const pageMap = new Map(pages.map((page) => [page.id, page]));
     const nodes = graph.nodes
@@ -245,7 +349,11 @@ export class ProjectGraphService {
       };
     });
 
-    return { nodes, edges, functions };
+    const databases = graph.databases ?? [];
+    this.logger.debug(
+      `Graph composed for response nodes=${nodes.length} edges=${edges.length} functions=${functions.length} databases=${databases.length}`
+    );
+    return { nodes, edges, functions, databases };
   }
 
   private composeNode(node: LogicEditorNode, pageMap: Map<string, ProjectPage>): LogicEditorNode | null {
@@ -316,13 +424,15 @@ export class ProjectGraphService {
   }
 
   private withGraphDefaults(graph?: ProjectGraphSnapshot | null): ProjectGraphSnapshot {
+    const databases = this.sanitizeDatabases(graph?.databases);
     if (!graph) {
-      return { nodes: [], edges: [], functions: [] };
+      return { nodes: [], edges: [], functions: [], databases };
     }
     return {
       nodes: graph.nodes ?? [],
       edges: graph.edges ?? [],
-      functions: graph.functions ?? []
+      functions: graph.functions ?? [],
+      databases
     };
   }
 

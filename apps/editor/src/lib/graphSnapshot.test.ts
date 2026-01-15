@@ -1,5 +1,5 @@
 import type { FlowEdge, FlowNode } from '../components/logic/graphSerialization';
-import type { LogicEditorNodeData, UserDefinedFunction } from '../types/api';
+import type { DatabaseSchema, LogicEditorNodeData, UserDefinedFunction } from '../types/api';
 import { cloneGraphSnapshot, hashGraphSnapshot } from './graphSnapshot';
 
 describe('graphSnapshot utilities', () => {
@@ -31,22 +31,31 @@ describe('graphSnapshot utilities', () => {
     returnsValue: false
   };
 
+  const baseDatabase: DatabaseSchema = {
+    id: 'db-1',
+    name: 'Main',
+    tables: [],
+    relationships: []
+  };
+
   it('removes transient fields when hashing', () => {
-    const baseHash = hashGraphSnapshot({ nodes: [baseNode], edges: [baseEdge], functions: [baseFunction] });
+    const baseHash = hashGraphSnapshot({ nodes: [baseNode], edges: [baseEdge], functions: [baseFunction], databases: [baseDatabase] });
     const snapshotWithSelection = hashGraphSnapshot({
       nodes: [{ ...baseNode, selected: true, dragging: true }],
       edges: [{ ...baseEdge, selected: true }],
-      functions: [baseFunction]
+      functions: [baseFunction],
+      databases: [baseDatabase]
     });
 
     expect(snapshotWithSelection).toBe(baseHash);
   });
 
   it('produces deep clones without shared references', () => {
-    const cloned = cloneGraphSnapshot({ nodes: [baseNode], edges: [baseEdge], functions: [baseFunction] });
+    const cloned = cloneGraphSnapshot({ nodes: [baseNode], edges: [baseEdge], functions: [baseFunction], databases: [baseDatabase] });
     expect(cloned).not.toBe(baseNode);
     expect(cloned.nodes[0]).not.toBe(baseNode);
     expect(cloned.edges[0]).not.toBe(baseEdge);
     expect(cloned.functions[0]).not.toBe(baseFunction);
+    expect(cloned.databases[0]).not.toBe(baseDatabase);
   });
 });

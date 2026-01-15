@@ -19,6 +19,11 @@ import { DragEvent, useCallback, useEffect, useMemo, useRef, useState, useLayout
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useParams } from 'react-router-dom';
 import type {
+  DatabaseSchema,
+  DatabaseNodeData,
+  DatabaseTable,
+  DatabaseField,
+  DatabaseRelationship,
   FunctionNodeData,
   LogicEditorNode,
   LogicEditorNodeData,
@@ -69,6 +74,8 @@ import { FunctionArgumentNode } from '../components/logic/function/FunctionArgum
 import { FunctionReturnNode } from '../components/logic/function/FunctionReturnNode';
 import { FunctionEditorModal } from '../components/logic/function/FunctionEditorModal';
 import { FunctionRegistryProvider } from '../components/logic/function/FunctionRegistryContext';
+import { DatabaseDesignerModal } from '../components/db-designer/DatabaseDesignerModal';
+import { DatabaseNode } from '../components/logic/DatabaseNode';
 import { LogicEdgeActionsProvider, SeverEdgeReason } from '../components/logic/LogicEdgeActionsContext';
 import {
   buildNodePositionMap,
@@ -91,7 +98,8 @@ const nodeTypes = {
   relational: RelationalOperatorNode,
   function: FunctionNode,
   'function-argument': FunctionArgumentNode,
-  'function-return': FunctionReturnNode
+  'function-return': FunctionReturnNode,
+  database: DatabaseNode
 };
 
 const edgeTypes = {
@@ -139,6 +147,94 @@ const gestureDistance = (gesture: GestureState): number =>
 const isPaneTarget = (target: EventTarget | null): target is HTMLElement =>
   target instanceof HTMLElement && Boolean(target.closest('.react-flow__pane'));
 
+const createDefaultDbConnection = () => ({
+  host: 'localhost',
+  port: 5432,
+  database: '',
+  user: '',
+  password: '',
+  ssl: false
+});
+
+const normalizeDatabaseFields = (fields: DatabaseField[] = [], tableId: string): DatabaseField[] => {
+  const normalized = fields.map((field: DatabaseField) => ({
+    ...field,
+    name: field.name?.trim() || 'id',
+    type: field.type ?? 'uuid',
+    nullable: Boolean(field.nullable),
+    unique: Boolean(field.unique),
+    defaultValue: field.defaultValue ?? undefined,
+    isId: Boolean(field.isId)
+  }));
+  const hasId = normalized.some((field) => field.isId);
+  const ensured = hasId
+    ? normalized.map((field) => (field.isId ? { ...field, nullable: false, unique: true } : field))
+    : [
+        {
+          id: `${tableId}-id`,
+          name: 'id',
+          type: 'uuid',
+          nullable: false,
+          unique: true,
+          isId: true
+        } satisfies DatabaseField,
+        ...normalized
+      ];
+  return ensured;
+};
+
+const normalizeDatabaseSchema = (schema: DatabaseSchema): DatabaseSchema => {
+  const tables = (schema.tables ?? []).map((table: DatabaseTable, index: number) => {
+    const tableId = table.id || `table-${generateNodeId()}`;
+    return {
+      ...table,
+      id: tableId,
+      name: table.name?.trim() || `Table ${index + 1}`,
+      fields: normalizeDatabaseFields(table.fields ?? [], tableId),
+      position: table.position ?? { x: 140 * index, y: 80 * index }
+    };
+  });
+  const tableIds = new Set(tables.map((table) => table.id));
+  const relationships = (schema.relationships ?? [])
+    .filter((relationship: DatabaseRelationship) => tableIds.has(relationship.sourceTableId) && tableIds.has(relationship.targetTableId))
+    .map((relationship: DatabaseRelationship): DatabaseRelationship => ({
+      ...relationship,
+      cardinality: relationship.cardinality === 'one' ? 'one' : 'many',
+      modality: relationship.modality === 1 ? 1 : 0
+    }));
+
+  return {
+    ...schema,
+    name: schema.name?.trim() || 'Database',
+    tables,
+    relationships,
+    connection: schema.connection ? { ...createDefaultDbConnection(), ...schema.connection } : createDefaultDbConnection(),
+    updatedAt: schema.updatedAt ?? new Date().toISOString()
+  };
+};
+
+const createEmptyDatabaseSchema = (name: string): DatabaseSchema =>
+  normalizeDatabaseSchema({
+    id: `db-${generateNodeId()}`,
+    name,
+    tables: [],
+    relationships: [],
+    connection: createDefaultDbConnection()
+  });
+
+const toDatabaseNodeData = (schema: DatabaseSchema): DatabaseNodeData => {
+  const normalized = normalizeDatabaseSchema(schema);
+  return {
+    kind: 'database',
+    schemaId: normalized.id,
+    schemaName: normalized.name,
+    tables: normalized.tables.map(({ id, name, fields }: DatabaseTable) => ({ id, name, fields }))
+  };
+};
+
+const serializeDatabases = (schemas: DatabaseSchema[]): DatabaseSchema[] =>
+  (schemas ?? []).map((schema: DatabaseSchema) => normalizeDatabaseSchema(schema));
+
 const LogicEditorView = () => {
   const { projectId } = useParams<{ projectId: string }>();
   const navigate = useNavigate();
@@ -149,6 +245,9 @@ const LogicEditorView = () => {
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   const [functions, setFunctions] = useState<UserDefinedFunction[]>([]);
   const [activeFunction, setActiveFunction] = useState<UserDefinedFunction | null>(null);
+  const [databases, setDatabases] = useState<DatabaseSchema[]>([]);
+  const [activeDatabaseSchema, setActiveDatabaseSchema] = useState<DatabaseSchema | null>(null);
+  const [isDatabaseDesignerOpen, setIsDatabaseDesignerOpen] = useState(false);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>([]);
   const [feedback, setFeedback] = useState('');
@@ -186,6 +285,7 @@ const LogicEditorView = () => {
         nodes: snapshot.nodes.length,
         edges: snapshot.edges.length,
         functions: snapshot.functions.length,
+        databases: snapshot.databases.length,
         reason: context.reason,
         nodeIds: context.nodeIds
       });
@@ -200,7 +300,7 @@ const LogicEditorView = () => {
   );
 
   useLayoutEffect(() => {
-    const snapshot = cloneGraphSnapshot({ nodes, edges, functions });
+    const snapshot = cloneGraphSnapshot({ nodes, edges, functions, databases });
     if (nodeDragHistoryRef.current.isActive()) {
       nodeDragHistoryRef.current.capture(snapshot);
       if (pendingDragFlushRef.current) {
@@ -214,9 +314,10 @@ const LogicEditorView = () => {
       nodes: snapshot.nodes.length,
       edges: snapshot.edges.length,
       functions: snapshot.functions.length,
+      databases: snapshot.databases.length,
       reason: 'state-observer'
     });
-  }, [edges, flushDragSnapshot, functions, nodes, projectId]);
+  }, [databases, edges, flushDragSnapshot, functions, nodes, projectId]);
 
   const resetGraphHistory = useCallback(
     (snapshot: GraphSnapshot, context: string) => {
@@ -372,13 +473,18 @@ const LogicEditorView = () => {
       const hydratedNodes = toFlowNodes(graphQuery.data.graph.nodes);
       const hydratedEdges = ensureSeverableEdges(toFlowEdges(graphQuery.data.graph.edges));
       const hydratedFunctions = graphQuery.data.graph.functions ?? [];
+      const hydratedDatabases = serializeDatabases(graphQuery.data.graph.databases ?? []);
       setNodes(hydratedNodes);
       setEdges(hydratedEdges);
       setFunctions(hydratedFunctions);
+      setDatabases(hydratedDatabases);
       setHasUnsavedChanges(false);
       nodeDragHistoryRef.current.reset();
       pendingDragFlushRef.current = false;
-      resetGraphHistory({ nodes: hydratedNodes, edges: hydratedEdges, functions: hydratedFunctions }, 'hydrate');
+      resetGraphHistory(
+        { nodes: hydratedNodes, edges: hydratedEdges, functions: hydratedFunctions, databases: hydratedDatabases },
+        'hydrate'
+      );
       setTimeout(() => {
         try {
           reactFlowInstance.fitView({ padding: 0.4 });
@@ -387,15 +493,21 @@ const LogicEditorView = () => {
         }
       }, 50);
     }
-  }, [graphQuery.data?.graph, reactFlowInstance, resetGraphHistory, setEdges, setNodes, setFunctions]);
+  }, [graphQuery.data?.graph, reactFlowInstance, resetGraphHistory, setDatabases, setEdges, setNodes, setFunctions]);
 
   const saveMutation = useMutation({
     mutationFn: (payload: ProjectGraphSnapshot) => projectGraphApi.save(projectId!, payload),
     onSuccess: ({ graph }) => {
-      logicLogger.info('Graph saved', { projectId, nodes: graph.nodes.length, edges: graph.edges.length });
+      logicLogger.info('Graph saved', {
+        projectId,
+        nodes: graph.nodes.length,
+        edges: graph.edges.length,
+        databases: graph.databases?.length ?? 0
+      });
       setNodes(toFlowNodes(graph.nodes));
       setEdges(ensureSeverableEdges(toFlowEdges(graph.edges)));
       setFunctions(graph.functions ?? []);
+      setDatabases(serializeDatabases(graph.databases ?? []));
       setHasUnsavedChanges(false);
       setFeedback('Saved');
       setTimeout(() => setFeedback(''), 2000);
@@ -510,7 +622,8 @@ const LogicEditorView = () => {
       const payload: ProjectGraphSnapshot = {
         nodes: serializeNodes(nodes),
         edges: serializeEdges(edges),
-        functions: normalizedFunctions
+        functions: normalizedFunctions,
+        databases: serializeDatabases(databases)
       };
       const inputSummary = summarizePageNodeInputs(payload.nodes);
       if (inputSummary) {
@@ -532,7 +645,13 @@ const LogicEditorView = () => {
         return pendingSaveRef.current;
       }
 
-      logicLogger.info('Saving graph', { projectId, reason, nodes: payload.nodes.length, edges: payload.edges.length });
+      logicLogger.info('Saving graph', {
+        projectId,
+        reason,
+        nodes: payload.nodes.length,
+        edges: payload.edges.length,
+        databases: payload.databases?.length ?? 0
+      });
       const promise = saveMutation.mutateAsync(payload);
       pendingSaveRef.current = promise;
       try {
@@ -541,7 +660,7 @@ const LogicEditorView = () => {
         pendingSaveRef.current = null;
       }
     },
-    [edges, functions, hasUnsavedChanges, nodes, projectId, saveMutation]
+    [databases, edges, functions, hasUnsavedChanges, nodes, projectId, saveMutation]
   );
 
   const handleSave = useCallback(() => {
@@ -556,6 +675,7 @@ const LogicEditorView = () => {
       setNodes(snapshot.nodes);
       setEdges(snapshot.edges);
       setFunctions(snapshot.functions);
+      setDatabases(snapshot.databases);
       setHasUnsavedChanges(true);
       setFeedback(action === 'undo' ? 'Undid change' : 'Redid change');
       setTimeout(() => setFeedback(''), 2000);
@@ -564,29 +684,127 @@ const LogicEditorView = () => {
         undoDepth: graphHistoryRef.current.getUndoDepth(),
         redoDepth: graphHistoryRef.current.getRedoDepth(),
         nodes: snapshot.nodes.length,
-        edges: snapshot.edges.length
+        edges: snapshot.edges.length,
+        databases: snapshot.databases.length
       });
     },
-    [projectId, setEdges, setFunctions, setNodes]
+    [projectId, setDatabases, setEdges, setFunctions, setNodes]
   );
 
   const handleUndoAction = useCallback(() => {
-    const snapshot = graphHistoryRef.current.undo({ nodes, edges, functions });
+    const snapshot = graphHistoryRef.current.undo({ nodes, edges, functions, databases });
     if (!snapshot) {
       logicLogger.debug('Undo ignored — no history', { projectId });
       return;
     }
     restoreGraphSnapshot(snapshot, 'undo');
-  }, [edges, functions, nodes, projectId, restoreGraphSnapshot]);
+  }, [databases, edges, functions, nodes, projectId, restoreGraphSnapshot]);
 
   const handleRedoAction = useCallback(() => {
-    const snapshot = graphHistoryRef.current.redo({ nodes, edges, functions });
+    const snapshot = graphHistoryRef.current.redo({ nodes, edges, functions, databases });
     if (!snapshot) {
       logicLogger.debug('Redo ignored — no future history', { projectId });
       return;
     }
     restoreGraphSnapshot(snapshot, 'redo');
-  }, [edges, functions, nodes, projectId, restoreGraphSnapshot]);
+  }, [databases, edges, functions, nodes, projectId, restoreGraphSnapshot]);
+
+  const syncDatabaseNodesWithSchema = useCallback(
+    (schema: DatabaseSchema, options?: { createIfMissing?: boolean }) => {
+      const nodeData = toDatabaseNodeData(schema);
+      setNodes((current: FlowNode[]) => {
+        const updated = current.map((node) => {
+          if (node.type !== 'database') {
+            return node;
+          }
+          const existingData = node.data as Partial<DatabaseNodeData> | undefined;
+          if (existingData?.schemaId !== schema.id) {
+            return node;
+          }
+          const selectedTableId = existingData.selectedTableId && nodeData.tables.some((table) => table.id === existingData.selectedTableId)
+            ? existingData.selectedTableId
+            : nodeData.tables[0]?.id;
+          return { ...node, data: { ...nodeData, selectedTableId } };
+        });
+
+        const hasNode = updated.some((node) => node.type === 'database' && (node.data as DatabaseNodeData | undefined)?.schemaId === schema.id);
+        if (!hasNode && options?.createIfMissing) {
+          const newNode: FlowNode = {
+            id: `database-${generateNodeId()}`,
+            type: 'database',
+            position: { x: 0, y: 0 },
+            data: nodeData
+          };
+          return updated.concat(newNode);
+        }
+        return updated;
+      });
+    },
+    [setNodes]
+  );
+
+  const handleDatabaseSave = useCallback(
+    async (schema: DatabaseSchema) => {
+      const normalized = normalizeDatabaseSchema(schema);
+      setDatabases((current) => {
+        const exists = current.some((entry) => entry.id === normalized.id);
+        return exists ? current.map((entry) => (entry.id === normalized.id ? normalized : entry)) : current.concat(normalized);
+      });
+      syncDatabaseNodesWithSchema(normalized, { createIfMissing: true });
+      setHasUnsavedChanges(true);
+      setFeedback(`${normalized.name} saved`);
+      setTimeout(() => setFeedback(''), 2000);
+    },
+    [setDatabases, setHasUnsavedChanges, syncDatabaseNodesWithSchema]
+  );
+
+  const handleDatabaseApply = useCallback(
+    async (schema: DatabaseSchema) => {
+      const normalized = normalizeDatabaseSchema(schema);
+      logicLogger.info('Database apply requested', {
+        projectId,
+        schemaId: normalized.id,
+        connectionHost: normalized.connection?.host,
+        database: normalized.connection?.database
+      });
+      setFeedback('Applying database schema…');
+      setTimeout(() => setFeedback(''), 2000);
+    },
+    [projectId]
+  );
+
+  const handleOpenDatabaseDesigner = useCallback(() => {
+    const proposedName = window.prompt('Name your database schema', `Database ${databases.length + 1}`);
+    if (!proposedName) {
+      logicLogger.info('Database designer launch cancelled - missing name', { projectId });
+      return;
+    }
+    const schema = createEmptyDatabaseSchema(proposedName);
+    setActiveDatabaseSchema(schema);
+    setIsDatabaseDesignerOpen(true);
+    logicLogger.info('Database designer opened', { projectId, schemaId: schema.id });
+  }, [databases.length, projectId]);
+
+  const handleEditDatabaseSchema = useCallback(
+    (schemaId: string) => {
+      const existing = databases.find((schema) => schema.id === schemaId);
+      if (!existing) {
+        setFeedback('Database schema not found');
+        setTimeout(() => setFeedback(''), 2000);
+        return;
+      }
+      const normalized = normalizeDatabaseSchema(existing);
+      setActiveDatabaseSchema(normalized);
+      setIsDatabaseDesignerOpen(true);
+      logicLogger.info('Database designer opened for editing', { projectId, schemaId });
+    },
+    [databases, projectId]
+  );
+
+  const handleCloseDatabaseDesigner = useCallback(() => {
+    setActiveDatabaseSchema(null);
+    setIsDatabaseDesignerOpen(false);
+  }, []);
 
   const handleAddNode = useCallback(
     async (type: PaletteNodeType, position?: { x: number; y: number }, options?: PaletteNodeOptions) => {
@@ -1157,6 +1375,13 @@ const LogicEditorView = () => {
               pageRoutes={knownPageRoutes}
               isPageRoutesLoading={pagesQuery.isLoading}
               pageRoutesError={pageRoutesErrorMessage || undefined}
+              onOpenDatabaseDesigner={handleOpenDatabaseDesigner}
+              onEditDatabase={handleEditDatabaseSchema}
+              databases={databases.map((schema) => ({
+                id: schema.id,
+                name: schema.name,
+                tableCount: schema.tables?.length ?? 0
+              }))}
             />
           </div>
         </div>
@@ -1292,6 +1517,14 @@ const LogicEditorView = () => {
           functions={functions}
           onSave={handleFunctionSave}
           onClose={() => setActiveFunction(null)}
+        />
+      )}
+      {isDatabaseDesignerOpen && activeDatabaseSchema && (
+        <DatabaseDesignerModal
+          initialSchema={activeDatabaseSchema}
+          onSave={handleDatabaseSave}
+          onApply={handleDatabaseApply}
+          onClose={handleCloseDatabaseDesigner}
         />
       )}
     </>

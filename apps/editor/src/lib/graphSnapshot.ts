@@ -1,10 +1,11 @@
 import type { FlowEdge, FlowNode } from '../components/logic/graphSerialization';
-import type { UserDefinedFunction } from '../types/api';
+import type { DatabaseSchema, UserDefinedFunction } from '../types/api';
 
 export type GraphSnapshot = {
   nodes: FlowNode[];
   edges: FlowEdge[];
   functions: UserDefinedFunction[];
+  databases: DatabaseSchema[];
 };
 
 const sanitizeNode = (node: FlowNode): FlowNode => {
@@ -35,10 +36,14 @@ const sanitizeEdge = (edge: FlowEdge): FlowEdge => {
 const sanitizeFunctions = (functions: UserDefinedFunction[]): UserDefinedFunction[] =>
   functions.map((fn) => ({ ...fn }));
 
+const sanitizeDatabases = (databases: DatabaseSchema[]): DatabaseSchema[] =>
+  (databases ?? []).map((schema) => ({ ...schema }));
+
 export const sanitizeGraphSnapshot = (snapshot: GraphSnapshot): GraphSnapshot => ({
   nodes: snapshot.nodes.map((node) => sanitizeNode(node)),
   edges: snapshot.edges.map((edge) => sanitizeEdge(edge)),
-  functions: sanitizeFunctions(snapshot.functions)
+  functions: sanitizeFunctions(snapshot.functions),
+  databases: sanitizeDatabases(snapshot.databases)
 });
 
 export const cloneGraphSnapshot = (snapshot: GraphSnapshot): GraphSnapshot =>

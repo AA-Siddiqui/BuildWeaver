@@ -14,7 +14,8 @@ export type LogicEditorNodeType =
   | 'relational'
   | 'function'
   | 'function-argument'
-  | 'function-return';
+  | 'function-return'
+  | 'database';
 
 export interface LogicEditorNodePosition {
   x: number;
@@ -216,6 +217,71 @@ export interface PageNodeData {
   inputs: PageDynamicInput[];
 }
 
+export type DatabaseFieldType =
+  | 'uuid'
+  | 'string'
+  | 'number'
+  | 'boolean'
+  | 'json'
+  | 'date'
+  | 'datetime';
+
+export interface DatabaseField {
+  id: string;
+  name: string;
+  type: DatabaseFieldType;
+  defaultValue?: string;
+  nullable: boolean;
+  unique: boolean;
+  isId?: boolean;
+}
+
+export interface DatabaseTable {
+  id: string;
+  name: string;
+  fields: DatabaseField[];
+  position?: LogicEditorNodePosition;
+}
+
+export type RelationshipCardinality = 'one' | 'many';
+
+export type RelationshipModality = 0 | 1;
+
+export interface DatabaseRelationship {
+  id: string;
+  sourceTableId: string;
+  targetTableId: string;
+  cardinality: RelationshipCardinality;
+  modality: RelationshipModality;
+  description?: string;
+}
+
+export interface DatabaseConnectionSettings {
+  host: string;
+  port: number;
+  database: string;
+  user: string;
+  password?: string;
+  ssl?: boolean;
+}
+
+export interface DatabaseSchema {
+  id: string;
+  name: string;
+  tables: DatabaseTable[];
+  relationships: DatabaseRelationship[];
+  connection?: DatabaseConnectionSettings;
+  updatedAt?: string;
+}
+
+export interface DatabaseNodeData {
+  kind: 'database';
+  schemaId: string;
+  schemaName: string;
+  selectedTableId?: string;
+  tables: Array<Pick<DatabaseTable, 'id' | 'name' | 'fields'>>;
+}
+
 export type LogicEditorNodeData =
   | DummyNodeData
   | PageNodeData
@@ -228,7 +294,8 @@ export type LogicEditorNodeData =
   | RelationalOperatorNodeData
   | FunctionNodeData
   | FunctionArgumentNodeData
-  | FunctionReturnNodeData;
+  | FunctionReturnNodeData
+  | DatabaseNodeData;
 
 export interface LogicEditorNode {
   id: string;
@@ -267,6 +334,7 @@ export interface ProjectGraphSnapshot {
   nodes: LogicEditorNode[];
   edges: LogicEditorEdge[];
   functions: UserDefinedFunction[];
+  databases?: DatabaseSchema[];
 }
 
 export type PageBuilderState = Record<string, unknown>;

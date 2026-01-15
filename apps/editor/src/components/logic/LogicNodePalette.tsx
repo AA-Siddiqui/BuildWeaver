@@ -22,6 +22,9 @@ interface LogicNodePaletteProps {
   pageRoutes?: string[];
   isPageRoutesLoading?: boolean;
   pageRoutesError?: string;
+  onOpenDatabaseDesigner?: () => void;
+  onEditDatabase?: (schemaId: string) => void;
+  databases?: Array<{ id: string; name: string; tableCount: number }>;
 }
 
 const basePaletteItems: Array<{ type: PaletteNodeType; label: string; description: string }> = [
@@ -48,7 +51,10 @@ export const LogicNodePalette = ({
   disablePageNode,
   pageRoutes,
   isPageRoutesLoading,
-  pageRoutesError
+  pageRoutesError,
+  onOpenDatabaseDesigner,
+  onEditDatabase,
+  databases
 }: LogicNodePaletteProps) => {
   const paletteItems = disablePageNode ? basePaletteItems.filter((item) => item.type !== 'page') : basePaletteItems;
 
@@ -82,6 +88,46 @@ export const LogicNodePalette = ({
         <p className="text-xs uppercase tracking-[0.3em] text-bw-amber">Node palette</p>
         <p className="mt-1 text-xs text-bw-platinum/70">Drag or click to add nodes</p>
       </div>
+      {onOpenDatabaseDesigner && (
+        <div className="space-y-3 rounded-2xl border border-white/10 bg-white/5 p-4">
+          <div className="flex items-center justify-between gap-2">
+            <div>
+              <p className="text-[10px] uppercase tracking-[0.3em] text-bw-amber">Database</p>
+              <p className="text-xs text-bw-platinum/70">Design entity relationships</p>
+            </div>
+            <button
+              type="button"
+              onClick={onOpenDatabaseDesigner}
+              className="rounded-xl border border-white/20 px-3 py-1 text-[11px] font-semibold text-white transition hover:-translate-y-0.5"
+            >
+              Design DB
+            </button>
+          </div>
+          {databases && databases.length > 0 ? (
+            <ul className="space-y-1 text-xs text-bw-platinum/80">
+              {databases.map((db) => (
+                <li key={db.id} className="flex items-center justify-between gap-2 rounded-lg border border-white/5 bg-bw-ink/60 px-3 py-2">
+                  <div>
+                    <p className="font-semibold text-white">{db.name}</p>
+                    <p className="text-[11px] text-bw-platinum/70">{db.tableCount} table{db.tableCount === 1 ? '' : 's'}</p>
+                  </div>
+                  {onEditDatabase && (
+                    <button
+                      type="button"
+                      onClick={() => onEditDatabase(db.id)}
+                      className="text-[11px] text-bw-sand underline"
+                    >
+                      Edit
+                    </button>
+                  )}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="text-[11px] text-bw-platinum/70">No databases yet.</p>
+          )}
+        </div>
+      )}
       {paletteItems.map((item) => (
         <button
           key={item.type}

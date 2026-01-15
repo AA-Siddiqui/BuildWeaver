@@ -16,7 +16,8 @@ import {
   ScalarValue,
   StringNodeInputRole,
   StringOperation,
-  UserDefinedFunction
+  UserDefinedFunction,
+  DatabaseFieldType
 } from '@buildweaver/libs';
 import { Type } from 'class-transformer';
 import { IsArray, IsBoolean, IsIn, IsNumber, IsObject, IsOptional, IsString, ValidateIf, ValidateNested } from 'class-validator';
@@ -171,7 +172,8 @@ class GraphNodeDataDto {
     'relational',
     'function',
     'function-argument',
-    'function-return'
+    'function-return',
+    'database'
   ])
   kind!: LogicEditorNode['type'];
 
@@ -352,6 +354,26 @@ class GraphNodeDataDto {
   @ValidateIf((node: GraphNodeDataDto) => node.kind === 'function-return')
   @IsString()
   returnId?: string;
+
+  // Database node specifics
+  @ValidateIf((node: GraphNodeDataDto) => node.kind === 'database')
+  @IsString()
+  schemaId?: string;
+
+  @ValidateIf((node: GraphNodeDataDto) => node.kind === 'database')
+  @IsString()
+  schemaName?: string;
+
+  @ValidateIf((node: GraphNodeDataDto) => node.kind === 'database')
+  @IsOptional()
+  @IsString()
+  selectedTableId?: string;
+
+  @ValidateIf((node: GraphNodeDataDto) => node.kind === 'database')
+  @IsOptional()
+  @ValidateNested({ each: true })
+  @Type(() => DatabaseNodeTableDto)
+  tables?: DatabaseNodeTableDto[];
 }
 
 class GraphNodeDto {
@@ -370,7 +392,8 @@ class GraphNodeDto {
     'relational',
     'function',
     'function-argument',
-    'function-return'
+    'function-return',
+    'database'
   ])
   type!: LogicEditorNode['type'];
 
@@ -447,6 +470,132 @@ class UserFunctionDto {
   returnsValue!: boolean;
 }
 
+class DatabaseFieldDto {
+  @IsString()
+  id!: string;
+
+  @IsString()
+  name!: string;
+
+  @IsIn(['uuid', 'string', 'number', 'boolean', 'json', 'date', 'datetime'])
+  type!: DatabaseFieldType;
+
+  @IsOptional()
+  @IsString()
+  defaultValue?: string;
+
+  @IsBoolean()
+  nullable!: boolean;
+
+  @IsBoolean()
+  unique!: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  isId?: boolean;
+}
+
+class DatabaseTableDto {
+  @IsString()
+  id!: string;
+
+  @IsString()
+  name!: string;
+
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => DatabaseFieldDto)
+  fields!: DatabaseFieldDto[];
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => GraphNodePositionDto)
+  position?: GraphNodePositionDto;
+}
+
+class DatabaseNodeTableDto {
+  @IsString()
+  id!: string;
+
+  @IsString()
+  name!: string;
+
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => DatabaseFieldDto)
+  fields!: DatabaseFieldDto[];
+}
+
+class DatabaseRelationshipDto {
+  @IsString()
+  id!: string;
+
+  @IsString()
+  sourceTableId!: string;
+
+  @IsString()
+  targetTableId!: string;
+
+  @IsIn(['one', 'many'])
+  cardinality!: 'one' | 'many';
+
+  @IsIn([0, 1])
+  modality!: 0 | 1;
+
+  @IsOptional()
+  @IsString()
+  description?: string;
+}
+
+class DatabaseConnectionDto {
+  @IsString()
+  host!: string;
+
+  @IsNumber()
+  port!: number;
+
+  @IsString()
+  database!: string;
+
+  @IsString()
+  user!: string;
+
+  @IsOptional()
+  @IsString()
+  password?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  ssl?: boolean;
+}
+
+class DatabaseSchemaDto {
+  @IsString()
+  id!: string;
+
+  @IsString()
+  name!: string;
+
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => DatabaseTableDto)
+  tables!: DatabaseTableDto[];
+
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => DatabaseRelationshipDto)
+  relationships!: DatabaseRelationshipDto[];
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => DatabaseConnectionDto)
+  connection?: DatabaseConnectionDto;
+
+  @IsOptional()
+  @IsString()
+  updatedAt?: string;
+}
+
 export class SaveProjectGraphDto {
   @IsArray()
   @ValidateNested({ each: true })
@@ -462,4 +611,9 @@ export class SaveProjectGraphDto {
   @ValidateNested({ each: true })
   @Type(() => UserFunctionDto)
   functions!: UserDefinedFunction[];
+
+  @IsOptional()
+  @ValidateNested({ each: true })
+  @Type(() => DatabaseSchemaDto)
+  databases?: DatabaseSchemaDto[];
 }

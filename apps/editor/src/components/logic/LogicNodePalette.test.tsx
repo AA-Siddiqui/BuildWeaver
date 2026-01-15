@@ -70,4 +70,24 @@ describe('LogicNodePalette', () => {
 
     expect(screen.getByTestId('page-routes-error')).toHaveTextContent('Unable to load routes');
   });
+
+  it('shows database design controls and forwards actions', () => {
+    const handleDesign = jest.fn();
+    const handleEdit = jest.fn();
+
+    render(
+      <LogicNodePalette
+        onAddNode={jest.fn()}
+        onOpenDatabaseDesigner={handleDesign}
+        onEditDatabase={handleEdit}
+        databases={[{ id: 'db-1', name: 'Analytics', tableCount: 3 }]}
+      />
+    );
+
+    fireEvent.click(screen.getByText('Design DB'));
+    expect(handleDesign).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByText('Edit'));
+    expect(handleEdit).toHaveBeenCalledWith('db-1');
+  });
 });

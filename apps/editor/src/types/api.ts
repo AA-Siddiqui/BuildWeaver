@@ -32,5 +32,13 @@ export type {
   ObjectNodeData,
   ConditionalNodeData,
   LogicalOperatorNodeData,
-  RelationalOperatorNodeData
+  RelationalOperatorNodeData,
+  DatabaseSchema,
+  DatabaseTable,
+  DatabaseField,
+  DatabaseRelationship,
+  DatabaseConnectionSettings,
+  DatabaseNodeData,
+  RelationshipCardinality,
+  RelationshipModality
 } from '@buildweaver/libs';

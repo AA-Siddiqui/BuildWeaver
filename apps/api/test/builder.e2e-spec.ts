@@ -359,6 +359,70 @@ describe('Builder surfaces (e2e)', () => {
     expect(refreshed.body.data.graph.functions[0].id).toBe(functionId);
   });
 
+  it('persists databases and database nodes in the graph', async () => {
+    const databaseSchema = {
+      id: 'db-analytics',
+      name: 'Analytics',
+      tables: [
+        {
+          id: 'table-users',
+          name: 'users',
+          fields: [
+            { id: 'user-id', name: 'id', type: 'uuid', nullable: false, unique: true, isId: true },
+            { id: 'user-email', name: 'email', type: 'string', nullable: false, unique: true }
+          ]
+        }
+      ],
+      relationships: [],
+      connection: {
+        host: 'db.internal',
+        port: 5432,
+        database: 'analytics',
+        user: 'dbuser',
+        password: 'secret',
+        ssl: false
+      }
+    } satisfies ProjectGraphSnapshot['databases'][number];
+
+    const graphPayload: ProjectGraphSnapshot = {
+      nodes: [
+        {
+          id: 'database-node-1',
+          type: 'database',
+          position: { x: 120, y: 40 },
+          data: {
+            kind: 'database',
+            schemaId: databaseSchema.id,
+            schemaName: databaseSchema.name,
+            tables: databaseSchema.tables.map((table) => ({ id: table.id, name: table.name, fields: table.fields }))
+          }
+        }
+      ],
+      edges: [],
+      functions: [],
+      databases: [databaseSchema]
+    };
+
+    const saveGraphRes = await request(app.getHttpServer())
+      .put(`/projects/${projectId}/graph`)
+      .set('Authorization', `Bearer ${token}`)
+      .send(graphPayload);
+
+    expect(saveGraphRes.status).toBe(200);
+    expect(saveGraphRes.body.data.graph.databases).toHaveLength(1);
+    const savedSchema = saveGraphRes.body.data.graph.databases[0];
+    expect(savedSchema.tables[0].fields.find((field: { isId?: boolean }) => field.isId)).toBeDefined();
+    expect(savedSchema.connection).toMatchObject({ host: 'db.internal', database: 'analytics', user: 'dbuser' });
+
+    const getGraphRes = await request(app.getHttpServer())
+      .get(`/projects/${projectId}/graph`)
+      .set('Authorization', `Bearer ${token}`);
+
+    expect(getGraphRes.status).toBe(200);
+    expect(getGraphRes.body.data.graph.databases).toHaveLength(1);
+    expect(getGraphRes.body.data.graph.nodes.find((node: { type: string }) => node.type === 'database')).toBeDefined();
+  });
+
   it('persists builder state and returns it via the API', async () => {
     expect(landingPageId).toBeDefined();
     const builderState = {
