@@ -1,5 +1,5 @@
 import { useAuthStore } from '../stores/auth-store';
-import { AuthUser, Project } from '../types/api';
+import { AuthUser, DatabaseSchema, Project } from '../types/api';
 import type {
   ComponentBindingReference,
   PageBuilderState,
@@ -147,4 +147,12 @@ export const projectComponentsApi = {
     }),
   get: (projectId: string, componentId: string) =>
     apiFetch<{ component: ProjectComponentDocument }>(`/projects/${projectId}/components/${componentId}`)
+};
+
+export const projectDatabasesApi = {
+  apply: (projectId: string, schema: DatabaseSchema) =>
+    apiFetch<{ applied: boolean; statements: string[] }>(`/projects/${projectId}/databases/apply`, {
+      method: 'POST',
+      body: serialize(schema)
+    })
 };

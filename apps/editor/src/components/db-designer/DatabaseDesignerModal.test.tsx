@@ -108,6 +108,24 @@ describe('DatabaseDesignerModal', () => {
     expect(screen.getByText('Schema applied to database')).toBeInTheDocument();
   });
 
+  it('surfaces apply errors to the user', async () => {
+    const onApply = jest.fn().mockRejectedValue(new Error('connection refused'));
+
+    render(
+      <DatabaseDesignerModal
+        initialSchema={baseSchema}
+        onSave={jest.fn()}
+        onApply={onApply}
+        onClose={jest.fn()}
+      />
+    );
+
+    fireEvent.click(screen.getByText('Apply to DB'));
+
+    await waitFor(() => expect(onApply).toHaveBeenCalledTimes(1));
+    expect(screen.getByText('connection refused')).toBeInTheDocument();
+  });
+
   it('adds a new table before saving', async () => {
     const onSave = jest.fn().mockResolvedValue(undefined);
 

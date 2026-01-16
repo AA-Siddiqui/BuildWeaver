@@ -32,7 +32,7 @@ import type {
   ProjectGraphSnapshot,
   UserDefinedFunction
 } from '../types/api';
-import { projectGraphApi, projectPagesApi } from '../lib/api-client';
+import { projectDatabasesApi, projectGraphApi, projectPagesApi } from '../lib/api-client';
 import { LogicNodePalette, FUNCTION_DRAG_DATA } from '../components/logic/LogicNodePalette';
 import { DummyNode } from '../components/logic/DummyNode';
 import { PageNode } from '../components/logic/PageNode';
@@ -713,6 +713,7 @@ const LogicEditorView = () => {
     (schema: DatabaseSchema, options?: { createIfMissing?: boolean }) => {
       const nodeData = toDatabaseNodeData(schema);
       setNodes((current: FlowNode[]) => {
+        let refreshed = 0;
         const updated = current.map((node) => {
           if (node.type !== 'database') {
             return node;
@@ -724,6 +725,7 @@ const LogicEditorView = () => {
           const selectedTableId = existingData.selectedTableId && nodeData.tables.some((table) => table.id === existingData.selectedTableId)
             ? existingData.selectedTableId
             : nodeData.tables[0]?.id;
+          refreshed += 1;
           return { ...node, data: { ...nodeData, selectedTableId } };
         });
 
@@ -735,12 +737,25 @@ const LogicEditorView = () => {
             position: { x: 0, y: 0 },
             data: nodeData
           };
+          logicLogger.info('Database node created for schema', {
+            projectId,
+            schemaId: schema.id,
+            tableCount: nodeData.tables.length,
+            nodeId: newNode.id
+          });
           return updated.concat(newNode);
+        }
+        if (refreshed > 0) {
+          logicLogger.debug('Database node data refreshed', {
+            projectId,
+            schemaId: schema.id,
+            updatedCount: refreshed
+          });
         }
         return updated;
       });
     },
-    [setNodes]
+    [projectId, setNodes]
   );
 
   const handleDatabaseSave = useCallback(
@@ -752,14 +767,25 @@ const LogicEditorView = () => {
       });
       syncDatabaseNodesWithSchema(normalized, { createIfMissing: true });
       setHasUnsavedChanges(true);
+      logicLogger.info('Database schema saved in logic editor', {
+        projectId,
+        schemaId: normalized.id,
+        tableCount: normalized.tables.length
+      });
       setFeedback(`${normalized.name} saved`);
       setTimeout(() => setFeedback(''), 2000);
     },
-    [setDatabases, setHasUnsavedChanges, syncDatabaseNodesWithSchema]
+    [projectId, setDatabases, setHasUnsavedChanges, syncDatabaseNodesWithSchema]
   );
 
   const handleDatabaseApply = useCallback(
     async (schema: DatabaseSchema) => {
+      if (!projectId) {
+        logicLogger.error('Database apply aborted - missing project id');
+        setFeedback('Missing project context.');
+        setTimeout(() => setFeedback(''), 3000);
+        return;
+      }
       const normalized = normalizeDatabaseSchema(schema);
       logicLogger.info('Database apply requested', {
         projectId,
@@ -768,9 +794,33 @@ const LogicEditorView = () => {
         database: normalized.connection?.database
       });
       setFeedback('Applying database schema…');
-      setTimeout(() => setFeedback(''), 2000);
+      try {
+        const response = await projectDatabasesApi.apply(projectId, normalized);
+        setDatabases((current) => {
+          const exists = current.some((entry) => entry.id === normalized.id);
+          return exists ? current.map((entry) => (entry.id === normalized.id ? normalized : entry)) : current.concat(normalized);
+        });
+        syncDatabaseNodesWithSchema(normalized, { createIfMissing: true });
+        setHasUnsavedChanges(true);
+        logicLogger.info('Database schema apply completed', {
+          projectId,
+          schemaId: normalized.id,
+          statements: response.statements.length
+        });
+        setFeedback('Database applied to Postgres');
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Unable to apply database schema';
+        setFeedback(message);
+        logicLogger.error('Database apply failed', {
+          projectId,
+          schemaId: normalized.id,
+          message
+        });
+      } finally {
+        setTimeout(() => setFeedback(''), 3000);
+      }
     },
-    [projectId]
+    [projectId, setDatabases, setHasUnsavedChanges, syncDatabaseNodesWithSchema]
   );
 
   const handleOpenDatabaseDesigner = useCallback(() => {
