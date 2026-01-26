@@ -24,6 +24,7 @@ import type {
   DatabaseTable,
   DatabaseField,
   DatabaseRelationship,
+  DatabaseConnectionSettings,
   FunctionNodeData,
   LogicEditorNode,
   LogicEditorNodeData,
@@ -823,6 +824,54 @@ const LogicEditorView = () => {
     [projectId, setDatabases, setHasUnsavedChanges, syncDatabaseNodesWithSchema]
   );
 
+  const handleDatabaseIntrospect = useCallback(
+    async (connection: DatabaseConnectionSettings, schema: DatabaseSchema) => {
+      if (!projectId) {
+        const message = 'Missing project context.';
+        logicLogger.error('Database introspection aborted - missing project id');
+        throw new Error(message);
+      }
+      const normalized = normalizeDatabaseSchema(schema);
+      logicLogger.info('Database schema introspection requested', {
+        projectId,
+        schemaId: normalized.id,
+        host: connection.host,
+        database: connection.database
+      });
+      try {
+        const response = await projectDatabasesApi.introspect(projectId, {
+          connection,
+          name: normalized.name,
+          schemaId: normalized.id
+        });
+        const remoteSchema = normalizeDatabaseSchema({ ...response.schema, connection });
+        setDatabases((current) => {
+          const exists = current.some((entry) => entry.id === remoteSchema.id);
+          return exists ? current.map((entry) => (entry.id === remoteSchema.id ? remoteSchema : entry)) : current.concat(remoteSchema);
+        });
+        syncDatabaseNodesWithSchema(remoteSchema, { createIfMissing: true });
+        setHasUnsavedChanges(true);
+        setActiveDatabaseSchema(remoteSchema);
+        logicLogger.info('Database schema introspection completed', {
+          projectId,
+          schemaId: remoteSchema.id,
+          tableCount: remoteSchema.tables.length,
+          relationshipCount: remoteSchema.relationships.length
+        });
+        return remoteSchema;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Unable to load schema from database';
+        logicLogger.error('Database introspection failed', {
+          projectId,
+          schemaId: normalized.id,
+          message
+        });
+        throw new Error(message);
+      }
+    },
+    [projectId, setDatabases, setHasUnsavedChanges, syncDatabaseNodesWithSchema]
+  );
+
   const handleOpenDatabaseDesigner = useCallback(() => {
     const proposedName = window.prompt('Name your database schema', `Database ${databases.length + 1}`);
     if (!proposedName) {
@@ -1574,6 +1623,7 @@ const LogicEditorView = () => {
           initialSchema={activeDatabaseSchema}
           onSave={handleDatabaseSave}
           onApply={handleDatabaseApply}
+          onLoadFromDatabase={handleDatabaseIntrospect}
           onClose={handleCloseDatabaseDesigner}
         />
       )}

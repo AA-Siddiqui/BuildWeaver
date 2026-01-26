@@ -46,6 +46,37 @@ const parseJson = async <T>(response: Response): Promise<ApiResponse<T> | undefi
   return undefined;
 };
 
+const resolveErrorMessage = (payload: unknown, response: Response): string => {
+  if (payload && typeof payload === 'object') {
+    const maybeMessage = (payload as { message?: unknown }).message;
+    if (typeof maybeMessage === 'string') {
+      return maybeMessage;
+    }
+    if (Array.isArray(maybeMessage)) {
+      const combined = maybeMessage.filter((entry) => typeof entry === 'string').join(', ');
+      if (combined) {
+        return combined;
+      }
+    }
+    const maybeError = (payload as { error?: unknown }).error;
+    if (maybeError && typeof maybeError === 'object' && 'message' in (maybeError as object)) {
+      const nested = (maybeError as { message?: unknown }).message;
+      if (typeof nested === 'string') {
+        return nested;
+      }
+    }
+    if (typeof maybeError === 'string' && maybeError.trim()) {
+      return maybeError;
+    }
+  }
+
+  if (response.statusText) {
+    return response.statusText;
+  }
+
+  return 'Something went wrong';
+};
+
 export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
   const state = useAuthStore.getState();
   const headers = new Headers(init.headers ?? {});
@@ -63,7 +94,7 @@ export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise
 
   const payload = await parseJson<T>(response);
   if (!response.ok) {
-    const message = (payload as ApiFailure | undefined)?.error?.message ?? response.statusText;
+    const message = (payload as ApiFailure | undefined)?.error?.message ?? resolveErrorMessage(payload, response);
     throw new Error(message || 'Something went wrong');
   }
 
@@ -154,5 +185,13 @@ export const projectDatabasesApi = {
     apiFetch<{ applied: boolean; statements: string[] }>(`/projects/${projectId}/databases/apply`, {
       method: 'POST',
       body: serialize(schema)
+    }),
+  introspect: (
+    projectId: string,
+    payload: { connection: DatabaseSchema['connection']; name?: string; schemaId?: string }
+  ) =>
+    apiFetch<{ schema: DatabaseSchema }>(`/projects/${projectId}/databases/introspect`, {
+      method: 'POST',
+      body: serialize(payload)
     })
 };

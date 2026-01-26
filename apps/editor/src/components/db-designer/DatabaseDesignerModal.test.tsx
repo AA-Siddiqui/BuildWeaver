@@ -126,6 +126,24 @@ describe('DatabaseDesignerModal', () => {
     expect(screen.getByText('connection refused')).toBeInTheDocument();
   });
 
+  it('surfaces load errors to the user', async () => {
+    const onLoadFromDatabase = jest.fn().mockRejectedValue(new Error('authentication failed'));
+
+    render(
+      <DatabaseDesignerModal
+        initialSchema={baseSchema}
+        onSave={jest.fn()}
+        onLoadFromDatabase={onLoadFromDatabase}
+        onClose={jest.fn()}
+      />
+    );
+
+    fireEvent.click(screen.getByText('Load from DB'));
+
+    await waitFor(() => expect(onLoadFromDatabase).toHaveBeenCalledTimes(1));
+    expect(screen.getByText('authentication failed')).toBeInTheDocument();
+  });
+
   it('adds a new table before saving', async () => {
     const onSave = jest.fn().mockResolvedValue(undefined);
 
@@ -142,5 +160,49 @@ describe('DatabaseDesignerModal', () => {
     const idField = newestTable.fields.find((field) => field.isId);
     expect(idField).toBeDefined();
     expect(idField?.nullable).toBe(false);
+  });
+
+  it('loads schema from database and updates state before saving', async () => {
+    const onSave = jest.fn().mockResolvedValue(undefined);
+    const loadedSchema: DatabaseSchema = {
+      ...baseSchema,
+      id: 'db-remote',
+      name: 'Remote',
+      tables: [
+        ...baseSchema.tables,
+        {
+          id: 'orders',
+          name: 'Orders',
+          fields: [
+            { id: 'orders-id', name: 'id', type: 'uuid', nullable: false, unique: true, isId: true },
+            { id: 'orders-total', name: 'total', type: 'number', nullable: false, unique: false }
+          ],
+          position: { x: 120, y: 80 }
+        }
+      ]
+    };
+
+    const onLoadFromDatabase = jest.fn().mockResolvedValue(loadedSchema);
+
+    render(
+      <DatabaseDesignerModal
+        initialSchema={baseSchema}
+        onSave={onSave}
+        onLoadFromDatabase={onLoadFromDatabase}
+        onClose={jest.fn()}
+      />
+    );
+
+    fireEvent.click(screen.getByText('Load from DB'));
+
+    await waitFor(() => expect(onLoadFromDatabase).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screen.getByText('Schema loaded from database')).toBeInTheDocument());
+
+    fireEvent.click(screen.getByText('Save'));
+
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
+    const saved = onSave.mock.calls[0][0] as DatabaseSchema;
+
+    expect(saved.tables.find((table) => table.name === 'Orders')).toBeDefined();
   });
 });

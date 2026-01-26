@@ -5,6 +5,7 @@ import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { ok } from '../../common/api-response';
 import { AuthUser } from '../../auth/interfaces/auth-user.interface';
 import { ApplyDatabaseSchemaDto } from './dto/apply-database-schema.dto';
+import { IntrospectDatabaseSchemaDto } from './dto/introspect-database-schema.dto';
 import { ProjectDatabasesService } from './project-databases.service';
 
 @ApiTags('project-databases')
@@ -26,5 +27,19 @@ export class ProjectDatabasesController {
   ) {
     const result = await this.databases.applySchema(user.sub, projectId, schema);
     return ok({ applied: true, statements: result.statements });
+  }
+
+  @Post('introspect')
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Pulls the current schema from the configured Postgres instance'
+  })
+  async introspect(
+    @CurrentUser() user: AuthUser,
+    @Param('projectId', new ParseUUIDPipe()) projectId: string,
+    @Body() payload: IntrospectDatabaseSchemaDto
+  ) {
+    const result = await this.databases.introspectSchema(user.sub, projectId, payload);
+    return ok(result);
   }
 }

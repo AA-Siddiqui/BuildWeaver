@@ -1,6 +1,7 @@
-import type { DatabaseSchema } from '@buildweaver/libs';
+import { BadRequestException } from '@nestjs/common';
+import type { DatabaseConnectionSettings, DatabaseSchema } from '@buildweaver/libs';
 import { newDb } from 'pg-mem';
-import type { Pool } from 'pg';
+import type { Pool, PoolClient } from 'pg';
 import type { DatabaseService } from '../../database/database.service';
 import { ProjectDatabasesService } from './project-databases.service';
 
@@ -160,5 +161,104 @@ describe('ProjectDatabasesService', () => {
     client.release();
 
     expect(columns.rows[0]?.column_default).toBeNull();
+  });
+
+  it('introspects existing tables and relationships', async () => {
+    const service = buildService();
+    const pool = createInMemoryPool();
+
+    const client = await pool.connect();
+    await client.query(
+      `CREATE TABLE users (
+        id uuid PRIMARY KEY,
+        email text UNIQUE NOT NULL,
+        created_at timestamptz DEFAULT now()
+      );`
+    );
+    await client.query(
+      `CREATE TABLE orders (
+        id uuid PRIMARY KEY,
+        total numeric NOT NULL,
+        user_id uuid REFERENCES users(id)
+      );`
+    );
+    client.release();
+
+    const result = await service.introspectSchema(
+      'owner-1',
+      'project-1',
+      { connection, name: 'Remote DB', schemaId: 'db-remote' },
+      { pool }
+    );
+
+    expect(result.schema.id).toBe('db-remote');
+    expect(result.schema.name).toBe('Remote DB');
+    expect(result.schema.tables).toHaveLength(2);
+
+    const usersTable = result.schema.tables.find((table) => table.name === 'users');
+    const ordersTable = result.schema.tables.find((table) => table.name === 'orders');
+
+    expect(usersTable?.fields.find((field) => field.name === 'email')?.unique).toBe(true);
+    expect(usersTable?.fields.find((field) => field.name === 'created_at')?.type).toBe('datetime');
+    expect(usersTable?.fields.find((field) => field.isId)?.name).toBe('id');
+
+    expect(ordersTable?.fields.find((field) => field.name === 'user_id')?.type).toBe('uuid');
+
+    expect(result.schema.relationships).toHaveLength(1);
+    expect(result.schema.relationships[0]).toMatchObject({
+      sourceTableId: 'orders',
+      targetTableId: 'users',
+      cardinality: 'many',
+      modality: 0
+    });
+  });
+
+  it('rejects introspection when connection details are missing', async () => {
+    const service = buildService();
+    const invalidConnection: DatabaseConnectionSettings = { ...connection, host: '', database: '', user: '' };
+
+    await expect(
+      service.introspectSchema('owner-1', 'project-1', {
+        connection: invalidConnection
+      })
+    ).rejects.toThrow(BadRequestException);
+  });
+
+  it('surfaces connection errors during introspection', async () => {
+    const service = buildService();
+    const connect = jest
+      .fn()
+      .mockRejectedValue(Object.assign(new Error('password authentication failed'), { code: '28P01' }));
+    const pool = { connect } as unknown as Pool;
+
+    await expect(
+      service.introspectSchema(
+        'owner-1',
+        'project-1',
+        { connection },
+        { pool }
+      )
+    ).rejects.toThrow('Unable to connect to database: password authentication failed');
+
+    expect(connect).toHaveBeenCalledTimes(1);
+  });
+
+  it('includes underlying errors when introspection fails mid-query', async () => {
+    const service = buildService();
+    const pool = createInMemoryPool();
+    const loadSpy = jest
+      .spyOn(service as unknown as { loadTableNames: (client: PoolClient) => Promise<string[]> }, 'loadTableNames')
+      .mockRejectedValueOnce(new Error('boom'));
+
+    await expect(
+      service.introspectSchema(
+        'owner-1',
+        'project-1',
+        { connection },
+        { pool }
+      )
+    ).rejects.toThrow('Failed to introspect database schema: boom');
+
+    loadSpy.mockRestore();
   });
 });

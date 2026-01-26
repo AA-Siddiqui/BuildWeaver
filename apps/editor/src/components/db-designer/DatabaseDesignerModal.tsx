@@ -38,6 +38,7 @@ interface DatabaseDesignerModalProps {
   initialSchema: DatabaseSchema;
   onSave: (schema: DatabaseSchema) => Promise<void> | void;
   onApply?: (schema: DatabaseSchema) => Promise<void> | void;
+  onLoadFromDatabase?: (connection: DatabaseConnectionSettings, schema: DatabaseSchema) => Promise<DatabaseSchema> | DatabaseSchema;
   onClose: () => void;
 }
 
@@ -156,7 +157,7 @@ const buildFlowEdges = (relationships: DatabaseRelationship[]) =>
     markerEnd: { type: MarkerType.ArrowClosed }
   }));
 
-const DesignerCanvas = ({ initialSchema, onSave, onApply, onClose }: DatabaseDesignerModalProps) => {
+const DesignerCanvas = ({ initialSchema, onSave, onApply, onLoadFromDatabase, onClose }: DatabaseDesignerModalProps) => {
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
   const reactFlowInstance = useReactFlow();
   const [schema, setSchema] = useState<DatabaseSchema>(() => normalizeSchema(initialSchema));
@@ -166,6 +167,7 @@ const DesignerCanvas = ({ initialSchema, onSave, onApply, onClose }: DatabaseDes
   const [status, setStatus] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [isApplying, setIsApplying] = useState(false);
+  const [isLoadingFromDb, setIsLoadingFromDb] = useState(false);
 
   useEffect(() => {
     setSchema(normalizeSchema(initialSchema));
@@ -432,6 +434,42 @@ const DesignerCanvas = ({ initialSchema, onSave, onApply, onClose }: DatabaseDes
     }
   }, [onApply, schema]);
 
+  const loadFromDatabase = useCallback(async () => {
+    if (!onLoadFromDatabase) {
+      setStatus('Load hook not implemented yet.');
+      setTimeout(() => setStatus(''), 2000);
+      return;
+    }
+    setIsLoadingFromDb(true);
+    const normalized = normalizeSchema(schema);
+    const connection = normalized.connection ?? defaultConnection();
+    try {
+      const loaded = await Promise.resolve(onLoadFromDatabase(connection, normalized));
+      const nextSchema = normalizeSchema({ ...loaded, connection });
+      setSchema(nextSchema);
+      setStatus('Schema loaded from database');
+      logicLogger.info('Database schema loaded from database', {
+        schemaId: nextSchema.id,
+        tableCount: nextSchema.tables.length,
+        relationshipCount: nextSchema.relationships.length,
+        host: connection.host,
+        database: connection.database
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unable to load schema from database';
+      setStatus(message);
+      logicLogger.error('Database schema load failed', {
+        schemaId: normalized.id,
+        host: connection.host,
+        database: connection.database,
+        message
+      });
+    } finally {
+      setIsLoadingFromDb(false);
+      setTimeout(() => setStatus(''), 2500);
+    }
+  }, [onLoadFromDatabase, schema]);
+
   const connection = useMemo(() => schema.connection ?? defaultConnection(), [schema.connection]);
 
   return (
@@ -462,6 +500,14 @@ const DesignerCanvas = ({ initialSchema, onSave, onApply, onClose }: DatabaseDes
               className="rounded-xl border border-white/20 px-3 py-2 text-white transition hover:-translate-y-0.5 disabled:opacity-60"
             >
               {isSaving ? 'Saving…' : 'Save'}
+            </button>
+            <button
+              type="button"
+              onClick={loadFromDatabase}
+              disabled={isLoadingFromDb}
+              className="rounded-xl border border-white/20 px-3 py-2 text-white transition hover:-translate-y-0.5 disabled:opacity-60"
+            >
+              {isLoadingFromDb ? 'Loading…' : 'Load from DB'}
             </button>
             <button
               type="button"
