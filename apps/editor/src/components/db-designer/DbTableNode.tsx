@@ -50,7 +50,7 @@ export const DbTableNode = ({ data, id }: NodeProps<DbTableNodeData>) => {
       </div>
       <div className="space-y-2">
         {table.fields.map((field) => (
-          <div key={field.id} className="rounded-lg border border-white/10 bg-white/5 p-3">
+          <div key={field.id} className="rounded-lg border border-white/10 bg-white/5 p-3 flex flex-col gap-2">
             <div className="flex items-center gap-2">
               <input
                 aria-label={`${field.name}-name`}
@@ -66,11 +66,13 @@ export const DbTableNode = ({ data, id }: NodeProps<DbTableNodeData>) => {
                 className="rounded-md border border-white/15 bg-white/5 px-2 py-1 text-xs"
               >
                 {FIELD_TYPES.map((option) => (
-                  <option key={option} value={option}>
+                  <option key={option} value={option} className='bg-white text-black'>
                     {toTitle(option)}
                   </option>
                 ))}
               </select>
+            </div>
+            <div className="flex items-center gap-2">
               <input
                 aria-label={`${field.name}-default`}
                 value={field.defaultValue ?? ''}
