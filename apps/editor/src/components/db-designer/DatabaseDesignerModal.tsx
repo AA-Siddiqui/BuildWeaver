@@ -175,11 +175,16 @@ const DesignerCanvas = ({ initialSchema, onSave, onApply, onLoadFromDatabase, on
 
   useEffect(() => {
     setNodes(buildFlowNodes(schema.tables, {
-      onRename: (tableId, name) => setSchema((current) => ({
-        ...current,
-        tables: current.tables.map((table) => (table.id === tableId ? { ...table, name } : table))
-      })),
-      onAddField: (tableId) =>
+      onRename: (tableId, name) => {
+        logicLogger.debug('Database table rename requested', { tableId, name });
+        setSchema((current) => ({
+          ...current,
+          tables: current.tables.map((table) => (table.id === tableId ? { ...table, name } : table))
+        }));
+      },
+      onAddField: (tableId) => {
+        const fieldId = `${tableId}-field-${generateNodeId()}`;
+        logicLogger.info('Database table field added', { tableId, fieldId });
         setSchema((current) => ({
           ...current,
           tables: current.tables.map((table) =>
@@ -187,7 +192,7 @@ const DesignerCanvas = ({ initialSchema, onSave, onApply, onLoadFromDatabase, on
               ? {
                   ...table,
                   fields: table.fields.concat({
-                    id: `${tableId}-field-${generateNodeId()}`,
+                    id: fieldId,
                     name: 'new_field',
                     type: 'string' as DatabaseFieldType,
                     defaultValue: '',
@@ -197,8 +202,10 @@ const DesignerCanvas = ({ initialSchema, onSave, onApply, onLoadFromDatabase, on
                 }
               : table
           )
-        })),
-      onRemoveField: (tableId, fieldId) =>
+        }));
+      },
+      onRemoveField: (tableId, fieldId) => {
+        logicLogger.info('Database table field removed', { tableId, fieldId });
         setSchema((current) => ({
           ...current,
           tables: current.tables.map((table) =>
@@ -209,8 +216,10 @@ const DesignerCanvas = ({ initialSchema, onSave, onApply, onLoadFromDatabase, on
                 }
               : table
           )
-        })),
-      onUpdateField: (tableId, fieldId, patch) =>
+        }));
+      },
+      onUpdateField: (tableId, fieldId, patch) => {
+        logicLogger.debug('Database table field updated', { tableId, fieldId, patch });
         setSchema((current) => ({
           ...current,
           tables: current.tables.map((table) =>
@@ -221,7 +230,8 @@ const DesignerCanvas = ({ initialSchema, onSave, onApply, onLoadFromDatabase, on
                 }
               : table
           )
-        }))
+        }));
+      }
     }));
   }, [schema.tables]);
 
@@ -236,6 +246,10 @@ const DesignerCanvas = ({ initialSchema, onSave, onApply, onLoadFromDatabase, on
         (change): change is NodePositionChange => change.type === 'position' && Boolean((change as NodePositionChange).position)
       );
       if (positionChanges.length) {
+        logicLogger.debug('Database table positions updated', {
+          updatedCount: positionChanges.length,
+          tableIds: positionChanges.map((change) => change.id)
+        });
         setSchema((current) => ({
           ...current,
           tables: current.tables.map((table) => {
@@ -256,6 +270,7 @@ const DesignerCanvas = ({ initialSchema, onSave, onApply, onLoadFromDatabase, on
       setEdges((eds) => applyEdgeChanges(changes, eds));
       const removedIds = changes.filter((change) => change.type === 'remove').map((change) => change.id);
       if (removedIds.length) {
+        logicLogger.info('Database relationships removed', { relationshipIds: removedIds });
         setSchema((current) => ({
           ...current,
           relationships: current.relationships.filter((rel) => !removedIds.includes(rel.id))
@@ -268,8 +283,15 @@ const DesignerCanvas = ({ initialSchema, onSave, onApply, onLoadFromDatabase, on
   const handleConnect = useCallback(
     (connection: Connection) => {
       if (!connection.source || !connection.target) {
+        logicLogger.warn('Database relationship connection missing endpoints', { connection });
         return;
       }
+      logicLogger.info('Database relationship draft created', {
+        sourceTableId: connection.source,
+        targetTableId: connection.target,
+        sourceHandle: connection.sourceHandle,
+        targetHandle: connection.targetHandle
+      });
       setPendingRelationship({
         sourceTableId: connection.source,
         targetTableId: connection.target,
@@ -289,6 +311,10 @@ const DesignerCanvas = ({ initialSchema, onSave, onApply, onLoadFromDatabase, on
     );
     if (exists) {
       setStatus('Relationship already exists between these tables.');
+      logicLogger.warn('Database relationship already exists', {
+        sourceTableId: pendingRelationship.sourceTableId,
+        targetTableId: pendingRelationship.targetTableId
+      });
       setPendingRelationship(null);
       return;
     }
@@ -296,6 +322,13 @@ const DesignerCanvas = ({ initialSchema, onSave, onApply, onLoadFromDatabase, on
       id: `rel-${generateNodeId()}`,
       ...pendingRelationship
     };
+    logicLogger.info('Database relationship added', {
+      relationshipId: nextRelationship.id,
+      sourceTableId: nextRelationship.sourceTableId,
+      targetTableId: nextRelationship.targetTableId,
+      cardinality: nextRelationship.cardinality,
+      modality: nextRelationship.modality
+    });
     setSchema((current) => ({
       ...current,
       relationships: current.relationships.concat(nextRelationship)
@@ -325,14 +358,16 @@ const DesignerCanvas = ({ initialSchema, onSave, onApply, onLoadFromDatabase, on
     (event: DragEvent) => {
       event.preventDefault();
       const position = projectPointer(event);
+      const tableId = `table-${generateNodeId()}`;
+      logicLogger.info('Database table dropped into canvas', { tableId, position });
       setSchema((current) => ({
         ...current,
         tables: current.tables.concat({
-          id: `table-${generateNodeId()}`,
+          id: tableId,
           name: `Table ${current.tables.length + 1}`,
           fields: [
             {
-              id: `table-${current.tables.length + 1}-id`,
+              id: `${tableId}-id`,
               name: 'id',
               type: 'uuid' as DatabaseFieldType,
               nullable: false,
@@ -348,14 +383,16 @@ const DesignerCanvas = ({ initialSchema, onSave, onApply, onLoadFromDatabase, on
   );
 
   const handleAddTable = useCallback(() => {
+    const tableId = `table-${generateNodeId()}`;
+    logicLogger.info('Database table added', { tableId });
     setSchema((current) => ({
       ...current,
       tables: current.tables.concat({
-        id: `table-${generateNodeId()}`,
+        id: tableId,
         name: `Table ${current.tables.length + 1}`,
         fields: [
           {
-            id: `table-${current.tables.length + 1}-id`,
+            id: `${tableId}-id`,
             name: 'id',
             type: 'uuid' as DatabaseFieldType,
             nullable: false,
@@ -370,6 +407,7 @@ const DesignerCanvas = ({ initialSchema, onSave, onApply, onLoadFromDatabase, on
 
   const handleConnectionChange = useCallback(
     (key: keyof DatabaseConnectionSettings, value: string | number | boolean) => {
+      logicLogger.debug('Database connection setting updated', { key, value });
       setSchema((current) => ({
         ...current,
         connection: {

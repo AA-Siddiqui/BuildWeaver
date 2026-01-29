@@ -31,8 +31,8 @@ export const DbTableNode = ({ data, id }: NodeProps<DbTableNodeData>) => {
 
   return (
     <div className="w-80 rounded-2xl border border-white/10 bg-bw-ink/80 p-4 text-white shadow-xl">
-      <Handle type="target" position={Position.Left} id={`${id}-target`} style={{ background: '#D34E4E' }} />
-      <Handle type="source" position={Position.Right} id={`${id}-source`} style={{ background: '#DDC57A' }} />
+      <Handle type="source" position={Position.Left} id={`${id}-source`} style={{ background: '#DDC57A' }} />
+      <Handle type="target" position={Position.Right} id={`${id}-target`} style={{ background: '#D34E4E' }} />
       <div className="mb-3 flex items-center justify-between gap-2">
         <input
           aria-label="Table name"
