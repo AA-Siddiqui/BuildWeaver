@@ -206,24 +206,6 @@ export const WorkspacePage = () => {
           </p>
         </div>
 
-        {/* Stats Bar */}
-        <div className="mb-10 grid grid-cols-2 gap-4 md:grid-cols-4">
-          {[
-            { label: 'Total Projects', value: projects.length },
-            { label: 'Export Targets', value: '3' },
-            { label: 'Components', value: '50+' },
-            { label: 'Status', value: 'Active' }
-          ].map((stat) => (
-            <div
-              key={stat.label}
-              className="rounded-2xl border border-white/10 bg-white/5 p-4 text-center"
-            >
-              <div className="text-2xl font-bold text-bw-sand">{stat.value}</div>
-              <div className="text-xs uppercase tracking-wider text-bw-platinum/50">{stat.label}</div>
-            </div>
-          ))}
-        </div>
-
         <div className="grid gap-8 lg:grid-cols-[1.2fr_0.8fr]">
           {/* Projects List */}
           <div>
