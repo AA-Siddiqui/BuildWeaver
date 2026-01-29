@@ -1,10 +1,11 @@
-import { BadRequestException, Injectable, InternalServerErrorException, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { and, eq } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
 import { Pool, PoolClient, PoolConfig } from 'pg';
 import { projects } from '@buildweaver/db';
 import type { DatabaseConnectionSettings, DatabaseField, DatabaseFieldType, DatabaseSchema, DatabaseTable } from '@buildweaver/libs';
 import { DatabaseService } from '../../database/database.service';
+import { DatabaseSchemaException } from './exceptions/database-schema.exception';
 
 const IDENTIFIER_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
@@ -91,18 +92,22 @@ export class ProjectDatabasesService {
 
       return { schema };
     } catch (error) {
+      const pgError = error as { code?: string; detail?: string; message?: string };
       this.logger.error('Database introspection failed', {
         projectId,
         host: connection.host,
         database: connection.database,
-        message: error instanceof Error ? error.message : 'Unknown error'
+        pgCode: pgError.code,
+        pgDetail: pgError.detail,
+        message: error instanceof Error ? error.message : 'Unknown error',
+        stack: error instanceof Error ? error.stack : undefined
       });
-      if (error instanceof BadRequestException) {
+      if (error instanceof BadRequestException || error instanceof DatabaseSchemaException) {
         throw error;
       }
-      throw new InternalServerErrorException(
-        `Failed to introspect database schema: ${error instanceof Error ? error.message : 'Unknown error'}`
-      );
+      throw DatabaseSchemaException.fromPgError(error, {
+        schemaId: payload.schemaId
+      });
     } finally {
       if (client) {
         client.release();
@@ -118,7 +123,7 @@ export class ProjectDatabasesService {
     }
   }
 
-  async applySchema(ownerId: string, projectId: string, schema: DatabaseSchema, options?: { pool?: Pool }): Promise<ApplySchemaResult> {
+  async applySchema(ownerId: string, projectId: string, schema: DatabaseSchema, options?: { pool?: Pool; useSavepoints?: boolean }): Promise<ApplySchemaResult> {
     await this.assertProjectOwner(ownerId, projectId);
     const normalized = this.normalizeSchema(schema);
     const connection = this.validateConnectionSettings(normalized.connection);
@@ -145,51 +150,158 @@ export class ProjectDatabasesService {
         `Unable to connect to database: ${error instanceof Error ? error.message : 'Unknown error'}`
       );
     }
+    let currentStatement = '';
+    let statementIndex = 0;
+    let failedStatementInfo: { index: number; statement: string; error: string } | null = null;
+    
+    // Determine if savepoints should be used
+    // In production (real PostgreSQL), we default to using savepoints for better error recovery
+    // In tests (pg-mem), savepoints may not be supported, so we allow disabling them
+    const useSavepoints = options?.useSavepoints ?? true;
+    
     try {
       await client.query('BEGIN');
+      this.logger.log('Starting schema apply transaction', {
+        schemaId: normalized.id,
+        statementCount: statements.length,
+        useSavepoints
+      });
+
+      // Test if savepoints are supported (for pg-mem compatibility)
+      let savepointsSupported = useSavepoints;
+      if (useSavepoints) {
+        try {
+          await client.query('SAVEPOINT sp_test');
+          await client.query('RELEASE SAVEPOINT sp_test');
+        } catch {
+          savepointsSupported = false;
+          this.logger.debug('Savepoints not supported, falling back to simple execution', {
+            schemaId: normalized.id
+          });
+        }
+      }
+
       for (const statement of statements) {
+        currentStatement = statement;
+        statementIndex++;
+        
+        const savepointName = `sp_${statementIndex}`;
         this.logger.debug('Executing schema apply statement', {
           schemaId: normalized.id,
+          statementIndex,
+          totalStatements: statements.length,
           statement
         });
+        
         try {
+          if (savepointsSupported) {
+            // Create savepoint before each statement to allow recovery from ignorable errors
+            await client.query(`SAVEPOINT ${savepointName}`);
+          }
           await client.query(statement);
+          if (savepointsSupported) {
+            // Release savepoint on success to free resources
+            await client.query(`RELEASE SAVEPOINT ${savepointName}`);
+          }
+          this.logger.debug('Statement executed successfully', {
+            schemaId: normalized.id,
+            statementIndex
+          });
         } catch (error) {
+          const pgError = error as {
+            code?: string;
+            detail?: string;
+            hint?: string;
+            message?: string;
+            constraint?: string;
+            table?: string;
+            column?: string;
+          };
+
           if (this.shouldIgnoreConstraintError(error)) {
-            this.logger.debug('Skipping duplicate constraint during apply', {
+            if (savepointsSupported) {
+              // Rollback to savepoint to recover from the error
+              await client.query(`ROLLBACK TO SAVEPOINT ${savepointName}`);
+            }
+            this.logger.debug('Ignoring constraint error and continuing', {
               schemaId: normalized.id,
-              statement
+              statementIndex,
+              statement,
+              pgCode: pgError.code,
+              reason: this.getIgnoreReason(error)
             });
             continue;
           }
+
+          // Track the first failing statement for better error reporting
+          if (!failedStatementInfo) {
+            failedStatementInfo = {
+              index: statementIndex,
+              statement,
+              error: pgError.message ?? 'Unknown error'
+            };
+          }
+
           this.logger.error('Statement failed during schema apply', {
             schemaId: normalized.id,
             host: connection.host,
             database: connection.database,
+            statementIndex,
+            totalStatements: statements.length,
             statement,
-            error: error instanceof Error ? error.message : error,
-            code: (error as { code?: string } | undefined)?.code
+            pgCode: pgError.code,
+            pgDetail: pgError.detail,
+            pgHint: pgError.hint,
+            pgConstraint: pgError.constraint,
+            pgTable: pgError.table,
+            pgColumn: pgError.column,
+            errorMessage: error instanceof Error ? error.message : String(error),
+            stack: error instanceof Error ? error.stack : undefined
           });
-          throw error;
+
+          throw DatabaseSchemaException.fromPgError(error, {
+            schemaId: normalized.id,
+            statement,
+            tableName: pgError.table,
+            fieldName: pgError.column,
+            constraintName: pgError.constraint
+          });
         }
       }
       await client.query('COMMIT');
-      this.logger.log('Database schema applied', {
+      this.logger.log('Database schema applied successfully', {
         schemaId: normalized.id,
         host: connection.host,
         database: connection.database,
-        statements: statements.length
+        statementsExecuted: statements.length
       });
       return { statements };
     } catch (error) {
       await this.safeRollback(client, normalized.id);
+
+      // If it's already our exception, just rethrow
+      if (error instanceof DatabaseSchemaException) {
+        throw error;
+      }
+
+      const pgError = error as { code?: string; detail?: string; message?: string };
       this.logger.error('Database schema apply failed', {
         schemaId: normalized.id,
         host: connection.host,
         database: connection.database,
-        message: error instanceof Error ? error.message : 'Unknown error'
+        failedStatementIndex: statementIndex,
+        failedStatement: currentStatement,
+        firstFailure: failedStatementInfo,
+        pgCode: pgError.code,
+        pgDetail: pgError.detail,
+        message: error instanceof Error ? error.message : 'Unknown error',
+        stack: error instanceof Error ? error.stack : undefined
       });
-      throw new InternalServerErrorException('Failed to apply database schema');
+
+      throw DatabaseSchemaException.fromPgError(error, {
+        schemaId: normalized.id,
+        statement: currentStatement
+      });
     } finally {
       if (client) {
         client.release();
@@ -338,8 +450,22 @@ export class ProjectDatabasesService {
   private buildStatements(schema: DatabaseSchema): string[] {
     const statements: string[] = [];
     const tableMap = new Map(schema.tables.map((table) => [table.id, table]));
+    // Track FK columns per source table to avoid naming conflicts
+    const fkColumnTracker = new Map<string, Set<string>>();
+
+    this.logger.debug('Building SQL statements for schema', {
+      schemaId: schema.id,
+      tableCount: schema.tables.length,
+      relationshipCount: schema.relationships?.length ?? 0
+    });
 
     for (const table of schema.tables) {
+      this.logger.debug('Building statements for table', {
+        schemaId: schema.id,
+        tableId: table.id,
+        tableName: table.name,
+        fieldCount: table.fields.length
+      });
       statements.push(this.buildCreateTableStatement(table));
       for (const field of table.fields) {
         statements.push(this.buildAddColumnStatement(table.name, field));
@@ -350,12 +476,27 @@ export class ProjectDatabasesService {
           statements.push(this.buildNotNullStatement(table.name, field.name));
         }
       }
+      // Initialize FK column tracker for each table
+      fkColumnTracker.set(table.id, new Set(table.fields.map((f) => f.name)));
     }
 
     for (const relationship of schema.relationships ?? []) {
-      const relationshipStatements = this.buildRelationshipStatements(relationship, tableMap);
+      this.logger.debug('Building statements for relationship', {
+        schemaId: schema.id,
+        relationshipId: relationship.id,
+        sourceTableId: relationship.sourceTableId,
+        targetTableId: relationship.targetTableId,
+        cardinality: relationship.cardinality,
+        modality: relationship.modality
+      });
+      const relationshipStatements = this.buildRelationshipStatements(relationship, tableMap, fkColumnTracker);
       statements.push(...relationshipStatements);
     }
+
+    this.logger.debug('Built SQL statements', {
+      schemaId: schema.id,
+      statementCount: statements.length
+    });
 
     return statements;
   }
@@ -380,40 +521,131 @@ export class ProjectDatabasesService {
     return `CREATE UNIQUE INDEX IF NOT EXISTS ${this.quoteIdentifier(indexName)} ON ${this.quoteIdentifier(tableName)} (${this.quoteIdentifier(fieldName)});`;
   }
 
-  private buildRelationshipStatements(relationship: DatabaseSchema['relationships'][number], tableMap: Map<string, DatabaseTable>): string[] {
+  private buildRelationshipStatements(
+    relationship: DatabaseSchema['relationships'][number],
+    tableMap: Map<string, DatabaseTable>,
+    fkColumnTracker: Map<string, Set<string>>
+  ): string[] {
     const sourceTable = tableMap.get(relationship.sourceTableId);
     const targetTable = tableMap.get(relationship.targetTableId);
     if (!sourceTable || !targetTable) {
+      this.logger.warn('Skipping relationship - missing source or target table', {
+        relationshipId: relationship.id,
+        sourceTableId: relationship.sourceTableId,
+        targetTableId: relationship.targetTableId,
+        sourceFound: !!sourceTable,
+        targetFound: !!targetTable
+      });
       return [];
     }
 
     const targetIdField = targetTable.fields.find((field) => field.isId) ?? targetTable.fields[0];
     if (!targetIdField) {
+      this.logger.warn('Skipping relationship - target table has no ID field', {
+        relationshipId: relationship.id,
+        targetTableId: relationship.targetTableId,
+        targetTableName: targetTable.name
+      });
       return [];
     }
 
-    const fkFieldName = this.ensureValidIdentifier(`${targetTable.name}_id`, 'field');
-    const fkField: DatabaseField = {
-      id: `${relationship.id}_fk`,
-      name: fkFieldName,
-      type: targetIdField.type,
-      nullable: relationship.modality === 0,
-      unique: relationship.cardinality === 'one',
-      isId: false
-    };
+    const existingColumns = fkColumnTracker.get(sourceTable.id) ?? new Set<string>();
+    const baseFkName = this.ensureValidIdentifier(`${targetTable.name}_id`, 'field');
+
+    // Check if there's an existing field in the source table that matches the FK pattern
+    // This handles the case where the FK column was already defined in the table schema
+    const existingFkField = sourceTable.fields.find((field) => {
+      // Match by name pattern: either exact match or name ends with _id and references target
+      const nameMatches = field.name === baseFkName || 
+        (field.name.toLowerCase().endsWith('_id') && 
+         field.name.toLowerCase().includes(targetTable.name.toLowerCase()));
+      // Type should be compatible with the target's ID field
+      const typeMatches = field.type === targetIdField.type;
+      return nameMatches && typeMatches && !field.isId;
+    });
+
+    let fkFieldName: string;
+    let needsColumnCreation = true;
+
+    if (existingFkField) {
+      // Reuse existing FK column - don't create a new one
+      fkFieldName = existingFkField.name;
+      needsColumnCreation = false;
+      this.logger.debug('Reusing existing FK column for relationship', {
+        relationshipId: relationship.id,
+        sourceTable: sourceTable.name,
+        targetTable: targetTable.name,
+        existingFkColumn: fkFieldName,
+        targetIdField: targetIdField.name
+      });
+    } else {
+      // Generate a unique FK column name to avoid conflicts
+      fkFieldName = baseFkName;
+      let suffix = 1;
+
+      // If the base name already exists (and wasn't matched as FK field), append a suffix
+      while (existingColumns.has(fkFieldName)) {
+        fkFieldName = this.ensureValidIdentifier(`${targetTable.name}_id_${suffix}`, 'field');
+        suffix++;
+        if (suffix > 100) {
+          this.logger.error('Too many FK columns with same base name', {
+            relationshipId: relationship.id,
+            sourceTableId: sourceTable.id,
+            baseFkName
+          });
+          throw new BadRequestException(
+            `Cannot create FK column: too many relationships from ${sourceTable.name} to ${targetTable.name}`
+          );
+        }
+      }
+
+      // Track the new FK column name
+      existingColumns.add(fkFieldName);
+
+      this.logger.debug('Creating new FK column for relationship', {
+        relationshipId: relationship.id,
+        sourceTable: sourceTable.name,
+        targetTable: targetTable.name,
+        fkColumnName: fkFieldName,
+        targetIdField: targetIdField.name
+      });
+    }
 
     const statements: string[] = [];
-    statements.push(this.buildAddColumnStatement(sourceTable.name, fkField));
-    if (!fkField.nullable) {
-      statements.push(this.buildNotNullStatement(sourceTable.name, fkField.name));
-    }
-    if (fkField.unique) {
-      statements.push(this.buildUniqueIndexStatement(sourceTable.name, fkField.name));
+
+    // Only add column creation statements if the column doesn't already exist
+    if (needsColumnCreation) {
+      const fkField: DatabaseField = {
+        id: `${relationship.id}_fk`,
+        name: fkFieldName,
+        type: targetIdField.type,
+        nullable: relationship.modality === 0,
+        unique: relationship.cardinality === 'one',
+        isId: false
+      };
+
+      statements.push(this.buildAddColumnStatement(sourceTable.name, fkField));
+      if (!fkField.nullable) {
+        statements.push(this.buildNotNullStatement(sourceTable.name, fkField.name));
+      }
+      if (fkField.unique) {
+        statements.push(this.buildUniqueIndexStatement(sourceTable.name, fkField.name));
+      }
     }
 
+    // Always add the FK constraint (it will be skipped if it already exists via savepoint recovery)
     const constraintName = this.ensureValidIdentifier(`${relationship.id}_fk`, 'constraint');
-    const constraintClause = `FOREIGN KEY (${this.quoteIdentifier(fkField.name)}) REFERENCES ${this.quoteIdentifier(targetTable.name)} (${this.quoteIdentifier(targetIdField.name)}) ON DELETE ${relationship.modality === 0 ? 'SET NULL' : 'CASCADE'}`;
+    const constraintClause = `FOREIGN KEY (${this.quoteIdentifier(fkFieldName)}) REFERENCES ${this.quoteIdentifier(targetTable.name)} (${this.quoteIdentifier(targetIdField.name)}) ON DELETE ${relationship.modality === 0 ? 'SET NULL' : 'CASCADE'}`;
     statements.push(this.buildConstraintIfMissing(sourceTable.name, constraintName, constraintClause));
+
+    this.logger.debug('Built relationship statements', {
+      relationshipId: relationship.id,
+      sourceTable: sourceTable.name,
+      targetTable: targetTable.name,
+      fkColumnName: fkFieldName,
+      needsColumnCreation,
+      statementCount: statements.length
+    });
 
     return statements;
   }
@@ -795,9 +1027,33 @@ export class ProjectDatabasesService {
   private shouldIgnoreConstraintError(error: unknown): boolean {
     const code = (error as { code?: string } | undefined)?.code;
     const message = (error as Error | undefined)?.message?.toLowerCase() ?? '';
-    if (code === '42710') {
+    
+    // 42710 - duplicate_object (constraint already exists)
+    // 42P07 - duplicate_table (table already exists) 
+    // 42701 - duplicate_column (column already exists)
+    if (code === '42710' || code === '42P07' || code === '42701') {
       return true;
     }
+    
     return message.includes('already exists');
+  }
+
+  private getIgnoreReason(error: unknown): string {
+    const code = (error as { code?: string } | undefined)?.code;
+    const message = (error as Error | undefined)?.message?.toLowerCase() ?? '';
+    
+    if (code === '42710') {
+      return 'constraint already exists';
+    }
+    if (code === '42P07') {
+      return 'table already exists';
+    }
+    if (code === '42701') {
+      return 'column already exists';
+    }
+    if (message.includes('already exists')) {
+      return `object already exists: ${message}`;
+    }
+    return 'unknown ignorable error';
   }
 }
