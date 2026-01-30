@@ -10,3 +10,4 @@ logs/*.log
 *.tsbuildinfo
 pnpm-debug.log
 .husky/_
+!.env.example
