@@ -92,6 +92,60 @@ describe('ProjectDatabasesService', () => {
     expect(result.statements.some((statement) => statement.includes('FOREIGN KEY'))).toBe(true);
   });
 
+  it('applies relationships when target primary key is non-UUID', async () => {
+    const service = buildService();
+    const pool = createInMemoryPool();
+
+    const schema: DatabaseSchema = {
+      id: 'db-non-uuid-parent',
+      name: 'Non UUID Parent',
+      tables: [
+        {
+          id: 'accounts',
+          name: 'accounts',
+          fields: [
+            { id: 'account-id', name: 'id', type: 'number', nullable: false, unique: true, isId: true },
+            { id: 'account-name', name: 'name', type: 'string', nullable: false, unique: false }
+          ]
+        },
+        {
+          id: 'orders',
+          name: 'orders',
+          fields: [
+            { id: 'order-id', name: 'id', type: 'uuid', nullable: false, unique: true, isId: true },
+            { id: 'order-total', name: 'total', type: 'number', nullable: false, unique: false }
+          ]
+        }
+      ],
+      relationships: [
+        {
+          id: 'rel_orders_accounts',
+          sourceTableId: 'orders',
+          targetTableId: 'accounts',
+          cardinality: 'many',
+          modality: 1
+        }
+      ],
+      connection
+    };
+
+    const result = await service.applySchema('owner-1', 'project-1', schema, { pool, useSavepoints: false });
+
+    expect(result.statements.some((statement) => statement.includes('FOREIGN KEY'))).toBe(true);
+
+    const client = await pool.connect();
+    const ordersColumns = await client.query(
+      "SELECT column_name, data_type FROM information_schema.columns WHERE table_name='orders'"
+    );
+    client.release();
+
+    const fkColumn = ordersColumns.rows.find((row) => row.column_name === 'accounts_id');
+    expect(fkColumn).toBeDefined();
+    expect(['double precision', 'float']).toContain(fkColumn?.data_type);
+    expect(result.statements.some((statement) => statement.includes('REFERENCES "accounts" ("id")'))).toBe(true);
+  });
+
+
   it('sanitizes unsafe identifiers before applying', async () => {
     const service = buildService();
     const pool = createInMemoryPool();

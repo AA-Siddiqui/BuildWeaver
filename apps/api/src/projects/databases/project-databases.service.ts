@@ -386,9 +386,20 @@ export class ProjectDatabasesService {
       throw new BadRequestException('At least one table is required');
     }
     const tableIds = new Set(tables.map((table) => table.id));
-    const relationships = (schema.relationships ?? []).filter(
-      (relationship) => relationship && tableIds.has(relationship.sourceTableId) && tableIds.has(relationship.targetTableId)
-    );
+    const relationships = (schema.relationships ?? []).filter((relationship) => {
+      if (!relationship) {
+        return false;
+      }
+      const valid = tableIds.has(relationship.sourceTableId) && tableIds.has(relationship.targetTableId);
+      if (!valid) {
+        this.logger.warn('Dropping relationship with missing table reference', {
+          relationshipId: relationship.id,
+          sourceTableId: relationship.sourceTableId,
+          targetTableId: relationship.targetTableId
+        });
+      }
+      return valid;
+    });
 
     const connection = schema.connection;
     if (!connection) {
@@ -539,7 +550,10 @@ export class ProjectDatabasesService {
       return [];
     }
 
-    const targetIdField = targetTable.fields.find((field) => field.isId) ?? targetTable.fields[0];
+    const targetIdField =
+      targetTable.fields.find((field) => field.isId) ??
+      targetTable.fields.find((field) => field.name.toLowerCase() === 'id') ??
+      targetTable.fields[0];
     if (!targetIdField) {
       this.logger.warn('Skipping relationship - target table has no ID field', {
         relationshipId: relationship.id,
@@ -554,22 +568,20 @@ export class ProjectDatabasesService {
 
     // Check if there's an existing field in the source table that matches the FK pattern
     // This handles the case where the FK column was already defined in the table schema
-    const existingFkField = sourceTable.fields.find((field) => {
-      // Match by name pattern: either exact match or name ends with _id and references target
-      const nameMatches = field.name === baseFkName || 
-        (field.name.toLowerCase().endsWith('_id') && 
-         field.name.toLowerCase().includes(targetTable.name.toLowerCase()));
-      // Type should be compatible with the target's ID field
-      const typeMatches = field.type === targetIdField.type;
-      return nameMatches && typeMatches && !field.isId;
+    const matchingNameField = sourceTable.fields.find((field) => {
+      const nameMatches =
+        field.name === baseFkName ||
+        (field.name.toLowerCase().endsWith('_id') && field.name.toLowerCase().includes(targetTable.name.toLowerCase()));
+      return nameMatches && !field.isId;
     });
+    const typeMatches = matchingNameField ? matchingNameField.type === targetIdField.type : false;
 
     let fkFieldName: string;
     let needsColumnCreation = true;
 
-    if (existingFkField) {
+    if (matchingNameField && typeMatches) {
       // Reuse existing FK column - don't create a new one
-      fkFieldName = existingFkField.name;
+      fkFieldName = matchingNameField.name;
       needsColumnCreation = false;
       this.logger.debug('Reusing existing FK column for relationship', {
         relationshipId: relationship.id,
@@ -579,6 +591,16 @@ export class ProjectDatabasesService {
         targetIdField: targetIdField.name
       });
     } else {
+      if (matchingNameField && !typeMatches) {
+        this.logger.warn('Existing FK column type mismatch; creating a new FK column', {
+          relationshipId: relationship.id,
+          sourceTable: sourceTable.name,
+          targetTable: targetTable.name,
+          existingFkColumn: matchingNameField.name,
+          existingType: matchingNameField.type,
+          expectedType: targetIdField.type
+        });
+      }
       // Generate a unique FK column name to avoid conflicts
       fkFieldName = baseFkName;
       let suffix = 1;
@@ -653,6 +675,7 @@ export class ProjectDatabasesService {
   private buildConstraintIfMissing(tableName: string, constraintName: string, clause: string): string {
     return `ALTER TABLE ${this.quoteIdentifier(tableName)} ADD CONSTRAINT ${this.quoteIdentifier(constraintName)} ${clause};`;
   }
+
 
   private async loadTableNames(client: PoolClient): Promise<string[]> {
     const result = await client.query<{ table_name: string }>(
