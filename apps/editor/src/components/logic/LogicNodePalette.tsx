@@ -2,6 +2,7 @@ import { DragEvent, KeyboardEvent } from 'react';
 import type { ExtendedPaletteNodeType, PaletteNodeType } from './nodeFactories';
 
 export const FUNCTION_DRAG_DATA = 'application/buildweaver/function';
+export const DATABASE_DRAG_DATA = 'application/buildweaver/database';
 
 interface UserFunctionListItem {
   id: string;
@@ -25,6 +26,7 @@ interface LogicNodePaletteProps {
   onOpenDatabaseDesigner?: () => void;
   onEditDatabase?: (schemaId: string) => void;
   databases?: Array<{ id: string; name: string; tableCount: number }>;
+  onAddDatabaseNode?: (schemaId: string) => void;
 }
 
 const basePaletteItems: Array<{ type: PaletteNodeType; label: string; description: string }> = [
@@ -54,7 +56,8 @@ export const LogicNodePalette = ({
   pageRoutesError,
   onOpenDatabaseDesigner,
   onEditDatabase,
-  databases
+  databases,
+  onAddDatabaseNode
 }: LogicNodePaletteProps) => {
   const paletteItems = disablePageNode ? basePaletteItems.filter((item) => item.type !== 'page') : basePaletteItems;
 
@@ -73,6 +76,11 @@ export const LogicNodePalette = ({
       event.preventDefault();
       onAddFunctionNode?.(functionId);
     }
+  };
+
+  const handleDatabaseDragStart = (event: DragEvent<HTMLButtonElement>, schemaId: string) => {
+    event.dataTransfer.setData(DATABASE_DRAG_DATA, JSON.stringify({ schemaId }));
+    event.dataTransfer.effectAllowed = 'move';
   };
 
   const formattedRoutes = (pageRoutes ?? []).map((route) => {
@@ -111,15 +119,29 @@ export const LogicNodePalette = ({
                     <p className="font-semibold text-white">{db.name}</p>
                     <p className="text-[11px] text-bw-platinum/70">{db.tableCount} table{db.tableCount === 1 ? '' : 's'}</p>
                   </div>
-                  {onEditDatabase && (
-                    <button
-                      type="button"
-                      onClick={() => onEditDatabase(db.id)}
-                      className="text-[11px] text-bw-sand underline"
-                    >
-                      Edit
-                    </button>
-                  )}
+                  <div className="flex flex-col items-end gap-1">
+                    {onAddDatabaseNode && (
+                      <button
+                        type="button"
+                        draggable
+                        onDragStart={(event) => handleDatabaseDragStart(event, db.id)}
+                        onClick={() => onAddDatabaseNode(db.id)}
+                        className="rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-[11px] font-semibold text-white transition hover:-translate-y-0.5"
+                        data-testid={`db-node-${db.id}`}
+                      >
+                        Add node
+                      </button>
+                    )}
+                    {onEditDatabase && (
+                      <button
+                        type="button"
+                        onClick={() => onEditDatabase(db.id)}
+                        className="text-[11px] text-bw-sand underline"
+                      >
+                        Edit
+                      </button>
+                    )}
+                  </div>
                 </li>
               ))}
             </ul>

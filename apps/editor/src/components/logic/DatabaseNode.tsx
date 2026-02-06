@@ -32,7 +32,7 @@ export const DatabaseNode = ({ data }: NodeProps<DatabaseNodeData>) => {
         <select
           value={selectedTableId}
           onChange={(event) => setSelectedTableId(event.target.value)}
-          className="rounded-lg border border-white/15 bg-white/5 px-3 py-2 text-xs text-white"
+          className="rounded-lg bw-node-select px-3 py-2 text-xs text-black"
         >
           {data.tables.map((table) => (
             <option key={table.id} value={table.id}>

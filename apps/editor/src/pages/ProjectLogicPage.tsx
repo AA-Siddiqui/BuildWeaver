@@ -34,7 +34,7 @@ import type {
   UserDefinedFunction
 } from '../types/api';
 import { projectDatabasesApi, projectGraphApi, projectPagesApi } from '../lib/api-client';
-import { LogicNodePalette, FUNCTION_DRAG_DATA } from '../components/logic/LogicNodePalette';
+import { LogicNodePalette, FUNCTION_DRAG_DATA, DATABASE_DRAG_DATA } from '../components/logic/LogicNodePalette';
 import { DummyNode } from '../components/logic/DummyNode';
 import { PageNode } from '../components/logic/PageNode';
 import { ArithmeticNode } from '../components/logic/ArithmeticNode';
@@ -230,6 +230,17 @@ const toDatabaseNodeData = (schema: DatabaseSchema): DatabaseNodeData => {
     schemaId: normalized.id,
     schemaName: normalized.name,
     tables: normalized.tables.map(({ id, name, fields }: DatabaseTable) => ({ id, name, fields }))
+  };
+};
+
+export const createDatabaseFlowNode = (schema: DatabaseSchema, position: XYPosition = { x: 0, y: 0 }): FlowNode => {
+  const nodeData = toDatabaseNodeData(schema);
+  const selectedTableId = nodeData.tables[0]?.id;
+  return {
+    id: `database-${generateNodeId()}`,
+    type: 'database',
+    position,
+    data: { ...nodeData, selectedTableId }
   };
 };
 
@@ -711,7 +722,7 @@ const LogicEditorView = () => {
   }, [databases, edges, functions, nodes, projectId, restoreGraphSnapshot]);
 
   const syncDatabaseNodesWithSchema = useCallback(
-    (schema: DatabaseSchema, options?: { createIfMissing?: boolean }) => {
+    (schema: DatabaseSchema) => {
       const nodeData = toDatabaseNodeData(schema);
       setNodes((current: FlowNode[]) => {
         let refreshed = 0;
@@ -730,27 +741,16 @@ const LogicEditorView = () => {
           return { ...node, data: { ...nodeData, selectedTableId } };
         });
 
-        const hasNode = updated.some((node) => node.type === 'database' && (node.data as DatabaseNodeData | undefined)?.schemaId === schema.id);
-        if (!hasNode && options?.createIfMissing) {
-          const newNode: FlowNode = {
-            id: `database-${generateNodeId()}`,
-            type: 'database',
-            position: { x: 0, y: 0 },
-            data: nodeData
-          };
-          logicLogger.info('Database node created for schema', {
-            projectId,
-            schemaId: schema.id,
-            tableCount: nodeData.tables.length,
-            nodeId: newNode.id
-          });
-          return updated.concat(newNode);
-        }
         if (refreshed > 0) {
           logicLogger.debug('Database node data refreshed', {
             projectId,
             schemaId: schema.id,
             updatedCount: refreshed
+          });
+        } else {
+          logicLogger.debug('Database node refresh skipped - no nodes found', {
+            projectId,
+            schemaId: schema.id
           });
         }
         return updated;
@@ -766,7 +766,7 @@ const LogicEditorView = () => {
         const exists = current.some((entry) => entry.id === normalized.id);
         return exists ? current.map((entry) => (entry.id === normalized.id ? normalized : entry)) : current.concat(normalized);
       });
-      syncDatabaseNodesWithSchema(normalized, { createIfMissing: true });
+      syncDatabaseNodesWithSchema(normalized);
       setHasUnsavedChanges(true);
       logicLogger.info('Database schema saved in logic editor', {
         projectId,
@@ -801,7 +801,7 @@ const LogicEditorView = () => {
           const exists = current.some((entry) => entry.id === normalized.id);
           return exists ? current.map((entry) => (entry.id === normalized.id ? normalized : entry)) : current.concat(normalized);
         });
-        syncDatabaseNodesWithSchema(normalized, { createIfMissing: true });
+        syncDatabaseNodesWithSchema(normalized);
         setHasUnsavedChanges(true);
         logicLogger.info('Database schema apply completed', {
           projectId,
@@ -849,7 +849,7 @@ const LogicEditorView = () => {
           const exists = current.some((entry) => entry.id === remoteSchema.id);
           return exists ? current.map((entry) => (entry.id === remoteSchema.id ? remoteSchema : entry)) : current.concat(remoteSchema);
         });
-        syncDatabaseNodesWithSchema(remoteSchema, { createIfMissing: true });
+        syncDatabaseNodesWithSchema(remoteSchema);
         setHasUnsavedChanges(true);
         setActiveDatabaseSchema(remoteSchema);
         logicLogger.info('Database schema introspection completed', {
@@ -965,6 +965,28 @@ const LogicEditorView = () => {
       setHasUnsavedChanges(true);
     },
     [functions, projectId, setNodes]
+  );
+
+  const handleAddDatabaseNode = useCallback(
+    (schemaId: string, position?: { x: number; y: number }) => {
+      const target = databases.find((schema) => schema.id === schemaId);
+      if (!target) {
+        setFeedback('Database schema not found');
+        setTimeout(() => setFeedback(''), 2000);
+        logicLogger.warn('Attempted to add missing database node', { projectId, schemaId });
+        return;
+      }
+      const node = createDatabaseFlowNode(target, position);
+      logicLogger.info('Database node added', {
+        projectId,
+        schemaId,
+        nodeId: node.id,
+        tableCount: (node.data as DatabaseNodeData).tables.length
+      });
+      setNodes((current: FlowNode[]) => current.concat(node));
+      setHasUnsavedChanges(true);
+    },
+    [databases, projectId, setNodes]
   );
 
   const handleCreateFunction = useCallback(() => {
@@ -1130,6 +1152,16 @@ const LogicEditorView = () => {
       });
       const type = event.dataTransfer.getData('application/reactflow') as PaletteNodeType | undefined;
       if (!type) {
+        const databasePayload = event.dataTransfer.getData(DATABASE_DRAG_DATA);
+        if (databasePayload) {
+          try {
+            const parsed = JSON.parse(databasePayload) as { schemaId: string };
+            handleAddDatabaseNode(parsed.schemaId, position);
+          } catch (error) {
+            logicLogger.error('Invalid database drag payload', { error: (error as Error).message });
+          }
+          return;
+        }
         const functionPayload = event.dataTransfer.getData(FUNCTION_DRAG_DATA);
         if (functionPayload) {
           try {
@@ -1143,7 +1175,7 @@ const LogicEditorView = () => {
       }
       handleAddNode(type, position);
     },
-    [handleAddFunctionNode, handleAddNode, reactFlowInstance]
+    [handleAddDatabaseNode, handleAddFunctionNode, handleAddNode, reactFlowInstance]
   );
 
   useEffect(() => {
@@ -1476,6 +1508,7 @@ const LogicEditorView = () => {
               pageRoutesError={pageRoutesErrorMessage || undefined}
               onOpenDatabaseDesigner={handleOpenDatabaseDesigner}
               onEditDatabase={handleEditDatabaseSchema}
+              onAddDatabaseNode={handleAddDatabaseNode}
               databases={databases.map((schema) => ({
                 id: schema.id,
                 name: schema.name,

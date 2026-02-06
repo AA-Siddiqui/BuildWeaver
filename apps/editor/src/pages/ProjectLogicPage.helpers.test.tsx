@@ -1,6 +1,6 @@
-import type { PageDocument, LogicEditorNodeData, PageNodeData } from '../types/api';
+import type { PageDocument, LogicEditorNodeData, PageNodeData, DatabaseSchema, DatabaseNodeData } from '../types/api';
 import type { Edge, Node } from 'reactflow';
-import { createPageNode, serializeEdges, serializeNodes, isTargetHandleFree, collectPageRoutes } from './ProjectLogicPage';
+import { createPageNode, createDatabaseFlowNode, serializeEdges, serializeNodes, isTargetHandleFree, collectPageRoutes } from './ProjectLogicPage';
 
 describe('ProjectLogicPage helpers', () => {
   it('creates page nodes with derived id and metadata', () => {
@@ -19,6 +19,40 @@ describe('ProjectLogicPage helpers', () => {
     expect(node.id).toBe(`page-${page.id}`);
     expect((node.data as PageNodeData).inputs).toHaveLength(1);
     expect(node.position).toEqual({ x: 10, y: 20 });
+  });
+
+  it('creates database nodes with schema data', () => {
+    const schema = {
+      id: 'db-1',
+      name: 'Analytics',
+      tables: [
+        {
+          id: 'table-1',
+          name: 'Events',
+          fields: []
+        }
+      ],
+      relationships: [],
+      connection: {
+        host: 'localhost',
+        port: 5432,
+        database: 'analytics',
+        user: 'postgres',
+        password: 'secret',
+        ssl: false
+      },
+      updatedAt: ''
+    } satisfies DatabaseSchema;
+
+    const node = createDatabaseFlowNode(schema, { x: 12, y: 24 });
+    expect(node.id).toMatch(/^database-/);
+    expect(node.position).toEqual({ x: 12, y: 24 });
+    expect(node.type).toBe('database');
+    const data = node.data as DatabaseNodeData;
+    expect(data.schemaId).toBe('db-1');
+    expect(data.schemaName).toBe('Analytics');
+    expect(data.tables[0]?.name).toBe('Events');
+    expect(data.selectedTableId).toBe('table-1');
   });
 
   it('serializes nodes and edges by keeping portable fields only', () => {
