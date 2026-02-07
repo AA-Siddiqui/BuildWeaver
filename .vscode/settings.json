@@ -1,0 +1,20 @@
+{
+  "copyTab.templates": [
+    {
+      "name": "Change (Singular)",
+      "suffix": "\n\nImplement this change, put informative logs properly everywhere so even if there is a problem, you have more info to work with.\n\nWrite tests to validate and verify this. Don't stop until lint, typecheck, test and build are successful for entire workspace."
+    },
+    {
+      "name": "Change (Plural)",
+      "suffix": "\n\nImplement these changes, put informative logs properly everywhere so even if there is a problem, you have more info to work with.\n\nWrite tests to validate and verify for each of these. Don't stop until lint, typecheck, test and build are successful for entire workspace."
+    },
+    {
+      "name": "Fix (Singular)",
+      "suffix": "\n\nFix this, put informative logs properly everywhere so even if there is a problem, you have more info to work with.\n\nWrite tests to validate and verify this. Don't stop until lint, typecheck, test and build are successful for entire workspace."
+    },
+    {
+      "name": "Fix (Plural)",
+      "suffix": "\n\nFix these, put informative logs properly everywhere so even if there is a problem, you have more info to work with.\n\nWrite tests to validate and verify each of these. Don't stop until lint, typecheck, test and build are successful for entire workspace."
+    }
+  ]
+}
