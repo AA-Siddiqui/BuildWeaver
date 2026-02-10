@@ -273,7 +273,7 @@ export const QueryTableNode = ({ id, data }: NodeProps<QueryTableNodeData>) => {
         type="source"
         position={Position.Right}
         id="output"
-        className="!right-[-6px] !h-3 !w-3 !rounded-full !bg-[#DDC57A]"
+        className="!right-14 !h-3 !w-3 !rounded-full !bg-[#DDC57A]"
       />
     </div>
   );
