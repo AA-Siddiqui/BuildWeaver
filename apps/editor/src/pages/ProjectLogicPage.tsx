@@ -20,7 +20,6 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useParams } from 'react-router-dom';
 import type {
   DatabaseSchema,
-  DatabaseNodeData,
   DatabaseTable,
   DatabaseField,
   DatabaseRelationship,
@@ -31,10 +30,12 @@ import type {
   PageDocument,
   PageNodeData,
   ProjectGraphSnapshot,
-  UserDefinedFunction
+  UserDefinedFunction,
+  QueryDefinition,
+  QueryNodeData
 } from '../types/api';
 import { projectDatabasesApi, projectGraphApi, projectPagesApi } from '../lib/api-client';
-import { LogicNodePalette, FUNCTION_DRAG_DATA, DATABASE_DRAG_DATA } from '../components/logic/LogicNodePalette';
+import { LogicNodePalette, FUNCTION_DRAG_DATA, QUERY_DRAG_DATA } from '../components/logic/LogicNodePalette';
 import { DummyNode } from '../components/logic/DummyNode';
 import { PageNode } from '../components/logic/PageNode';
 import { ArithmeticNode } from '../components/logic/ArithmeticNode';
@@ -67,6 +68,7 @@ import {
   PaletteNodeType,
   createFunctionReferenceNode,
   createPageNode,
+  createQueryFlowNode,
   generateNodeId,
   staticNodeFactory
 } from '../components/logic/nodeFactories';
@@ -76,7 +78,8 @@ import { FunctionReturnNode } from '../components/logic/function/FunctionReturnN
 import { FunctionEditorModal } from '../components/logic/function/FunctionEditorModal';
 import { FunctionRegistryProvider } from '../components/logic/function/FunctionRegistryContext';
 import { DatabaseDesignerModal } from '../components/db-designer/DatabaseDesignerModal';
-import { DatabaseNode } from '../components/logic/DatabaseNode';
+import { QueryNode } from '../components/logic/query/QueryNode';
+import { QueryEditorModal } from '../components/logic/query/QueryEditorModal';
 import { LogicEdgeActionsProvider, SeverEdgeReason } from '../components/logic/LogicEdgeActionsContext';
 import {
   buildNodePositionMap,
@@ -100,7 +103,7 @@ const nodeTypes = {
   function: FunctionNode,
   'function-argument': FunctionArgumentNode,
   'function-return': FunctionReturnNode,
-  database: DatabaseNode
+  query: QueryNode
 };
 
 const edgeTypes = {
@@ -223,27 +226,6 @@ const createEmptyDatabaseSchema = (name: string): DatabaseSchema =>
     connection: createDefaultDbConnection()
   });
 
-const toDatabaseNodeData = (schema: DatabaseSchema): DatabaseNodeData => {
-  const normalized = normalizeDatabaseSchema(schema);
-  return {
-    kind: 'database',
-    schemaId: normalized.id,
-    schemaName: normalized.name,
-    tables: normalized.tables.map(({ id, name, fields }: DatabaseTable) => ({ id, name, fields }))
-  };
-};
-
-export const createDatabaseFlowNode = (schema: DatabaseSchema, position: XYPosition = { x: 0, y: 0 }): FlowNode => {
-  const nodeData = toDatabaseNodeData(schema);
-  const selectedTableId = nodeData.tables[0]?.id;
-  return {
-    id: `database-${generateNodeId()}`,
-    type: 'database',
-    position,
-    data: { ...nodeData, selectedTableId }
-  };
-};
-
 const serializeDatabases = (schemas: DatabaseSchema[]): DatabaseSchema[] =>
   (schemas ?? []).map((schema: DatabaseSchema) => normalizeDatabaseSchema(schema));
 
@@ -257,6 +239,8 @@ const LogicEditorView = () => {
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   const [functions, setFunctions] = useState<UserDefinedFunction[]>([]);
   const [activeFunction, setActiveFunction] = useState<UserDefinedFunction | null>(null);
+  const [queries, setQueries] = useState<QueryDefinition[]>([]);
+  const [activeQuery, setActiveQuery] = useState<QueryDefinition | null>(null);
   const [databases, setDatabases] = useState<DatabaseSchema[]>([]);
   const [activeDatabaseSchema, setActiveDatabaseSchema] = useState<DatabaseSchema | null>(null);
   const [isDatabaseDesignerOpen, setIsDatabaseDesignerOpen] = useState(false);
@@ -298,6 +282,7 @@ const LogicEditorView = () => {
         edges: snapshot.edges.length,
         functions: snapshot.functions.length,
         databases: snapshot.databases.length,
+        queries: snapshot.queries.length,
         reason: context.reason,
         nodeIds: context.nodeIds
       });
@@ -312,7 +297,7 @@ const LogicEditorView = () => {
   );
 
   useLayoutEffect(() => {
-    const snapshot = cloneGraphSnapshot({ nodes, edges, functions, databases });
+    const snapshot = cloneGraphSnapshot({ nodes, edges, functions, databases, queries });
     if (nodeDragHistoryRef.current.isActive()) {
       nodeDragHistoryRef.current.capture(snapshot);
       if (pendingDragFlushRef.current) {
@@ -327,9 +312,10 @@ const LogicEditorView = () => {
       edges: snapshot.edges.length,
       functions: snapshot.functions.length,
       databases: snapshot.databases.length,
+      queries: snapshot.queries.length,
       reason: 'state-observer'
     });
-  }, [databases, edges, flushDragSnapshot, functions, nodes, projectId]);
+  }, [databases, edges, flushDragSnapshot, functions, nodes, projectId, queries]);
 
   const resetGraphHistory = useCallback(
     (snapshot: GraphSnapshot, context: string) => {
@@ -411,6 +397,20 @@ const LogicEditorView = () => {
     }
   }, [activeFunction, functions]);
 
+  useEffect(() => {
+    if (!activeQuery) {
+      return;
+    }
+    const refreshed = queries.find((q) => q.id === activeQuery.id);
+    if (!refreshed) {
+      setActiveQuery(null);
+      return;
+    }
+    if (refreshed.updatedAt !== activeQuery.updatedAt) {
+      setActiveQuery(refreshed);
+    }
+  }, [activeQuery, queries]);
+
   const graphQuery = useQuery({
     queryKey: projectGraphQueryKey(projectId ?? 'logic'),
     queryFn: () => projectGraphApi.get(projectId!),
@@ -486,15 +486,17 @@ const LogicEditorView = () => {
       const hydratedEdges = ensureSeverableEdges(toFlowEdges(graphQuery.data.graph.edges));
       const hydratedFunctions = graphQuery.data.graph.functions ?? [];
       const hydratedDatabases = serializeDatabases(graphQuery.data.graph.databases ?? []);
+      const hydratedQueries: QueryDefinition[] = graphQuery.data.graph.queries ?? [];
       setNodes(hydratedNodes);
       setEdges(hydratedEdges);
       setFunctions(hydratedFunctions);
       setDatabases(hydratedDatabases);
+      setQueries(hydratedQueries);
       setHasUnsavedChanges(false);
       nodeDragHistoryRef.current.reset();
       pendingDragFlushRef.current = false;
       resetGraphHistory(
-        { nodes: hydratedNodes, edges: hydratedEdges, functions: hydratedFunctions, databases: hydratedDatabases },
+        { nodes: hydratedNodes, edges: hydratedEdges, functions: hydratedFunctions, databases: hydratedDatabases, queries: hydratedQueries },
         'hydrate'
       );
       setTimeout(() => {
@@ -505,7 +507,7 @@ const LogicEditorView = () => {
         }
       }, 50);
     }
-  }, [graphQuery.data?.graph, reactFlowInstance, resetGraphHistory, setDatabases, setEdges, setNodes, setFunctions]);
+  }, [graphQuery.data?.graph, reactFlowInstance, resetGraphHistory, setDatabases, setEdges, setNodes, setFunctions, setQueries]);
 
   const saveMutation = useMutation({
     mutationFn: (payload: ProjectGraphSnapshot) => projectGraphApi.save(projectId!, payload),
@@ -514,12 +516,14 @@ const LogicEditorView = () => {
         projectId,
         nodes: graph.nodes.length,
         edges: graph.edges.length,
-        databases: graph.databases?.length ?? 0
+        databases: graph.databases?.length ?? 0,
+        queries: graph.queries?.length ?? 0
       });
       setNodes(toFlowNodes(graph.nodes));
       setEdges(ensureSeverableEdges(toFlowEdges(graph.edges)));
       setFunctions(graph.functions ?? []);
       setDatabases(serializeDatabases(graph.databases ?? []));
+      setQueries(graph.queries ?? []);
       setHasUnsavedChanges(false);
       setFeedback('Saved');
       setTimeout(() => setFeedback(''), 2000);
@@ -631,11 +635,16 @@ const LogicEditorView = () => {
           stripped: strippedCount
         });
       }
+      const normalizedQueries = queries.map((q) => {
+        const { updatedAt, ...persistable } = q;
+        return updatedAt ? { ...persistable } : persistable;
+      });
       const payload: ProjectGraphSnapshot = {
         nodes: serializeNodes(nodes),
         edges: serializeEdges(edges),
         functions: normalizedFunctions,
-        databases: serializeDatabases(databases)
+        databases: serializeDatabases(databases),
+        queries: normalizedQueries
       };
       const inputSummary = summarizePageNodeInputs(payload.nodes);
       if (inputSummary) {
@@ -662,7 +671,8 @@ const LogicEditorView = () => {
         reason,
         nodes: payload.nodes.length,
         edges: payload.edges.length,
-        databases: payload.databases?.length ?? 0
+        databases: payload.databases?.length ?? 0,
+        queries: payload.queries?.length ?? 0
       });
       const promise = saveMutation.mutateAsync(payload);
       pendingSaveRef.current = promise;
@@ -672,7 +682,7 @@ const LogicEditorView = () => {
         pendingSaveRef.current = null;
       }
     },
-    [databases, edges, functions, hasUnsavedChanges, nodes, projectId, saveMutation]
+    [databases, edges, functions, hasUnsavedChanges, nodes, projectId, queries, saveMutation]
   );
 
   const handleSave = useCallback(() => {
@@ -688,6 +698,7 @@ const LogicEditorView = () => {
       setEdges(snapshot.edges);
       setFunctions(snapshot.functions);
       setDatabases(snapshot.databases);
+      setQueries(snapshot.queries);
       setHasUnsavedChanges(true);
       setFeedback(action === 'undo' ? 'Undid change' : 'Redid change');
       setTimeout(() => setFeedback(''), 2000);
@@ -697,66 +708,37 @@ const LogicEditorView = () => {
         redoDepth: graphHistoryRef.current.getRedoDepth(),
         nodes: snapshot.nodes.length,
         edges: snapshot.edges.length,
-        databases: snapshot.databases.length
+        databases: snapshot.databases.length,
+        queries: snapshot.queries.length
       });
     },
     [projectId, setDatabases, setEdges, setFunctions, setNodes]
   );
 
   const handleUndoAction = useCallback(() => {
-    const snapshot = graphHistoryRef.current.undo({ nodes, edges, functions, databases });
+    const snapshot = graphHistoryRef.current.undo({ nodes, edges, functions, databases, queries });
     if (!snapshot) {
       logicLogger.debug('Undo ignored — no history', { projectId });
       return;
     }
     restoreGraphSnapshot(snapshot, 'undo');
-  }, [databases, edges, functions, nodes, projectId, restoreGraphSnapshot]);
+  }, [databases, edges, functions, nodes, projectId, queries, restoreGraphSnapshot]);
 
   const handleRedoAction = useCallback(() => {
-    const snapshot = graphHistoryRef.current.redo({ nodes, edges, functions, databases });
+    const snapshot = graphHistoryRef.current.redo({ nodes, edges, functions, databases, queries });
     if (!snapshot) {
       logicLogger.debug('Redo ignored — no future history', { projectId });
       return;
     }
     restoreGraphSnapshot(snapshot, 'redo');
-  }, [databases, edges, functions, nodes, projectId, restoreGraphSnapshot]);
+  }, [databases, edges, functions, nodes, projectId, queries, restoreGraphSnapshot]);
 
   const syncDatabaseNodesWithSchema = useCallback(
     (schema: DatabaseSchema) => {
-      const nodeData = toDatabaseNodeData(schema);
-      setNodes((current: FlowNode[]) => {
-        let refreshed = 0;
-        const updated = current.map((node) => {
-          if (node.type !== 'database') {
-            return node;
-          }
-          const existingData = node.data as Partial<DatabaseNodeData> | undefined;
-          if (existingData?.schemaId !== schema.id) {
-            return node;
-          }
-          const selectedTableId = existingData.selectedTableId && nodeData.tables.some((table) => table.id === existingData.selectedTableId)
-            ? existingData.selectedTableId
-            : nodeData.tables[0]?.id;
-          refreshed += 1;
-          return { ...node, data: { ...nodeData, selectedTableId } };
-        });
-
-        if (refreshed > 0) {
-          logicLogger.debug('Database node data refreshed', {
-            projectId,
-            schemaId: schema.id,
-            updatedCount: refreshed
-          });
-        } else {
-          logicLogger.debug('Database node refresh skipped - no nodes found', {
-            projectId,
-            schemaId: schema.id
-          });
-        }
-        return updated;
-      });
+      void schema;
+      logicLogger.debug('Database schema updated (no DB canvas nodes to sync)', { projectId });
     },
-    [projectId, setNodes]
+    [projectId]
   );
 
   const handleDatabaseSave = useCallback(
@@ -967,28 +949,6 @@ const LogicEditorView = () => {
     [functions, projectId, setNodes]
   );
 
-  const handleAddDatabaseNode = useCallback(
-    (schemaId: string, position?: { x: number; y: number }) => {
-      const target = databases.find((schema) => schema.id === schemaId);
-      if (!target) {
-        setFeedback('Database schema not found');
-        setTimeout(() => setFeedback(''), 2000);
-        logicLogger.warn('Attempted to add missing database node', { projectId, schemaId });
-        return;
-      }
-      const node = createDatabaseFlowNode(target, position);
-      logicLogger.info('Database node added', {
-        projectId,
-        schemaId,
-        nodeId: node.id,
-        tableCount: (node.data as DatabaseNodeData).tables.length
-      });
-      setNodes((current: FlowNode[]) => current.concat(node));
-      setHasUnsavedChanges(true);
-    },
-    [databases, projectId, setNodes]
-  );
-
   const handleCreateFunction = useCallback(() => {
     const newFunction: UserDefinedFunction = {
       id: `fn-${generateNodeId()}`,
@@ -1130,6 +1090,119 @@ const LogicEditorView = () => {
     [projectId]
   );
 
+  const handleCreateQuery = useCallback(() => {
+    if (databases.length === 0) {
+      setFeedback('Create a database schema first');
+      setTimeout(() => setFeedback(''), 2000);
+      logicLogger.warn('Query creation blocked - no databases', { projectId });
+      return;
+    }
+    const newQuery: QueryDefinition = {
+      id: `query-${generateNodeId()}`,
+      name: `Query ${queries.length + 1}`,
+      mode: 'read',
+      schemaId: databases[0].id,
+      nodes: [],
+      edges: [],
+      arguments: [],
+      updatedAt: new Date().toISOString()
+    };
+    logicLogger.info('Query created', { projectId, queryId: newQuery.id, schemaId: newQuery.schemaId });
+    setQueries((current) => current.concat(newQuery));
+    setActiveQuery(newQuery);
+    setHasUnsavedChanges(true);
+  }, [databases, queries.length, projectId]);
+
+  const handleEditQuery = useCallback(
+    (queryId: string) => {
+      const target = queries.find((q) => q.id === queryId);
+      if (!target) {
+        setFeedback('Query not found');
+        setTimeout(() => setFeedback(''), 2000);
+        logicLogger.warn('Query edit requested but not found', { projectId, queryId });
+        return;
+      }
+      logicLogger.debug('Opening query editor', { projectId, queryId });
+      setActiveQuery(target);
+    },
+    [queries, projectId]
+  );
+
+  const handleDeleteQuery = useCallback(
+    (queryId: string) => {
+      setQueries((current) => current.filter((q) => q.id !== queryId));
+      setNodes((current: FlowNode[]) => {
+        const removedIds = new Set(
+          current
+            .filter((node) => node.type === 'query' && (node.data as QueryNodeData).queryId === queryId)
+            .map((node) => node.id)
+        );
+        if (removedIds.size === 0) {
+          return current;
+        }
+        setEdges((edgesState) => edgesState.filter((edge) => !removedIds.has(edge.source) && !removedIds.has(edge.target)));
+        return current.filter((node) => !removedIds.has(node.id));
+      });
+      if (activeQuery?.id === queryId) {
+        setActiveQuery(null);
+      }
+      setHasUnsavedChanges(true);
+      logicLogger.warn('Query deleted', { projectId, queryId });
+    },
+    [activeQuery?.id, projectId, setEdges]
+  );
+
+  const handleQuerySave = useCallback(
+    (updatedQuery: QueryDefinition) => {
+      setQueries((current) => current.map((q) => (q.id === updatedQuery.id ? updatedQuery : q)));
+      setNodes((current: FlowNode[]) => {
+        let mutated = false;
+        const next = current.map((node) => {
+          if (node.type !== 'query') {
+            return node;
+          }
+          const data = node.data as QueryNodeData;
+          if (data.queryId !== updatedQuery.id) {
+            return node;
+          }
+          mutated = true;
+          return {
+            ...node,
+            data: {
+              ...data,
+              queryName: updatedQuery.name,
+              mode: updatedQuery.mode,
+              schemaId: updatedQuery.schemaId,
+              arguments: updatedQuery.arguments.map((arg) => ({ id: arg.id, name: arg.name, type: arg.type }))
+            }
+          };
+        });
+        return mutated ? next : current;
+      });
+      setActiveQuery(updatedQuery);
+      setHasUnsavedChanges(true);
+      logicLogger.info('Query updated locally', { projectId, queryId: updatedQuery.id });
+    },
+    [projectId]
+  );
+
+  const handleAddQueryNode = useCallback(
+    (queryId: string, position?: { x: number; y: number }) => {
+      const target = queries.find((q) => q.id === queryId);
+      if (!target) {
+        setFeedback('Query not found');
+        setTimeout(() => setFeedback(''), 2000);
+        logicLogger.warn('Attempted to add missing query node', { projectId, queryId });
+        return;
+      }
+      const node = createQueryFlowNode(target, position);
+      logicLogger.info('Query node added', { projectId, queryId, nodeId: node.id });
+      setNodes((current: FlowNode[]) => current.concat(node));
+      setHasUnsavedChanges(true);
+    },
+    [queries, projectId, setNodes]
+  );
+
   const handlePaletteAdd = useCallback(
     (type: PaletteNodeType) => {
       void handleAddNode(type);
@@ -1152,13 +1225,13 @@ const LogicEditorView = () => {
       });
       const type = event.dataTransfer.getData('application/reactflow') as PaletteNodeType | undefined;
       if (!type) {
-        const databasePayload = event.dataTransfer.getData(DATABASE_DRAG_DATA);
-        if (databasePayload) {
+        const queryPayload = event.dataTransfer.getData(QUERY_DRAG_DATA);
+        if (queryPayload) {
           try {
-            const parsed = JSON.parse(databasePayload) as { schemaId: string };
-            handleAddDatabaseNode(parsed.schemaId, position);
+            const parsed = JSON.parse(queryPayload) as { queryId: string };
+            handleAddQueryNode(parsed.queryId, position);
           } catch (error) {
-            logicLogger.error('Invalid database drag payload', { error: (error as Error).message });
+            logicLogger.error('Invalid query drag payload', { error: (error as Error).message });
           }
           return;
         }
@@ -1175,7 +1248,7 @@ const LogicEditorView = () => {
       }
       handleAddNode(type, position);
     },
-    [handleAddDatabaseNode, handleAddFunctionNode, handleAddNode, reactFlowInstance]
+    [handleAddQueryNode, handleAddFunctionNode, handleAddNode, reactFlowInstance]
   );
 
   useEffect(() => {
@@ -1508,12 +1581,16 @@ const LogicEditorView = () => {
               pageRoutesError={pageRoutesErrorMessage || undefined}
               onOpenDatabaseDesigner={handleOpenDatabaseDesigner}
               onEditDatabase={handleEditDatabaseSchema}
-              onAddDatabaseNode={handleAddDatabaseNode}
               databases={databases.map((schema) => ({
                 id: schema.id,
                 name: schema.name,
                 tableCount: schema.tables?.length ?? 0
               }))}
+              queries={queries.map((q) => ({ id: q.id, name: q.name, mode: q.mode }))}
+              onCreateQuery={handleCreateQuery}
+              onEditQuery={handleEditQuery}
+              onDeleteQuery={handleDeleteQuery}
+              onAddQueryNode={(queryId) => handleAddQueryNode(queryId)}
             />
           </div>
         </div>
@@ -1649,6 +1726,14 @@ const LogicEditorView = () => {
           functions={functions}
           onSave={handleFunctionSave}
           onClose={() => setActiveFunction(null)}
+        />
+      )}
+      {activeQuery && (
+        <QueryEditorModal
+          queryDef={activeQuery}
+          schema={databases.find((db) => db.id === activeQuery.schemaId) ?? null}
+          onSave={handleQuerySave}
+          onClose={() => setActiveQuery(null)}
         />
       )}
       {isDatabaseDesignerOpen && activeDatabaseSchema && (

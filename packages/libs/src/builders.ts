@@ -15,7 +15,18 @@ export type LogicEditorNodeType =
   | 'function'
   | 'function-argument'
   | 'function-return'
-  | 'database';
+  | 'query'
+  | 'query-argument'
+  | 'query-output'
+  | 'query-table'
+  | 'query-join'
+  | 'query-where'
+  | 'query-groupby'
+  | 'query-having'
+  | 'query-orderby'
+  | 'query-limit'
+  | 'query-aggregation'
+  | 'query-attribute';
 
 export interface LogicEditorNodePosition {
   x: number;
@@ -274,12 +285,130 @@ export interface DatabaseSchema {
   updatedAt?: string;
 }
 
-export interface DatabaseNodeData {
-  kind: 'database';
+// ── Query node types ──────────────────────────────────────────────
+
+export type QueryMode = 'read' | 'insert' | 'update' | 'delete';
+
+export type SqlOperator =
+  | '='
+  | '!='
+  | '>'
+  | '<'
+  | '>='
+  | '<='
+  | 'in'
+  | 'not in'
+  | 'like'
+  | 'not like'
+  | 'is null'
+  | 'is not null';
+
+export type SqlJoinType = 'inner' | 'left' | 'right' | 'full';
+
+export type SqlAggregateFunction = 'sum' | 'max' | 'min' | 'count' | 'avg';
+
+export type SqlSortOrder = 'asc' | 'desc';
+
+/** Main-canvas query node – references a QueryDefinition by id. */
+export interface QueryNodeData {
+  kind: 'query';
+  queryId: string;
+  queryName: string;
+  mode: QueryMode;
   schemaId: string;
-  schemaName: string;
-  selectedTableId?: string;
-  tables: Array<Pick<DatabaseTable, 'id' | 'name' | 'fields'>>;
+  arguments: Array<{ id: string; name: string; type: string }>;
+}
+
+/** Inner: passes an external value into the query as a parameter. */
+export interface QueryArgumentNodeData {
+  kind: 'query-argument';
+  argumentId: string;
+  name: string;
+  type: ScalarSampleKind;
+}
+
+/** Inner: collects the query result (built-in, non-removable). */
+export interface QueryOutputNodeData {
+  kind: 'query-output';
+  outputId: string;
+}
+
+/** Inner: represents a database table in the query. */
+export interface QueryTableNodeData {
+  kind: 'query-table';
+  tableId: string;
+  tableName: string;
+  schemaId: string;
+  selectedColumns: string[];
+  columnDefaults: Record<string, string>;
+  aggregationInputCount: number;
+}
+
+/** Inner: SQL JOIN clause. */
+export interface QueryJoinNodeData {
+  kind: 'query-join';
+  joinType: SqlJoinType;
+  tableA?: string;
+  tableB?: string;
+  attributeA?: string;
+  attributeB?: string;
+}
+
+/** Inner: SQL WHERE clause. */
+export interface QueryWhereNodeData {
+  kind: 'query-where';
+  operator: SqlOperator;
+  leftOperand?: string;
+  rightOperand?: string;
+  leftIsColumn: boolean;
+  rightIsColumn: boolean;
+}
+
+/** Inner: SQL GROUP BY clause. */
+export interface QueryGroupByNodeData {
+  kind: 'query-groupby';
+  groupingAttributeCount: number;
+  attributes: string[];
+}
+
+/** Inner: SQL HAVING clause (structurally identical to WHERE). */
+export interface QueryHavingNodeData {
+  kind: 'query-having';
+  operator: SqlOperator;
+  leftOperand?: string;
+  rightOperand?: string;
+  leftIsColumn: boolean;
+  rightIsColumn: boolean;
+}
+
+/** Inner: SQL ORDER BY clause. */
+export interface QueryOrderByNodeData {
+  kind: 'query-orderby';
+  sortCount: number;
+  sortAttributes: string[];
+  sortOrders: SqlSortOrder[];
+}
+
+/** Inner: SQL LIMIT / OFFSET clause. */
+export interface QueryLimitNodeData {
+  kind: 'query-limit';
+  limitValue?: number;
+  offsetValue?: number;
+}
+
+/** Inner: SQL aggregate function (SUM, MAX, …). */
+export interface QueryAggregationNodeData {
+  kind: 'query-aggregation';
+  function: SqlAggregateFunction;
+  attribute?: string;
+  tableName?: string;
+}
+
+/** Inner: references a specific table attribute. */
+export interface QueryAttributeNodeData {
+  kind: 'query-attribute';
+  tableName?: string;
+  attributeName?: string;
 }
 
 export type LogicEditorNodeData =
@@ -295,7 +424,18 @@ export type LogicEditorNodeData =
   | FunctionNodeData
   | FunctionArgumentNodeData
   | FunctionReturnNodeData
-  | DatabaseNodeData;
+  | QueryNodeData
+  | QueryArgumentNodeData
+  | QueryOutputNodeData
+  | QueryTableNodeData
+  | QueryJoinNodeData
+  | QueryWhereNodeData
+  | QueryGroupByNodeData
+  | QueryHavingNodeData
+  | QueryOrderByNodeData
+  | QueryLimitNodeData
+  | QueryAggregationNodeData
+  | QueryAttributeNodeData;
 
 export interface LogicEditorNode {
   id: string;
@@ -330,11 +470,29 @@ export interface UserDefinedFunction {
   updatedAt?: string;
 }
 
+export interface QueryArgument {
+  id: string;
+  name: string;
+  type: ScalarSampleKind;
+}
+
+export interface QueryDefinition {
+  id: string;
+  name: string;
+  mode: QueryMode;
+  schemaId: string;
+  nodes: LogicEditorNode[];
+  edges: LogicEditorEdge[];
+  arguments: QueryArgument[];
+  updatedAt?: string;
+}
+
 export interface ProjectGraphSnapshot {
   nodes: LogicEditorNode[];
   edges: LogicEditorEdge[];
   functions: UserDefinedFunction[];
   databases?: DatabaseSchema[];
+  queries?: QueryDefinition[];
 }
 
 export type PageBuilderState = Record<string, unknown>;

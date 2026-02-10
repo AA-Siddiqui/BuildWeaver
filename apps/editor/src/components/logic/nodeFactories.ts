@@ -11,10 +11,11 @@ import {
   ObjectNodeData,
   PageDocument,
   PageNodeData,
+  QueryNodeData,
   RelationalOperatorNodeData,
   StringNodeData
 } from '@buildweaver/libs';
-import type { LogicEditorNodeData } from '@buildweaver/libs';
+import type { LogicEditorNodeData, QueryDefinition } from '@buildweaver/libs';
 
 export type FlowNode = Node<LogicEditorNodeData>;
 export type PaletteNodeType =
@@ -265,3 +266,20 @@ export const functionBuilderNodeFactory: Record<FunctionOnlyPaletteNodeType, Flo
   'function-argument': createFunctionArgumentNode,
   'function-return': createFunctionReturnNode
 };
+
+export const createQueryFlowNode = (
+  query: QueryDefinition,
+  position: { x: number; y: number } = { x: 0, y: 0 }
+): FlowNode => ({
+  id: `query-${generateNodeId()}`,
+  type: 'query',
+  position,
+  data: {
+    kind: 'query',
+    queryId: query.id,
+    queryName: query.name,
+    mode: query.mode,
+    schemaId: query.schemaId,
+    arguments: query.arguments.map((arg) => ({ id: arg.id, name: arg.name, type: arg.type }))
+  } satisfies QueryNodeData
+});

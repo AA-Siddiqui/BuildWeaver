@@ -2,12 +2,18 @@ import { DragEvent, KeyboardEvent } from 'react';
 import type { ExtendedPaletteNodeType, PaletteNodeType } from './nodeFactories';
 
 export const FUNCTION_DRAG_DATA = 'application/buildweaver/function';
-export const DATABASE_DRAG_DATA = 'application/buildweaver/database';
+export const QUERY_DRAG_DATA = 'application/buildweaver/query';
 
 interface UserFunctionListItem {
   id: string;
   name: string;
   returnsValue: boolean;
+}
+
+interface QueryListItem {
+  id: string;
+  name: string;
+  mode: string;
 }
 
 interface LogicNodePaletteProps {
@@ -26,7 +32,11 @@ interface LogicNodePaletteProps {
   onOpenDatabaseDesigner?: () => void;
   onEditDatabase?: (schemaId: string) => void;
   databases?: Array<{ id: string; name: string; tableCount: number }>;
-  onAddDatabaseNode?: (schemaId: string) => void;
+  queries?: QueryListItem[];
+  onCreateQuery?: () => void;
+  onEditQuery?: (queryId: string) => void;
+  onDeleteQuery?: (queryId: string) => void;
+  onAddQueryNode?: (queryId: string) => void;
 }
 
 const basePaletteItems: Array<{ type: PaletteNodeType; label: string; description: string }> = [
@@ -57,7 +67,11 @@ export const LogicNodePalette = ({
   onOpenDatabaseDesigner,
   onEditDatabase,
   databases,
-  onAddDatabaseNode
+  queries,
+  onCreateQuery,
+  onEditQuery,
+  onDeleteQuery,
+  onAddQueryNode
 }: LogicNodePaletteProps) => {
   const paletteItems = disablePageNode ? basePaletteItems.filter((item) => item.type !== 'page') : basePaletteItems;
 
@@ -78,9 +92,16 @@ export const LogicNodePalette = ({
     }
   };
 
-  const handleDatabaseDragStart = (event: DragEvent<HTMLButtonElement>, schemaId: string) => {
-    event.dataTransfer.setData(DATABASE_DRAG_DATA, JSON.stringify({ schemaId }));
+  const handleQueryDragStart = (event: DragEvent<HTMLElement>, queryId: string) => {
+    event.dataTransfer.setData(QUERY_DRAG_DATA, JSON.stringify({ queryId }));
     event.dataTransfer.effectAllowed = 'move';
+  };
+
+  const handleQueryKeyDown = (event: KeyboardEvent<HTMLDivElement>, queryId: string) => {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      onAddQueryNode?.(queryId);
+    }
   };
 
   const formattedRoutes = (pageRoutes ?? []).map((route) => {
@@ -120,18 +141,6 @@ export const LogicNodePalette = ({
                     <p className="text-[11px] text-bw-platinum/70">{db.tableCount} table{db.tableCount === 1 ? '' : 's'}</p>
                   </div>
                   <div className="flex flex-col items-end gap-1">
-                    {onAddDatabaseNode && (
-                      <button
-                        type="button"
-                        draggable
-                        onDragStart={(event) => handleDatabaseDragStart(event, db.id)}
-                        onClick={() => onAddDatabaseNode(db.id)}
-                        className="rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-[11px] font-semibold text-white transition hover:-translate-y-0.5"
-                        data-testid={`db-node-${db.id}`}
-                      >
-                        Add node
-                      </button>
-                    )}
                     {onEditDatabase && (
                       <button
                         type="button"
@@ -181,6 +190,76 @@ export const LogicNodePalette = ({
           ))}
         </div>
       ) : null}
+      <div className="space-y-3 rounded-2xl border border-white/10 bg-white/5 p-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-xs uppercase tracking-[0.3em] text-bw-amber">Queries</p>
+            <p className="text-[11px] text-bw-platinum/70">Drag to reuse across flows</p>
+          </div>
+          {onCreateQuery && (
+            <button
+              type="button"
+              onClick={onCreateQuery}
+              className="rounded-xl border border-white/20 px-3 py-1 text-[11px] font-semibold text-white"
+            >
+              New
+            </button>
+          )}
+        </div>
+        {queries && queries.length > 0 ? (
+          <div className="space-y-2">
+            {queries.map((query) => (
+              <div
+                key={query.id}
+                role="button"
+                tabIndex={0}
+                draggable
+                onDragStart={(event) => handleQueryDragStart(event, query.id)}
+                onClick={() => onAddQueryNode?.(query.id)}
+                onKeyDown={(event) => handleQueryKeyDown(event, query.id)}
+                className="group w-full rounded-xl border border-white/10 bg-bw-ink/70 p-3 text-left transition hover:-translate-y-0.5 focus:outline-none focus:ring-2 focus:ring-bw-sand"
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <p className="text-sm font-semibold text-white">{query.name}</p>
+                    <p className="text-[11px] text-bw-platinum/60 uppercase">{query.mode}</p>
+                  </div>
+                  <div className="flex gap-2 opacity-0 transition group-hover:opacity-100">
+                    {onEditQuery && (
+                      <button
+                        type="button"
+                        className="text-[11px] text-bw-sand"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          onEditQuery(query.id);
+                        }}
+                      >
+                        Edit
+                      </button>
+                    )}
+                    {onDeleteQuery && (
+                      <button
+                        type="button"
+                        className="text-[11px] text-red-300"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          onDeleteQuery(query.id);
+                        }}
+                      >
+                        Delete
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="rounded-xl border border-dashed border-white/20 px-3 py-4 text-center text-xs text-bw-platinum/70">
+            No queries yet.
+          </p>
+        )}
+      </div>
       <div className="space-y-3 rounded-2xl border border-white/10 bg-white/5 p-4">
         <div className="flex items-center justify-between">
           <div>

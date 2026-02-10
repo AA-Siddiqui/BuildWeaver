@@ -74,23 +74,18 @@ describe('LogicNodePalette', () => {
   it('shows database design controls and forwards actions', () => {
     const handleDesign = jest.fn();
     const handleEdit = jest.fn();
-    const handleAddDatabaseNode = jest.fn();
 
     render(
       <LogicNodePalette
         onAddNode={jest.fn()}
         onOpenDatabaseDesigner={handleDesign}
         onEditDatabase={handleEdit}
-        onAddDatabaseNode={handleAddDatabaseNode}
         databases={[{ id: 'db-1', name: 'Analytics', tableCount: 3 }]}
       />
     );
 
     fireEvent.click(screen.getByText('Design DB'));
     expect(handleDesign).toHaveBeenCalledTimes(1);
-
-    fireEvent.click(screen.getByTestId('db-node-db-1'));
-    expect(handleAddDatabaseNode).toHaveBeenCalledWith('db-1');
 
     fireEvent.click(screen.getByText('Edit'));
     expect(handleEdit).toHaveBeenCalledWith('db-1');

@@ -38,7 +38,10 @@ export type {
   DatabaseField,
   DatabaseRelationship,
   DatabaseConnectionSettings,
-  DatabaseNodeData,
   RelationshipCardinality,
-  RelationshipModality
+  RelationshipModality,
+  QueryNodeData,
+  QueryDefinition,
+  QueryArgument,
+  QueryMode
 } from '@buildweaver/libs';

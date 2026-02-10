@@ -39,19 +39,20 @@ describe('graphSnapshot utilities', () => {
   };
 
   it('removes transient fields when hashing', () => {
-    const baseHash = hashGraphSnapshot({ nodes: [baseNode], edges: [baseEdge], functions: [baseFunction], databases: [baseDatabase] });
+    const baseHash = hashGraphSnapshot({ nodes: [baseNode], edges: [baseEdge], functions: [baseFunction], databases: [baseDatabase], queries: [] });
     const snapshotWithSelection = hashGraphSnapshot({
       nodes: [{ ...baseNode, selected: true, dragging: true }],
       edges: [{ ...baseEdge, selected: true }],
       functions: [baseFunction],
-      databases: [baseDatabase]
+      databases: [baseDatabase],
+      queries: []
     });
 
     expect(snapshotWithSelection).toBe(baseHash);
   });
 
   it('produces deep clones without shared references', () => {
-    const cloned = cloneGraphSnapshot({ nodes: [baseNode], edges: [baseEdge], functions: [baseFunction], databases: [baseDatabase] });
+    const cloned = cloneGraphSnapshot({ nodes: [baseNode], edges: [baseEdge], functions: [baseFunction], databases: [baseDatabase], queries: [] });
     expect(cloned).not.toBe(baseNode);
     expect(cloned.nodes[0]).not.toBe(baseNode);
     expect(cloned.edges[0]).not.toBe(baseEdge);

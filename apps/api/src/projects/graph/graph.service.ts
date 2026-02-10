@@ -14,7 +14,9 @@ import {
   LogicEditorNodeType,
   PageNodeData,
   ProjectGraphSnapshot,
-  UserDefinedFunction
+  UserDefinedFunction,
+  QueryNodeData,
+  QueryDefinition
 } from '@buildweaver/libs';
 
 @Injectable()
@@ -30,7 +32,20 @@ export class ProjectGraphService {
     'logical',
     'relational',
     'function',
-    'database'
+    'query'
+  ];
+  private readonly allowedQueryInternalNodes: LogicEditorNodeType[] = [
+    'query-argument',
+    'query-output',
+    'query-table',
+    'query-join',
+    'query-where',
+    'query-groupby',
+    'query-having',
+    'query-orderby',
+    'query-limit',
+    'query-aggregation',
+    'query-attribute'
   ];
 
   constructor(private readonly database: DatabaseService) {}
@@ -57,7 +72,7 @@ export class ProjectGraphService {
 
     const composed = this.composeGraph(graph, pages);
     this.logger.debug(
-      `Loaded graph nodes=${composed.nodes.length} edges=${composed.edges.length} functions=${composed.functions.length} databases=${composed.databases?.length ?? 0}`
+      `Loaded graph nodes=${composed.nodes.length} edges=${composed.edges.length} functions=${composed.functions.length} databases=${composed.databases?.length ?? 0} queries=${composed.queries?.length ?? 0}`
     );
     this.logPageNodeInputSummary(projectId, composed.nodes);
     return composed;
@@ -79,10 +94,14 @@ export class ProjectGraphService {
     const sanitizedFunctions = this.sanitizeFunctions(normalizedPayload.functions, pageIds, declaredFunctionIds);
     const allowedFunctionIds = new Set(sanitizedFunctions.map((fn) => fn.id));
     const sanitizedDatabases = this.sanitizeDatabases(normalizedPayload.databases);
+    const declaredQueryIds = new Set((normalizedPayload.queries ?? []).map((q) => q.id).filter(Boolean));
+    this.logger.debug(`Declared query ids: ${JSON.stringify([...declaredQueryIds])}`);
+    const sanitizedQueries = this.sanitizeQueries(normalizedPayload.queries ?? [], pageIds, declaredFunctionIds, declaredQueryIds);
+    const allowedQueryIds = new Set(sanitizedQueries.map((q) => q.id));
 
     const rejectedNodes: { id: string; type: string; reason: string }[] = [];
     const sanitizedNodes = normalizedPayload.nodes.filter((node) => {
-      const evaluation = this.evaluateNodeAllowance(node, pageIds, { allowedFunctionIds });
+      const evaluation = this.evaluateNodeAllowance(node, pageIds, { allowedFunctionIds, allowedQueryIds });
       if (!evaluation.allowed) {
         rejectedNodes.push({ id: node.id, type: node.type, reason: evaluation.reason ?? 'unknown' });
         return false;
@@ -102,7 +121,8 @@ export class ProjectGraphService {
       nodes: sanitizedNodes,
       edges: sanitizedEdges,
       functions: sanitizedFunctions,
-      databases: sanitizedDatabases
+      databases: sanitizedDatabases,
+      queries: sanitizedQueries
     };
     if (rejectedNodes.length) {
       this.logger.warn(
@@ -115,7 +135,7 @@ export class ProjectGraphService {
       );
     }
     this.logger.debug(
-      `Sanitized logic graph nodes=${sanitizedNodes.length}/${normalizedPayload.nodes.length} edges=${sanitizedEdges.length}/${normalizedPayload.edges.length} functions=${sanitizedFunctions.length}/${normalizedPayload.functions.length} databases=${sanitizedDatabases.length}/${(normalizedPayload.databases ?? []).length}`
+      `Sanitized logic graph nodes=${sanitizedNodes.length}/${normalizedPayload.nodes.length} edges=${sanitizedEdges.length}/${normalizedPayload.edges.length} functions=${sanitizedFunctions.length}/${normalizedPayload.functions.length} databases=${sanitizedDatabases.length}/${(normalizedPayload.databases ?? []).length} queries=${sanitizedQueries.length}/${(normalizedPayload.queries ?? []).length}`
     );
 
     const existing = await this.db
@@ -132,7 +152,7 @@ export class ProjectGraphService {
 
     const composed = this.composeGraph(snapshot, pages);
     this.logger.log(
-      `Graph persisted for project=${projectId} nodes=${composed.nodes.length} edges=${composed.edges.length} functions=${composed.functions.length} databases=${composed.databases?.length ?? 0}`
+      `Graph persisted for project=${projectId} nodes=${composed.nodes.length} edges=${composed.edges.length} functions=${composed.functions.length} databases=${composed.databases?.length ?? 0} queries=${composed.queries?.length ?? 0}`
     );
     return composed;
   }
@@ -140,14 +160,21 @@ export class ProjectGraphService {
   private evaluateNodeAllowance(
     node: LogicEditorNode,
     allowedPageIds: Set<string>,
-    options?: { allowFunctionInternals?: boolean; allowedFunctionIds?: Set<string> }
+    options?: {
+      allowFunctionInternals?: boolean;
+      allowedFunctionIds?: Set<string>;
+      allowQueryInternals?: boolean;
+      allowedQueryIds?: Set<string>;
+    }
   ): { allowed: boolean; reason?: string } {
     if (node.type === 'page') {
       const pageData = node.data as Partial<PageNodeData> | undefined;
       if (!pageData || !pageData.pageId) {
+        this.logger.debug(`Node ${node.id} rejected: missing page reference`);
         return { allowed: false, reason: 'missing_page_reference' };
       }
       if (!allowedPageIds.has(pageData.pageId)) {
+        this.logger.debug(`Node ${node.id} rejected: page ${pageData.pageId} not found`);
         return { allowed: false, reason: 'page_not_found' };
       }
       return { allowed: true };
@@ -155,17 +182,42 @@ export class ProjectGraphService {
     if (node.type === 'function') {
       const data = node.data as Partial<FunctionNodeData> | undefined;
       if (!data?.functionId) {
+        this.logger.debug(`Node ${node.id} rejected: missing function reference`);
         return { allowed: false, reason: 'missing_function_reference' };
       }
       if (options?.allowedFunctionIds && !options.allowedFunctionIds.has(data.functionId)) {
+        this.logger.debug(`Node ${node.id} rejected: function ${data.functionId} not found`);
         return { allowed: false, reason: 'function_not_found' };
       }
       return { allowed: true };
     }
     if (node.type === 'function-argument' || node.type === 'function-return') {
+      if (!options?.allowFunctionInternals) {
+        this.logger.debug(`Node ${node.id} rejected: function-internal type=${node.type} at top-level`);
+      }
       return options?.allowFunctionInternals ? { allowed: true } : { allowed: false, reason: 'function_scope_only' };
     }
+    if (node.type === 'query') {
+      const data = node.data as Partial<QueryNodeData> | undefined;
+      if (!data?.queryId) {
+        this.logger.debug(`Node ${node.id} rejected: missing query reference`);
+        return { allowed: false, reason: 'missing_query_reference' };
+      }
+      if (options?.allowedQueryIds && !options.allowedQueryIds.has(data.queryId)) {
+        this.logger.debug(`Node ${node.id} rejected: query ${data.queryId} not found`);
+        return { allowed: false, reason: 'query_not_found' };
+      }
+      return { allowed: true };
+    }
+    if (this.allowedQueryInternalNodes.includes(node.type)) {
+      if (!options?.allowQueryInternals) {
+        this.logger.debug(`Node ${node.id} rejected: query-internal type=${node.type} at top-level`);
+        return { allowed: false, reason: 'query_scope_only' };
+      }
+      return { allowed: true };
+    }
     if (!this.allowedNonPageNodes.includes(node.type)) {
+      this.logger.debug(`Node ${node.id} rejected: unsupported type=${node.type}`);
       return { allowed: false, reason: 'unsupported_type' };
     }
     return { allowed: true };
@@ -235,6 +287,58 @@ export class ProjectGraphService {
         } satisfies UserDefinedFunction;
       })
       .filter((fn): fn is UserDefinedFunction => Boolean(fn));
+  }
+
+  private sanitizeQueries(
+    queries: QueryDefinition[],
+    allowedPageIds: Set<string>,
+    declaredFunctionIds: Set<string>,
+    declaredQueryIds: Set<string>
+  ): QueryDefinition[] {
+    if (!queries?.length) {
+      this.logger.debug('No queries to sanitize');
+      return [];
+    }
+    this.logger.debug(`Sanitizing ${queries.length} query definitions`);
+    return queries
+      .map((query) => {
+        if (!query?.id) {
+          this.logger.warn('Skipping query without id');
+          return null;
+        }
+        const rejectedNodes: { id: string; type: string; reason?: string }[] = [];
+        const nodes = (query.nodes ?? []).filter((node) => {
+          const evaluation = this.evaluateNodeAllowance(node, allowedPageIds, {
+            allowQueryInternals: true,
+            allowedFunctionIds: declaredFunctionIds,
+            allowedQueryIds: declaredQueryIds
+          });
+          if (!evaluation.allowed) {
+            rejectedNodes.push({ id: node.id, type: node.type, reason: evaluation.reason });
+          }
+          return evaluation.allowed;
+        });
+        if (rejectedNodes.length) {
+          this.logger.warn(
+            `Rejected ${rejectedNodes.length} nodes while sanitizing query=${query.id}: ${JSON.stringify(rejectedNodes)}`
+          );
+        }
+        const nodeIds = new Set(nodes.map((node) => node.id));
+        const edges = (query.edges ?? []).filter((edge) => this.isEdgeAllowed(edge, nodeIds));
+        const args = Array.isArray(query.arguments)
+          ? query.arguments.filter((arg) => Boolean(arg?.id) && typeof arg.name === 'string' && typeof arg.type === 'string')
+          : [];
+        this.logger.debug(
+          `Sanitized query=${query.id} name=${query.name} nodes=${nodes.length} edges=${edges.length} args=${args.length}`
+        );
+        return {
+          ...query,
+          nodes,
+          edges,
+          arguments: args
+        } satisfies QueryDefinition;
+      })
+      .filter((query): query is QueryDefinition => Boolean(query));
   }
 
   private sanitizeDatabases(databases?: DatabaseSchema[] | null): DatabaseSchema[] {
@@ -350,10 +454,22 @@ export class ProjectGraphService {
     });
 
     const databases = graph.databases ?? [];
+    const queries = (graph.queries ?? []).map((query) => {
+      const queryNodes = (query.nodes ?? [])
+        .map((node) => this.composeNode(node, pageMap))
+        .filter((node): node is LogicEditorNode => Boolean(node));
+      const queryNodeIds = new Set(queryNodes.map((node) => node.id));
+      const queryEdges = (query.edges ?? []).filter((edge) => this.isEdgeAllowed(edge, queryNodeIds));
+      return {
+        ...query,
+        nodes: queryNodes,
+        edges: queryEdges
+      };
+    });
     this.logger.debug(
-      `Graph composed for response nodes=${nodes.length} edges=${edges.length} functions=${functions.length} databases=${databases.length}`
+      `Graph composed for response nodes=${nodes.length} edges=${edges.length} functions=${functions.length} databases=${databases.length} queries=${queries.length}`
     );
-    return { nodes, edges, functions, databases };
+    return { nodes, edges, functions, databases, queries };
   }
 
   private composeNode(node: LogicEditorNode, pageMap: Map<string, ProjectPage>): LogicEditorNode | null {
@@ -426,13 +542,15 @@ export class ProjectGraphService {
   private withGraphDefaults(graph?: ProjectGraphSnapshot | null): ProjectGraphSnapshot {
     const databases = this.sanitizeDatabases(graph?.databases);
     if (!graph) {
-      return { nodes: [], edges: [], functions: [], databases };
+      this.logger.debug('No existing graph found, returning empty defaults');
+      return { nodes: [], edges: [], functions: [], databases, queries: [] };
     }
     return {
       nodes: graph.nodes ?? [],
       edges: graph.edges ?? [],
       functions: graph.functions ?? [],
-      databases
+      databases,
+      queries: graph.queries ?? []
     };
   }
 

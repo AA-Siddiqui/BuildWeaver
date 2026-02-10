@@ -11,9 +11,15 @@
   ObjectValueSampleKind,
   PageDynamicInputDataType,
   PageDynamicListItemType,
+  QueryDefinition,
+  QueryMode,
   RelationalOperation,
   ScalarSampleKind,
   ScalarValue,
+  SqlAggregateFunction,
+  SqlJoinType,
+  SqlOperator,
+  SqlSortOrder,
   StringNodeInputRole,
   StringOperation,
   UserDefinedFunction,
@@ -159,22 +165,35 @@ class StringOptionsDto {
   replace?: string;
 }
 
+const ALL_NODE_KINDS = [
+  'dummy',
+  'page',
+  'arithmetic',
+  'string',
+  'list',
+  'object',
+  'conditional',
+  'logical',
+  'relational',
+  'function',
+  'function-argument',
+  'function-return',
+  'query',
+  'query-argument',
+  'query-output',
+  'query-table',
+  'query-join',
+  'query-where',
+  'query-groupby',
+  'query-having',
+  'query-orderby',
+  'query-limit',
+  'query-aggregation',
+  'query-attribute'
+] as const;
+
 class GraphNodeDataDto {
-  @IsIn([
-    'dummy',
-    'page',
-    'arithmetic',
-    'string',
-    'list',
-    'object',
-    'conditional',
-    'logical',
-    'relational',
-    'function',
-    'function-argument',
-    'function-return',
-    'database'
-  ])
+  @IsIn(ALL_NODE_KINDS)
   kind!: LogicEditorNode['type'];
 
   @IsOptional()
@@ -334,20 +353,25 @@ class GraphNodeDataDto {
   @IsIn(['applied', 'reference'])
   mode?: FunctionNodeMode;
 
+  @ValidateIf((node: GraphNodeDataDto) => node.kind === 'query')
+  @IsOptional()
+  @IsIn(['read', 'insert', 'update', 'delete'])
+  queryMode?: QueryMode;
+
   @ValidateIf((node: GraphNodeDataDto) => node.kind === 'function')
   @IsOptional()
   @IsBoolean()
   returnsValue?: boolean;
 
-  @ValidateIf((node: GraphNodeDataDto) => node.kind === 'function-argument')
+  @ValidateIf((node: GraphNodeDataDto) => node.kind === 'function-argument' || node.kind === 'query-argument')
   @IsString()
   argumentId?: string;
 
-  @ValidateIf((node: GraphNodeDataDto) => node.kind === 'function-argument')
+  @ValidateIf((node: GraphNodeDataDto) => node.kind === 'function-argument' || node.kind === 'query-argument')
   @IsString()
   name?: string;
 
-  @ValidateIf((node: GraphNodeDataDto) => node.kind === 'function-argument')
+  @ValidateIf((node: GraphNodeDataDto) => node.kind === 'function-argument' || node.kind === 'query-argument')
   @IsIn(['string', 'number', 'boolean', 'list', 'object'])
   type?: FunctionArgumentType;
 
@@ -355,46 +379,180 @@ class GraphNodeDataDto {
   @IsString()
   returnId?: string;
 
-  // Database node specifics
-  @ValidateIf((node: GraphNodeDataDto) => node.kind === 'database')
+  // Query node specifics (main canvas)
+  @ValidateIf((node: GraphNodeDataDto) => node.kind === 'query')
+  @IsString()
+  queryId?: string;
+
+  @ValidateIf((node: GraphNodeDataDto) => node.kind === 'query')
+  @IsOptional()
+  @IsString()
+  queryName?: string;
+
+  @ValidateIf((node: GraphNodeDataDto) => node.kind === 'query' || node.kind === 'query-table')
+  @IsOptional()
   @IsString()
   schemaId?: string;
 
-  @ValidateIf((node: GraphNodeDataDto) => node.kind === 'database')
-  @IsString()
-  schemaName?: string;
+  // Query-argument node
+  // argumentId, name, type are shared with function-argument (ValidateIf already covers both)
 
-  @ValidateIf((node: GraphNodeDataDto) => node.kind === 'database')
+  // Query-output node
+  @ValidateIf((node: GraphNodeDataDto) => node.kind === 'query-output')
+  @IsString()
+  outputId?: string;
+
+  // Query-table node
+  @ValidateIf((node: GraphNodeDataDto) => node.kind === 'query-table')
   @IsOptional()
   @IsString()
-  selectedTableId?: string;
+  tableId?: string;
 
-  @ValidateIf((node: GraphNodeDataDto) => node.kind === 'database')
+  @ValidateIf((node: GraphNodeDataDto) => node.kind === 'query-table')
   @IsOptional()
-  @ValidateNested({ each: true })
-  @Type(() => DatabaseNodeTableDto)
-  tables?: DatabaseNodeTableDto[];
+  @IsString()
+  tableName?: string;
+
+  @ValidateIf((node: GraphNodeDataDto) => node.kind === 'query-table')
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  selectedColumns?: string[];
+
+  @ValidateIf((node: GraphNodeDataDto) => node.kind === 'query-table')
+  @IsOptional()
+  @IsObject()
+  columnDefaults?: Record<string, string>;
+
+  @ValidateIf((node: GraphNodeDataDto) => node.kind === 'query-table')
+  @IsOptional()
+  @IsNumber()
+  aggregationInputCount?: number;
+
+  // Query-join node
+  @ValidateIf((node: GraphNodeDataDto) => node.kind === 'query-join')
+  @IsOptional()
+  @IsIn(['inner', 'left', 'right', 'full'])
+  joinType?: SqlJoinType;
+
+  @ValidateIf((node: GraphNodeDataDto) => node.kind === 'query-join')
+  @IsOptional()
+  @IsString()
+  tableA?: string;
+
+  @ValidateIf((node: GraphNodeDataDto) => node.kind === 'query-join')
+  @IsOptional()
+  @IsString()
+  tableB?: string;
+
+  @ValidateIf((node: GraphNodeDataDto) => node.kind === 'query-join')
+  @IsOptional()
+  @IsString()
+  attributeA?: string;
+
+  @ValidateIf((node: GraphNodeDataDto) => node.kind === 'query-join')
+  @IsOptional()
+  @IsString()
+  attributeB?: string;
+
+  // Query-where and query-having nodes
+  @ValidateIf((node: GraphNodeDataDto) => node.kind === 'query-where' || node.kind === 'query-having')
+  @IsOptional()
+  @IsIn(['=', '!=', '>', '<', '>=', '<=', 'in', 'not in', 'like', 'not like', 'is null', 'is not null'])
+  operator?: SqlOperator;
+
+  @ValidateIf((node: GraphNodeDataDto) => node.kind === 'query-where' || node.kind === 'query-having')
+  @IsOptional()
+  @IsString()
+  leftOperand?: string;
+
+  @ValidateIf((node: GraphNodeDataDto) => node.kind === 'query-where' || node.kind === 'query-having')
+  @IsOptional()
+  @IsString()
+  rightOperand?: string;
+
+  @ValidateIf((node: GraphNodeDataDto) => node.kind === 'query-where' || node.kind === 'query-having')
+  @IsOptional()
+  @IsBoolean()
+  leftIsColumn?: boolean;
+
+  @ValidateIf((node: GraphNodeDataDto) => node.kind === 'query-where' || node.kind === 'query-having')
+  @IsOptional()
+  @IsBoolean()
+  rightIsColumn?: boolean;
+
+  // Query-groupby node
+  @ValidateIf((node: GraphNodeDataDto) => node.kind === 'query-groupby')
+  @IsOptional()
+  @IsNumber()
+  groupingAttributeCount?: number;
+
+  @ValidateIf((node: GraphNodeDataDto) => node.kind === 'query-groupby')
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  attributes?: string[];
+
+  // Query-orderby node
+  @ValidateIf((node: GraphNodeDataDto) => node.kind === 'query-orderby')
+  @IsOptional()
+  @IsNumber()
+  sortCount?: number;
+
+  @ValidateIf((node: GraphNodeDataDto) => node.kind === 'query-orderby')
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  sortAttributes?: string[];
+
+  @ValidateIf((node: GraphNodeDataDto) => node.kind === 'query-orderby')
+  @IsOptional()
+  @IsArray()
+  @IsIn(['asc', 'desc'], { each: true })
+  sortOrders?: SqlSortOrder[];
+
+  // Query-limit node
+  @ValidateIf((node: GraphNodeDataDto) => node.kind === 'query-limit')
+  @IsOptional()
+  @IsNumber()
+  limitValue?: number;
+
+  @ValidateIf((node: GraphNodeDataDto) => node.kind === 'query-limit')
+  @IsOptional()
+  @IsNumber()
+  offsetValue?: number;
+
+  // Query-aggregation node
+  @ValidateIf((node: GraphNodeDataDto) => node.kind === 'query-aggregation')
+  @IsOptional()
+  @IsIn(['sum', 'max', 'min', 'count', 'avg'])
+  function?: SqlAggregateFunction;
+
+  @ValidateIf((node: GraphNodeDataDto) => node.kind === 'query-aggregation' || node.kind === 'query-attribute')
+  @IsOptional()
+  @IsString()
+  attribute?: string;
+
+  // Query-attribute node
+  // tableName is used by query-aggregation too
+  @ValidateIf((node: GraphNodeDataDto) =>
+    node.kind === 'query-attribute' || node.kind === 'query-aggregation'
+  )
+  @IsOptional()
+  @IsString()
+  attributeTableName?: string;
+
+  @ValidateIf((node: GraphNodeDataDto) => node.kind === 'query-attribute')
+  @IsOptional()
+  @IsString()
+  attributeName?: string;
 }
 
 class GraphNodeDto {
   @IsString()
   id!: string;
 
-  @IsIn([
-    'dummy',
-    'page',
-    'arithmetic',
-    'string',
-    'list',
-    'object',
-    'conditional',
-    'logical',
-    'relational',
-    'function',
-    'function-argument',
-    'function-return',
-    'database'
-  ])
+  @IsIn(ALL_NODE_KINDS)
   type!: LogicEditorNode['type'];
 
   @ValidateNested()
@@ -513,19 +671,6 @@ class DatabaseTableDto {
   position?: GraphNodePositionDto;
 }
 
-class DatabaseNodeTableDto {
-  @IsString()
-  id!: string;
-
-  @IsString()
-  name!: string;
-
-  @IsArray()
-  @ValidateNested({ each: true })
-  @Type(() => DatabaseFieldDto)
-  fields!: DatabaseFieldDto[];
-}
-
 class DatabaseRelationshipDto {
   @IsString()
   id!: string;
@@ -596,6 +741,50 @@ class DatabaseSchemaDto {
   updatedAt?: string;
 }
 
+class QueryArgumentDto {
+  @IsString()
+  id!: string;
+
+  @IsString()
+  name!: string;
+
+  @IsIn(['string', 'number', 'boolean', 'list', 'object'])
+  type!: ScalarSampleKind;
+}
+
+class QueryDefinitionDto {
+  @IsString()
+  id!: string;
+
+  @IsString()
+  name!: string;
+
+  @IsIn(['read', 'insert', 'update', 'delete'])
+  mode!: QueryMode;
+
+  @IsString()
+  schemaId!: string;
+
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => GraphNodeDto)
+  nodes!: LogicEditorNode[];
+
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => GraphEdgeDto)
+  edges!: LogicEditorEdge[];
+
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => QueryArgumentDto)
+  arguments!: QueryArgumentDto[];
+
+  @IsOptional()
+  @IsString()
+  updatedAt?: string;
+}
+
 export class SaveProjectGraphDto {
   @IsArray()
   @ValidateNested({ each: true })
@@ -616,4 +805,10 @@ export class SaveProjectGraphDto {
   @ValidateNested({ each: true })
   @Type(() => DatabaseSchemaDto)
   databases?: DatabaseSchemaDto[];
+
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => QueryDefinitionDto)
+  queries?: QueryDefinition[];
 }
