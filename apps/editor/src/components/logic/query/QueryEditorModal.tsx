@@ -78,9 +78,9 @@ const MODE_INACTIVE_COLORS: Record<QueryMode, string> = {
   delete: 'border-red-600/40 text-red-400 hover:bg-red-600/20'
 };
 
-type QueryInnerNodeType = QueryPaletteNodeType | 'query-output';
+export type QueryInnerNodeType = QueryPaletteNodeType | 'query-output';
 
-const createQueryInnerNode = (type: QueryInnerNodeType, position = { x: 0, y: 0 }): FlowNode => {
+export const createQueryInnerNode = (type: QueryInnerNodeType, position = { x: 0, y: 0 }): FlowNode => {
   const nodeId = `${type}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
   const defaults: Record<QueryInnerNodeType, LogicEditorNodeData> = {
     'query-argument': { kind: 'query-argument', argumentId: nodeId, name: 'arg', type: 'string' },
@@ -121,18 +121,16 @@ const QueryEditorCanvas = ({ queryDef, schema, onSave, onClose }: QueryEditorMod
   );
   const connectionLineStyle = useMemo(() => ({ stroke: '#F9E7B2', strokeWidth: 2 }), []);
 
-  // Auto-create query-output node if none exists
+  // Sync nodes/edges from queryDef and auto-create query-output if missing
   useEffect(() => {
-    const hasOutput = nodes.some((node) => node.type === 'query-output');
+    const flowNodes = toFlowNodes(queryDef.nodes);
+    const hasOutput = flowNodes.some((node) => node.type === 'query-output');
     if (!hasOutput) {
       const outputNode = createQueryInnerNode('query-output', { x: 600, y: 200 });
-      setNodes((current) => current.concat(outputNode));
+      flowNodes.push(outputNode);
       logicLogger.info('Auto-created query-output node', { queryId: queryDef.id, nodeId: outputNode.id });
     }
-  }, []);
-
-  useEffect(() => {
-    setNodes(toFlowNodes(queryDef.nodes));
+    setNodes(flowNodes);
     setEdges(toFlowEdges(queryDef.edges));
     setName(queryDef.name);
     setMode(queryDef.mode);

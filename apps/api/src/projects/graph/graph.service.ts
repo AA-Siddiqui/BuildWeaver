@@ -204,9 +204,10 @@ export class ProjectGraphService {
         return { allowed: false, reason: 'missing_query_reference' };
       }
       if (options?.allowedQueryIds && !options.allowedQueryIds.has(data.queryId)) {
-        this.logger.debug(`Node ${node.id} rejected: query ${data.queryId} not found`);
+        this.logger.debug(`Node ${node.id} rejected: query ${data.queryId} not found in allowed set [${[...options.allowedQueryIds].join(', ')}]`);
         return { allowed: false, reason: 'query_not_found' };
       }
+      this.logger.debug(`Node ${node.id} allowed: query node referencing queryId=${data.queryId} mode=${data.mode ?? 'unknown'}`);
       return { allowed: true };
     }
     if (this.allowedQueryInternalNodes.includes(node.type)) {
@@ -306,6 +307,7 @@ export class ProjectGraphService {
           this.logger.warn('Skipping query without id');
           return null;
         }
+        this.logger.debug(`Sanitizing query=${query.id} name=${query.name} mode=${query.mode} schemaId=${query.schemaId} incomingNodes=${(query.nodes ?? []).length} incomingEdges=${(query.edges ?? []).length} incomingArgs=${(query.arguments ?? []).length}`);
         const rejectedNodes: { id: string; type: string; reason?: string }[] = [];
         const nodes = (query.nodes ?? []).filter((node) => {
           const evaluation = this.evaluateNodeAllowance(node, allowedPageIds, {
@@ -323,13 +325,17 @@ export class ProjectGraphService {
             `Rejected ${rejectedNodes.length} nodes while sanitizing query=${query.id}: ${JSON.stringify(rejectedNodes)}`
           );
         }
+        const hasOutputNode = nodes.some((node) => node.type === 'query-output');
+        if (!hasOutputNode) {
+          this.logger.warn(`Query ${query.id} (${query.name}) has no query-output node after sanitization`);
+        }
         const nodeIds = new Set(nodes.map((node) => node.id));
         const edges = (query.edges ?? []).filter((edge) => this.isEdgeAllowed(edge, nodeIds));
         const args = Array.isArray(query.arguments)
           ? query.arguments.filter((arg) => Boolean(arg?.id) && typeof arg.name === 'string' && typeof arg.type === 'string')
           : [];
         this.logger.debug(
-          `Sanitized query=${query.id} name=${query.name} nodes=${nodes.length} edges=${edges.length} args=${args.length}`
+          `Sanitized query=${query.id} name=${query.name} nodes=${nodes.length} edges=${edges.length} args=${args.length} hasOutput=${hasOutputNode}`
         );
         return {
           ...query,
