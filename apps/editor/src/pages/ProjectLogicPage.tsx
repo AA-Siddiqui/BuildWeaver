@@ -59,6 +59,7 @@ import { deriveDefaultPageName, normalizeRouteSegment } from '../lib/routes';
 import {
   FlowEdge,
   FlowNode,
+  rehydrateQueryNodeArguments,
   serializeEdges,
   serializeNodes,
   toFlowEdges,
@@ -482,11 +483,14 @@ const LogicEditorView = () => {
 
   useEffect(() => {
     if (graphQuery.data?.graph) {
-      const hydratedNodes = toFlowNodes(graphQuery.data.graph.nodes);
+      const hydratedQueries: QueryDefinition[] = graphQuery.data.graph.queries ?? [];
+      const hydratedNodes = rehydrateQueryNodeArguments(
+        toFlowNodes(graphQuery.data.graph.nodes),
+        hydratedQueries
+      );
       const hydratedEdges = ensureSeverableEdges(toFlowEdges(graphQuery.data.graph.edges));
       const hydratedFunctions = graphQuery.data.graph.functions ?? [];
       const hydratedDatabases = serializeDatabases(graphQuery.data.graph.databases ?? []);
-      const hydratedQueries: QueryDefinition[] = graphQuery.data.graph.queries ?? [];
       setNodes(hydratedNodes);
       setEdges(hydratedEdges);
       setFunctions(hydratedFunctions);
@@ -519,7 +523,7 @@ const LogicEditorView = () => {
         databases: graph.databases?.length ?? 0,
         queries: graph.queries?.length ?? 0
       });
-      setNodes(toFlowNodes(graph.nodes));
+      setNodes(rehydrateQueryNodeArguments(toFlowNodes(graph.nodes), graph.queries ?? []));
       setEdges(ensureSeverableEdges(toFlowEdges(graph.edges)));
       setFunctions(graph.functions ?? []);
       setDatabases(serializeDatabases(graph.databases ?? []));
