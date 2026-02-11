@@ -11,6 +11,9 @@ import type {
   FunctionReturnNodeData,
   FunctionNodeData,
   LogicalOperatorNodeData,
+  QueryNodeData,
+  QueryDefinition,
+  DatabaseSchema,
   UserDefinedFunction
 } from '@buildweaver/libs';
 import { createPreviewResolver } from './previewResolver';
@@ -475,5 +478,324 @@ describe('previewResolver', () => {
     expect(preview.value).toBe(42);
     const binding = resolver.getHandleBinding('logic-1', getLogicalHandleId('logic-1', 'primary'));
     expect(binding?.value).toBe(42);
+  });
+
+  describe('main-canvas query node preview', () => {
+    const testSchema: DatabaseSchema = {
+      id: 'schema-1',
+      name: 'TestDB',
+      tables: [
+        {
+          id: 't-users',
+          name: 'users',
+          fields: [
+            { id: 'f-id', name: 'id', type: 'uuid', nullable: false, unique: true, isId: true },
+            { id: 'f-name', name: 'name', type: 'string', nullable: false, unique: false },
+            { id: 'f-email', name: 'email', type: 'string', nullable: false, unique: true }
+          ]
+        }
+      ],
+      relationships: []
+    };
+
+    const makeQueryDef = (overrides: Partial<QueryDefinition> = {}): QueryDefinition => ({
+      id: 'qd-1',
+      name: 'Get Users',
+      mode: 'read',
+      schemaId: 'schema-1',
+      nodes: [
+        {
+          id: 'qt-1',
+          type: 'query-table',
+          position: basePosition,
+          data: {
+            kind: 'query-table',
+            tableId: 't-users',
+            tableName: 'users',
+            schemaId: 'schema-1',
+            selectedColumns: ['name', 'email'],
+            columnDefaults: {},
+            aggregationInputCount: 0
+          }
+        },
+        {
+          id: 'qo-1',
+          type: 'query-output',
+          position: basePosition,
+          data: { kind: 'query-output', outputId: 'qo-1' }
+        }
+      ],
+      edges: [
+        { id: 'qe-1', source: 'qt-1', target: 'qo-1', sourceHandle: 'output', targetHandle: 'input' }
+      ],
+      arguments: [],
+      ...overrides
+    });
+
+    it('produces SQL and data shape for a query node on the main canvas', () => {
+      const queryDef = makeQueryDef();
+      const nodes: Node<LogicEditorNodeData>[] = [
+        {
+          id: 'main-q-1',
+          type: 'query',
+          position: basePosition,
+          data: {
+            kind: 'query',
+            queryId: 'qd-1',
+            queryName: 'Get Users',
+            mode: 'read',
+            schemaId: 'schema-1',
+            arguments: []
+          } satisfies QueryNodeData
+        }
+      ];
+
+      const resolver = createPreviewResolver(nodes, [], {
+        queryDefinitions: [queryDef],
+        databases: [testSchema]
+      });
+      const preview = resolver.getNodePreview('main-q-1');
+
+      expect(preview.state).toBe('ready');
+      expect(preview.heading).toBe('Get Users');
+      expect(preview.sql).toContain('SELECT users.name, users.email');
+      expect(preview.sql).toContain('FROM users');
+      expect(preview.dataShape).toBeDefined();
+      expect(preview.dataShape!.length).toBe(2);
+      expect(preview.dataShape![0].name).toBe('name');
+      expect(preview.dataShape![1].name).toBe('email');
+    });
+
+    it('includes WHERE in SQL when query definition has a where node', () => {
+      const queryDef = makeQueryDef({
+        nodes: [
+          {
+            id: 'qt-1',
+            type: 'query-table',
+            position: basePosition,
+            data: {
+              kind: 'query-table',
+              tableId: 't-users',
+              tableName: 'users',
+              schemaId: 'schema-1',
+              selectedColumns: ['name'],
+              columnDefaults: {},
+              aggregationInputCount: 0
+            }
+          },
+          {
+            id: 'qw-1',
+            type: 'query-where',
+            position: basePosition,
+            data: {
+              kind: 'query-where',
+              operator: '=',
+              leftOperand: 'users.id',
+              rightOperand: '1',
+              leftIsColumn: true,
+              rightIsColumn: false
+            }
+          },
+          {
+            id: 'qo-1',
+            type: 'query-output',
+            position: basePosition,
+            data: { kind: 'query-output', outputId: 'qo-1' }
+          }
+        ],
+        edges: [
+          { id: 'qe-1', source: 'qt-1', target: 'qw-1', sourceHandle: 'output', targetHandle: 'input-data' },
+          { id: 'qe-2', source: 'qw-1', target: 'qo-1', sourceHandle: 'output', targetHandle: 'input' }
+        ]
+      });
+
+      const nodes: Node<LogicEditorNodeData>[] = [
+        {
+          id: 'main-q-1',
+          type: 'query',
+          position: basePosition,
+          data: {
+            kind: 'query',
+            queryId: 'qd-1',
+            queryName: 'Get Users',
+            mode: 'read',
+            schemaId: 'schema-1',
+            arguments: []
+          } satisfies QueryNodeData
+        }
+      ];
+
+      const resolver = createPreviewResolver(nodes, [], {
+        queryDefinitions: [queryDef],
+        databases: [testSchema]
+      });
+      const preview = resolver.getNodePreview('main-q-1');
+
+      expect(preview.sql).toContain('SELECT users.name');
+      expect(preview.sql).toContain('WHERE');
+    });
+
+    it('falls back gracefully when query definition is not found', () => {
+      const nodes: Node<LogicEditorNodeData>[] = [
+        {
+          id: 'main-q-1',
+          type: 'query',
+          position: basePosition,
+          data: {
+            kind: 'query',
+            queryId: 'nonexistent',
+            queryName: 'Missing Query',
+            mode: 'read',
+            schemaId: 'schema-1',
+            arguments: [{ id: 'a1', name: 'userId', type: 'string' }]
+          } satisfies QueryNodeData
+        }
+      ];
+
+      const resolver = createPreviewResolver(nodes, [], {
+        queryDefinitions: [],
+        databases: [testSchema]
+      });
+      const preview = resolver.getNodePreview('main-q-1');
+
+      expect(preview.state).toBe('ready');
+      expect(preview.heading).toBe('Missing Query');
+      expect(preview.summary).toContain('READ');
+      expect(preview.summary).toContain('1 argument(s)');
+      expect(preview.sql).toBeUndefined();
+      expect(preview.dataShape).toBeUndefined();
+    });
+
+    it('handles query definition with no output node', () => {
+      const queryDef = makeQueryDef({
+        nodes: [
+          {
+            id: 'qt-1',
+            type: 'query-table',
+            position: basePosition,
+            data: {
+              kind: 'query-table',
+              tableId: 't-users',
+              tableName: 'users',
+              schemaId: 'schema-1',
+              selectedColumns: ['name'],
+              columnDefaults: {},
+              aggregationInputCount: 0
+            }
+          }
+        ],
+        edges: []
+      });
+
+      const nodes: Node<LogicEditorNodeData>[] = [
+        {
+          id: 'main-q-1',
+          type: 'query',
+          position: basePosition,
+          data: {
+            kind: 'query',
+            queryId: 'qd-1',
+            queryName: 'Get Users',
+            mode: 'read',
+            schemaId: 'schema-1',
+            arguments: []
+          } satisfies QueryNodeData
+        }
+      ];
+
+      const resolver = createPreviewResolver(nodes, [], {
+        queryDefinitions: [queryDef],
+        databases: [testSchema]
+      });
+      const preview = resolver.getNodePreview('main-q-1');
+
+      expect(preview.state).toBe('unknown');
+      expect(preview.summary).toContain('no output node');
+    });
+
+    it('produces delete SQL for delete-mode queries', () => {
+      const queryDef = makeQueryDef({
+        mode: 'delete',
+        nodes: [
+          {
+            id: 'qt-1',
+            type: 'query-table',
+            position: basePosition,
+            data: {
+              kind: 'query-table',
+              tableId: 't-users',
+              tableName: 'users',
+              schemaId: 'schema-1',
+              selectedColumns: [],
+              columnDefaults: {},
+              aggregationInputCount: 0
+            }
+          },
+          {
+            id: 'qo-1',
+            type: 'query-output',
+            position: basePosition,
+            data: { kind: 'query-output', outputId: 'qo-1' }
+          }
+        ],
+        edges: [
+          { id: 'qe-1', source: 'qt-1', target: 'qo-1', sourceHandle: 'output', targetHandle: 'input' }
+        ]
+      });
+
+      const nodes: Node<LogicEditorNodeData>[] = [
+        {
+          id: 'main-q-1',
+          type: 'query',
+          position: basePosition,
+          data: {
+            kind: 'query',
+            queryId: 'qd-1',
+            queryName: 'Remove Users',
+            mode: 'delete',
+            schemaId: 'schema-1',
+            arguments: []
+          } satisfies QueryNodeData
+        }
+      ];
+
+      const resolver = createPreviewResolver(nodes, [], {
+        queryDefinitions: [queryDef],
+        databases: [testSchema]
+      });
+      const preview = resolver.getNodePreview('main-q-1');
+
+      expect(preview.sql).toContain('DELETE FROM users');
+      expect(preview.dataShape).toEqual([{ name: 'affected_rows', type: 'number' }]);
+    });
+
+    it('works without database schema (unknown column types)', () => {
+      const queryDef = makeQueryDef();
+      const nodes: Node<LogicEditorNodeData>[] = [
+        {
+          id: 'main-q-1',
+          type: 'query',
+          position: basePosition,
+          data: {
+            kind: 'query',
+            queryId: 'qd-1',
+            queryName: 'Get Users',
+            mode: 'read',
+            schemaId: 'schema-1',
+            arguments: []
+          } satisfies QueryNodeData
+        }
+      ];
+
+      const resolver = createPreviewResolver(nodes, [], {
+        queryDefinitions: [queryDef],
+        databases: []
+      });
+      const preview = resolver.getNodePreview('main-q-1');
+
+      expect(preview.sql).toContain('SELECT users.name, users.email');
+      expect(preview.dataShape).toBeDefined();
+      expect(preview.dataShape!.every((c) => c.type === 'unknown')).toBe(true);
+    });
   });
 });

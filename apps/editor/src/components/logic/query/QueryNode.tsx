@@ -2,6 +2,9 @@ import { Handle, NodeProps, Position } from 'reactflow';
 import type { QueryNodeData } from '@buildweaver/libs';
 import { NodeChrome } from '../NodeChrome';
 import { usePreviewResolver } from '../previewResolver';
+import { logicLogger } from '../../../lib/logger';
+
+const LOGGER_PREFIX = 'QueryNode';
 
 const getHandleOffset = (index: number, total: number) => {
   if (total <= 0) return '50%';
@@ -21,7 +24,7 @@ export const QueryNode = ({ id, data }: NodeProps<QueryNodeData>) => {
   const preview = previewResolver.getNodePreview(id);
   const args = data.arguments ?? [];
 
-  console.log('[QueryNode] rendering', { id, queryId: data.queryId, mode: data.mode, argCount: args.length });
+  logicLogger.debug(`[${LOGGER_PREFIX}] rendering`, { id, queryId: data.queryId, mode: data.mode, argCount: args.length });
 
   return (
     <div className="relative">

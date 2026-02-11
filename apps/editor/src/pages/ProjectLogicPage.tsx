@@ -251,8 +251,8 @@ const LogicEditorView = () => {
   const [edgeCutGesture, setEdgeCutGesture] = useState<GestureState | null>(null);
   const [marqueeGesture, setMarqueeGesture] = useState<GestureState | null>(null);
   const previewResolver = useMemo(
-    () => createPreviewResolver(nodes, edges, { functions }),
-    [nodes, edges, functions]
+    () => createPreviewResolver(nodes, edges, { functions, queryDefinitions: queries, databases }),
+    [nodes, edges, functions, queries, databases]
   );
   const connectionLineStyle = useMemo(() => ({ stroke: '#F9E7B2', strokeWidth: 2 }), []);
   const pendingSaveRef = useRef<Promise<unknown> | null>(null);

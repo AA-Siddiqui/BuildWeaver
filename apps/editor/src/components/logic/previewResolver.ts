@@ -14,6 +14,7 @@ import {
   LogicalOperatorNodeData,
   ObjectNodeData,
   PageNodeData,
+  QueryDefinition,
   QueryMode,
   QueryNodeData,
   RelationalOperatorNodeData,
@@ -43,7 +44,7 @@ import { getConditionalHandleId } from './conditionalHandles';
 import { getLogicalHandleId, getLogicalOperationConfig } from './logicalOperatorConfig';
 import { getRelationalHandleId } from './relationalOperatorConfig';
 import { toFlowEdges, toFlowNodes } from './graphSerialization';
-import { evaluateQueryNodePreview } from './query/queryPreview';
+import { evaluateQueryNodePreview, assembleFullSql, inferFullDataShape } from './query/queryPreview';
 
 export interface ConnectedBinding {
   handleId: string;
@@ -255,6 +256,8 @@ interface PreviewResolverOptions {
   callStack?: string[];
   querySchema?: DatabaseSchema | null;
   queryMode?: QueryMode;
+  queryDefinitions?: QueryDefinition[];
+  databases?: DatabaseSchema[];
 }
 
 interface ResolverContext {
@@ -265,6 +268,8 @@ interface ResolverContext {
   queryMode?: QueryMode;
   allNodes: Node<LogicEditorNodeData>[];
   allEdges: Edge[];
+  queryDefinitions?: QueryDefinition[];
+  databases?: DatabaseSchema[];
 }
 
 const getArgumentSample = (type: FunctionArgumentNodeData['type']): ScalarValue => {
@@ -677,10 +682,65 @@ const evaluateNodePreview = (
     }
     case 'query': {
       const data = node.data as QueryNodeData;
+      const queryDef = context.queryDefinitions?.find((q) => q.id === data.queryId);
+      if (!queryDef) {
+        logicLogger.info('Query definition not found for main-canvas query node preview', {
+          nodeId: node.id,
+          queryId: data.queryId,
+          queryName: data.queryName
+        });
+        return {
+          state: 'ready',
+          heading: data.queryName || 'Query',
+          summary: `Mode: ${data.mode.toUpperCase()} | ${data.arguments.length} argument(s)`
+        };
+      }
+
+      const schema = context.databases?.find((db) => db.id === queryDef.schemaId) ?? null;
+      const flowNodes = toFlowNodes(queryDef.nodes);
+      const flowEdges = toFlowEdges(queryDef.edges);
+      const outputNode = flowNodes.find((n) => n.type === 'query-output');
+
+      if (!outputNode) {
+        logicLogger.warn('No output node in query definition for main-canvas preview', {
+          nodeId: node.id,
+          queryId: data.queryId,
+          innerNodeCount: flowNodes.length
+        });
+        return {
+          state: 'unknown',
+          heading: data.queryName || 'Query',
+          summary: 'Query has no output node.'
+        };
+      }
+
+      logicLogger.debug('Assembling main-canvas query node preview', {
+        nodeId: node.id,
+        queryId: data.queryId,
+        mode: queryDef.mode,
+        innerNodeCount: flowNodes.length,
+        innerEdgeCount: flowEdges.length,
+        hasSchema: schema !== null
+      });
+
+      const sql = assembleFullSql(outputNode.id, flowNodes, flowEdges, queryDef.mode);
+      const dataShape = inferFullDataShape(outputNode.id, flowNodes, flowEdges, schema, queryDef.mode);
+
+      logicLogger.info('Main-canvas query node preview computed', {
+        nodeId: node.id,
+        queryId: data.queryId,
+        columnCount: dataShape.length,
+        sqlLength: sql.length
+      });
+
       return {
-        state: 'ready',
+        state: dataShape.length > 0 ? 'ready' : 'unknown',
         heading: data.queryName || 'Query',
-        summary: `Mode: ${data.mode.toUpperCase()} | ${data.arguments.length} argument(s)`
+        summary: dataShape.length > 0
+          ? `Mode: ${data.mode.toUpperCase()} | ${dataShape.length} column(s)`
+          : `Mode: ${data.mode.toUpperCase()} | No columns resolved`,
+        sql,
+        dataShape
       };
     }
     case 'query-table':
@@ -728,7 +788,9 @@ export const createPreviewResolver = (
     querySchema: options.querySchema,
     queryMode: options.queryMode,
     allNodes: nodes,
-    allEdges: edges
+    allEdges: edges,
+    queryDefinitions: options.queryDefinitions,
+    databases: options.databases
   };
 
   const resolveBinding = (nodeId: string, handleId?: string): ConnectedBinding | undefined => {
