@@ -15,11 +15,22 @@ import { logicLogger } from '../../lib/logger';
 
 export type PreviewState = 'unknown' | 'ready' | 'error';
 
+/** Describes a single column in the output shape of a query node. */
+export interface QueryColumnShape {
+  name: string;
+  type: string;
+  table?: string;
+}
+
 export interface NodePreview<T = unknown> {
   state: PreviewState;
   heading: string;
   summary: string;
   value?: T;
+  /** Output column shape – populated for query nodes only. */
+  dataShape?: QueryColumnShape[];
+  /** Generated SQL fragment or full query – populated for query nodes only. */
+  sql?: string;
 }
 
 export const formatScalar = (

@@ -116,8 +116,8 @@ const QueryEditorCanvas = ({ queryDef, schema, onSave, onClose }: QueryEditorMod
   const [feedback, setFeedback] = useState('');
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const previewResolver = useMemo(
-    () => createPreviewResolver(nodes, edges),
-    [nodes, edges]
+    () => createPreviewResolver(nodes, edges, { querySchema: schema, queryMode: mode }),
+    [nodes, edges, schema, mode]
   );
   const connectionLineStyle = useMemo(() => ({ stroke: '#F9E7B2', strokeWidth: 2 }), []);
 

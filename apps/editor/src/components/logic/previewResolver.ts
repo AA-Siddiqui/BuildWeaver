@@ -3,6 +3,7 @@ import { Connection, Edge, Node } from 'reactflow';
 import {
   ArithmeticNodeData,
   ConditionalNodeData,
+  DatabaseSchema,
   DummyNodeData,
   FunctionArgumentNodeData,
   FunctionNodeData,
@@ -13,6 +14,8 @@ import {
   LogicalOperatorNodeData,
   ObjectNodeData,
   PageNodeData,
+  QueryMode,
+  QueryNodeData,
   RelationalOperatorNodeData,
   ScalarValue,
   StringNodeData,
@@ -40,6 +43,7 @@ import { getConditionalHandleId } from './conditionalHandles';
 import { getLogicalHandleId, getLogicalOperationConfig } from './logicalOperatorConfig';
 import { getRelationalHandleId } from './relationalOperatorConfig';
 import { toFlowEdges, toFlowNodes } from './graphSerialization';
+import { evaluateQueryNodePreview } from './query/queryPreview';
 
 export interface ConnectedBinding {
   handleId: string;
@@ -249,12 +253,18 @@ interface PreviewResolverOptions {
   functionsById?: Map<string, UserDefinedFunction>;
   argumentValueOverrides?: Record<string, ScalarValue | undefined>;
   callStack?: string[];
+  querySchema?: DatabaseSchema | null;
+  queryMode?: QueryMode;
 }
 
 interface ResolverContext {
   functionsById?: Map<string, UserDefinedFunction>;
   argumentValueOverrides?: Record<string, ScalarValue | undefined>;
   callStack: string[];
+  querySchema?: DatabaseSchema | null;
+  queryMode?: QueryMode;
+  allNodes: Node<LogicEditorNodeData>[];
+  allEdges: Edge[];
 }
 
 const getArgumentSample = (type: FunctionArgumentNodeData['type']): ScalarValue => {
@@ -665,6 +675,32 @@ const evaluateNodePreview = (
         summary: `Return handle ${data.returnId}`
       };
     }
+    case 'query': {
+      const data = node.data as QueryNodeData;
+      return {
+        state: 'ready',
+        heading: data.queryName || 'Query',
+        summary: `Mode: ${data.mode.toUpperCase()} | ${data.arguments.length} argument(s)`
+      };
+    }
+    case 'query-table':
+    case 'query-where':
+    case 'query-join':
+    case 'query-groupby':
+    case 'query-having':
+    case 'query-orderby':
+    case 'query-limit':
+    case 'query-aggregation':
+    case 'query-attribute':
+    case 'query-argument':
+    case 'query-output': {
+      return evaluateQueryNodePreview(node, {
+        schema: context.querySchema ?? null,
+        mode: context.queryMode ?? 'read',
+        allNodes: context.allNodes,
+        allEdges: context.allEdges
+      });
+    }
     default:
       return UNKNOWN_PREVIEW;
   }
@@ -688,7 +724,11 @@ export const createPreviewResolver = (
   const context: ResolverContext = {
     functionsById,
     argumentValueOverrides: options.argumentValueOverrides,
-    callStack: options.callStack ?? []
+    callStack: options.callStack ?? [],
+    querySchema: options.querySchema,
+    queryMode: options.queryMode,
+    allNodes: nodes,
+    allEdges: edges
   };
 
   const resolveBinding = (nodeId: string, handleId?: string): ConnectedBinding | undefined => {
