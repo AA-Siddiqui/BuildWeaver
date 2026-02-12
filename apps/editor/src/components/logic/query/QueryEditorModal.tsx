@@ -48,6 +48,7 @@ import { QueryOrderByNode } from './QueryOrderByNode';
 import { QueryLimitNode } from './QueryLimitNode';
 import { QueryAggregationNode } from './QueryAggregationNode';
 import { QueryAttributeNode } from './QueryAttributeNode';
+import { validateQuery, QueryValidationDiagnostic } from './queryValidation';
 
 const nodeTypes = {
   'query-argument': QueryArgumentNode,
@@ -139,6 +140,20 @@ const QueryEditorCanvas = ({ queryDef, schema, onSave, onClose }: QueryEditorMod
     [nodes, edges, schema, mode]
   );
   const connectionLineStyle = useMemo(() => ({ stroke: '#F9E7B2', strokeWidth: 2 }), []);
+
+  // -- Automatic query validation -------------------------------------------
+  const diagnostics: QueryValidationDiagnostic[] = useMemo(() => {
+    queryEditorLogger.debug('Re-running query validation', {
+      nodeCount: nodes.length,
+      edgeCount: edges.length,
+      mode
+    });
+    return validateQuery({ nodes, edges, mode, schema });
+  }, [nodes, edges, mode, schema]);
+
+  const errorCount = useMemo(() => diagnostics.filter((d) => d.severity === 'error').length, [diagnostics]);
+  const warningCount = useMemo(() => diagnostics.filter((d) => d.severity === 'warning').length, [diagnostics]);
+  const [showDiagnostics, setShowDiagnostics] = useState(false);
 
   // -- Undo / redo history --------------------------------------------------
   const historyRef = useRef(
@@ -528,6 +543,21 @@ const QueryEditorCanvas = ({ queryDef, schema, onSave, onClose }: QueryEditorMod
             </div>
           </div>
           <div className="flex items-center gap-3 text-sm">
+            {diagnostics.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setShowDiagnostics((prev) => !prev)}
+                className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition ${
+                  errorCount > 0
+                    ? 'bg-red-500/20 text-red-300 hover:bg-red-500/30'
+                    : 'bg-amber-500/20 text-amber-300 hover:bg-amber-500/30'
+                }`}
+              >
+                {errorCount > 0 && <span>{errorCount} error{errorCount > 1 ? 's' : ''}</span>}
+                {errorCount > 0 && warningCount > 0 && <span className="text-white/30">|</span>}
+                {warningCount > 0 && <span>{warningCount} warning{warningCount > 1 ? 's' : ''}</span>}
+              </button>
+            )}
             {feedback && <span className="text-bw-platinum/70">{feedback}</span>}
             <button
               type="button"
@@ -553,6 +583,40 @@ const QueryEditorCanvas = ({ queryDef, schema, onSave, onClose }: QueryEditorMod
             </button>
           </div>
         </header>
+        {showDiagnostics && diagnostics.length > 0 && (
+          <div className="max-h-40 overflow-y-auto border-b border-white/5 bg-bw-ink/95 px-6 py-3">
+            <div className="flex items-center justify-between pb-2">
+              <span className="text-xs font-semibold uppercase tracking-wider text-bw-platinum/50">
+                Query diagnostics
+              </span>
+              <button
+                type="button"
+                onClick={() => setShowDiagnostics(false)}
+                className="text-xs text-bw-platinum/40 hover:text-bw-platinum/70"
+              >
+                Hide
+              </button>
+            </div>
+            <ul className="flex flex-col gap-1">
+              {diagnostics.map((d, i) => (
+                <li
+                  key={`${d.code}-${d.nodeId ?? ''}-${i}`}
+                  className={`flex items-start gap-2 rounded px-2 py-1 text-xs ${
+                    d.severity === 'error'
+                      ? 'bg-red-500/10 text-red-300'
+                      : 'bg-amber-500/10 text-amber-300'
+                  }`}
+                >
+                  <span className="mt-px font-bold uppercase">
+                    {d.severity === 'error' ? 'ERR' : 'WARN'}
+                  </span>
+                  <span className="flex-1">{d.message}</span>
+                  <span className="font-mono text-[10px] text-white/30">{d.code}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
         <div className="relative flex-1">
           <div ref={reactFlowWrapper} className="h-full">
             <QuerySchemaProvider schema={schema} mode={mode}>
