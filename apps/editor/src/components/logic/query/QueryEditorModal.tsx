@@ -205,6 +205,12 @@ const QueryEditorCanvas = ({ queryDef, schema, onSave, onClose }: QueryEditorMod
 
   const handleConnect = useCallback(
     (connection: Connection) => {
+      logicLogger.info('Query editor connection created', {
+        source: connection.source,
+        sourceHandle: connection.sourceHandle,
+        target: connection.target,
+        targetHandle: connection.targetHandle
+      });
       setEdges((eds) => addEdge({ ...connection, id: `${connection.source}-${connection.target}-${Date.now()}` }, eds));
       setHasUnsavedChanges(true);
     },

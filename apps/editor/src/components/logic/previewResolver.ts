@@ -795,6 +795,7 @@ export const createPreviewResolver = (
 
   const resolveBinding = (nodeId: string, handleId?: string): ConnectedBinding | undefined => {
     if (!handleId) {
+      logicLogger.debug('resolveBinding called without handleId', { nodeId });
       return undefined;
     }
     const cacheKey = `${nodeId}:${handleId}`;
@@ -803,13 +804,29 @@ export const createPreviewResolver = (
     }
     const edge = findHandleEdge(nodeId, handleId);
     if (!edge) {
+      logicLogger.debug('resolveBinding found no edge for handle', { nodeId, handleId });
       return undefined;
     }
     const sourcePreview = resolveNode(edge.source);
     if (!sourcePreview || sourcePreview.value === undefined) {
+      logicLogger.warn('resolveBinding edge found but source preview has no value', {
+        targetNodeId: nodeId,
+        targetHandleId: handleId,
+        sourceNodeId: edge.source,
+        edgeId: edge.id,
+        previewState: sourcePreview?.state,
+        previewHeading: sourcePreview?.heading,
+        hasValue: sourcePreview?.value !== undefined
+      });
       return undefined;
     }
     const sourceNode = nodeMap.get(edge.source);
+    logicLogger.debug('resolveBinding succeeded', {
+      targetNodeId: nodeId,
+      targetHandleId: handleId,
+      sourceNodeId: edge.source,
+      sourceLabel: sourceNode ? getNodeLabel(sourceNode) : edge.source
+    });
     const binding: ConnectedBinding = {
       handleId,
       sourceNodeId: edge.source,

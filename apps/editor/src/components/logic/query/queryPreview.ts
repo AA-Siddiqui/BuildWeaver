@@ -647,6 +647,7 @@ export const evaluateQueryNodePreview = (
         state: 'ready',
         heading: data.tableName,
         summary: `${dataShape.length} column(s)`,
+        value: sql,
         dataShape,
         sql
       };
@@ -660,6 +661,7 @@ export const evaluateQueryNodePreview = (
         state: 'ready',
         heading: 'WHERE filter',
         summary: sql,
+        value: sql,
         sql,
         dataShape: []
       };
@@ -678,6 +680,7 @@ export const evaluateQueryNodePreview = (
         state: 'ready',
         heading: formatJoinType(data.joinType),
         summary: `${data.tableA || '?'} \u2194 ${data.tableB || '?'}`,
+        value: sql,
         sql,
         dataShape
       };
@@ -695,6 +698,7 @@ export const evaluateQueryNodePreview = (
         state: 'ready',
         heading: 'GROUP BY',
         summary: attrs.join(', ') || 'No attributes',
+        value: sql,
         sql,
         dataShape: []
       };
@@ -708,6 +712,7 @@ export const evaluateQueryNodePreview = (
         state: 'ready',
         heading: 'HAVING filter',
         summary: sql,
+        value: sql,
         sql,
         dataShape: []
       };
@@ -721,6 +726,7 @@ export const evaluateQueryNodePreview = (
         state: 'ready',
         heading: 'ORDER BY',
         summary: sql.replace('ORDER BY ', ''),
+        value: sql,
         sql,
         dataShape: []
       };
@@ -734,6 +740,7 @@ export const evaluateQueryNodePreview = (
         state: 'ready',
         heading: 'LIMIT',
         summary: sql,
+        value: sql,
         sql,
         dataShape: []
       };
@@ -751,6 +758,7 @@ export const evaluateQueryNodePreview = (
         state: 'ready',
         heading: 'Aggregation',
         summary: sql,
+        value: sql,
         sql,
         dataShape
       };
@@ -771,6 +779,7 @@ export const evaluateQueryNodePreview = (
         state: isReady ? 'ready' : 'unknown',
         heading: 'Attribute',
         summary: sql === '?' ? 'Select table and attribute' : sql,
+        value: isReady ? sql : undefined,
         sql,
         dataShape
       };
@@ -788,6 +797,7 @@ export const evaluateQueryNodePreview = (
         state: 'ready',
         heading: data.name || 'Argument',
         summary: `Type: ${data.type}`,
+        value: sql,
         sql,
         dataShape: [{ name: data.name, type: data.type }]
       };
@@ -809,6 +819,7 @@ export const evaluateQueryNodePreview = (
           dataShape.length > 0
             ? `${dataShape.length} column(s)`
             : 'Connect table nodes to see preview.',
+        value: dataShape.length > 0 ? sql : undefined,
         sql,
         dataShape
       };

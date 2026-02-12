@@ -1007,6 +1007,8 @@ describe('evaluateQueryNodePreview', () => {
     expect(preview.dataShape).toHaveLength(2);
     expect(preview.sql).toContain('SELECT');
     expect(preview.sql).toContain('FROM users');
+    expect(preview.value).toBeDefined();
+    expect(preview.value).toBe(preview.sql);
   });
 
   it('returns ready state for where node', () => {
@@ -1027,6 +1029,8 @@ describe('evaluateQueryNodePreview', () => {
     expect(preview.state).toBe('ready');
     expect(preview.heading).toBe('WHERE filter');
     expect(preview.sql).toContain('WHERE');
+    expect(preview.value).toBeDefined();
+    expect(preview.value).toBe(preview.sql);
   });
 
   it('returns ready state for join node', () => {
@@ -1048,6 +1052,8 @@ describe('evaluateQueryNodePreview', () => {
     expect(preview.heading).toBe('INNER JOIN');
     expect(preview.sql).toContain('INNER JOIN');
     expect(preview.dataShape!.length).toBeGreaterThan(0);
+    expect(preview.value).toBeDefined();
+    expect(preview.value).toBe(preview.sql);
   });
 
   it('returns ready state for aggregation node', () => {
@@ -1065,6 +1071,8 @@ describe('evaluateQueryNodePreview', () => {
     expect(preview.heading).toBe('Aggregation');
     expect(preview.sql).toBe('COUNT(*)');
     expect(preview.dataShape).toHaveLength(1);
+    expect(preview.value).toBeDefined();
+    expect(preview.value).toBe(preview.sql);
   });
 
   it('returns ready state for argument node', () => {
@@ -1083,6 +1091,8 @@ describe('evaluateQueryNodePreview', () => {
     expect(preview.state).toBe('ready');
     expect(preview.heading).toBe('userId');
     expect(preview.sql).toBe(':userId');
+    expect(preview.value).toBeDefined();
+    expect(preview.value).toBe(preview.sql);
   });
 
   it('returns unknown state for attribute node without selections', () => {
@@ -1108,6 +1118,8 @@ describe('evaluateQueryNodePreview', () => {
     expect(preview.state).toBe('ready');
     expect(preview.sql).toBe('users.email');
     expect(preview.dataShape).toHaveLength(1);
+    expect(preview.value).toBeDefined();
+    expect(preview.value).toBe(preview.sql);
   });
 
   it('returns ready state for limit node', () => {
@@ -1120,6 +1132,8 @@ describe('evaluateQueryNodePreview', () => {
     const preview = evaluateQueryNodePreview(node, defaultContext);
     expect(preview.state).toBe('ready');
     expect(preview.sql).toBe('LIMIT 25 OFFSET 10');
+    expect(preview.value).toBeDefined();
+    expect(preview.value).toBe(preview.sql);
   });
 
   it('returns ready state for group-by node', () => {
@@ -1137,6 +1151,8 @@ describe('evaluateQueryNodePreview', () => {
     expect(preview.state).toBe('ready');
     expect(preview.heading).toBe('GROUP BY');
     expect(preview.sql).toBe('GROUP BY users.name');
+    expect(preview.value).toBeDefined();
+    expect(preview.value).toBe(preview.sql);
   });
 
   it('returns ready state for having node', () => {
@@ -1157,6 +1173,8 @@ describe('evaluateQueryNodePreview', () => {
     expect(preview.state).toBe('ready');
     expect(preview.heading).toBe('HAVING filter');
     expect(preview.sql).toContain('HAVING');
+    expect(preview.value).toBeDefined();
+    expect(preview.value).toBe(preview.sql);
   });
 
   it('returns ready state for order-by node', () => {
@@ -1175,6 +1193,8 @@ describe('evaluateQueryNodePreview', () => {
     expect(preview.state).toBe('ready');
     expect(preview.heading).toBe('ORDER BY');
     expect(preview.sql).toBe('ORDER BY users.name ASC');
+    expect(preview.value).toBeDefined();
+    expect(preview.value).toBe(preview.sql);
   });
 
   it('assembles full SQL for output node', () => {
@@ -1211,6 +1231,8 @@ describe('evaluateQueryNodePreview', () => {
     expect(preview.sql).toContain('FROM users');
     expect(preview.dataShape).toHaveLength(1);
     expect(preview.dataShape![0].name).toBe('name');
+    expect(preview.value).toBeDefined();
+    expect(preview.value).toBe(preview.sql);
   });
 
   it('returns unknown for output node with no upstream tables', () => {

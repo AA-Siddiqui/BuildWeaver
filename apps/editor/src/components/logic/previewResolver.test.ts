@@ -14,7 +14,18 @@ import type {
   QueryNodeData,
   QueryDefinition,
   DatabaseSchema,
-  UserDefinedFunction
+  UserDefinedFunction,
+  QueryTableNodeData,
+  QueryJoinNodeData,
+  QueryWhereNodeData,
+  QueryGroupByNodeData,
+  QueryHavingNodeData,
+  QueryOrderByNodeData,
+  QueryLimitNodeData,
+  QueryAggregationNodeData,
+  QueryAttributeNodeData,
+  QueryArgumentNodeData,
+  QueryOutputNodeData
 } from '@buildweaver/libs';
 import { createPreviewResolver } from './previewResolver';
 import { getConditionalHandleId } from './conditionalHandles';
@@ -796,6 +807,634 @@ describe('previewResolver', () => {
       expect(preview.sql).toContain('SELECT users.name, users.email');
       expect(preview.dataShape).toBeDefined();
       expect(preview.dataShape!.every((c) => c.type === 'unknown')).toBe(true);
+    });
+  });
+
+  describe('query inner-node binding resolution', () => {
+    const querySchema: DatabaseSchema = {
+      id: 'schema-1',
+      name: 'TestDB',
+      tables: [
+        {
+          id: 't-users',
+          name: 'users',
+          fields: [
+            { id: 'f-id', name: 'id', type: 'uuid', nullable: false, unique: true, isId: true },
+            { id: 'f-name', name: 'name', type: 'string', nullable: false, unique: false }
+          ]
+        },
+        {
+          id: 't-orders',
+          name: 'orders',
+          fields: [
+            { id: 'f-oid', name: 'id', type: 'uuid', nullable: false, unique: true, isId: true },
+            { id: 'f-uid', name: 'user_id', type: 'uuid', nullable: false, unique: false }
+          ]
+        }
+      ],
+      relationships: []
+    };
+
+    it('resolves binding when table output is connected to join input-a', () => {
+      const nodes: Node<LogicEditorNodeData>[] = [
+        {
+          id: 'table-1',
+          type: 'query-table',
+          position: basePosition,
+          data: {
+            kind: 'query-table',
+            tableId: 't-users',
+            tableName: 'users',
+            schemaId: 'schema-1',
+            selectedColumns: ['name'],
+            columnDefaults: {},
+            aggregationInputCount: 0
+          } satisfies QueryTableNodeData
+        },
+        {
+          id: 'join-1',
+          type: 'query-join',
+          position: basePosition,
+          data: {
+            kind: 'query-join',
+            joinType: 'inner',
+            tableA: 'users',
+            tableB: 'orders',
+            attributeA: 'id',
+            attributeB: 'user_id'
+          } satisfies QueryJoinNodeData
+        }
+      ];
+
+      const edges: Edge[] = [
+        {
+          id: 'e1',
+          source: 'table-1',
+          target: 'join-1',
+          sourceHandle: 'output',
+          targetHandle: 'input-a'
+        }
+      ];
+
+      const resolver = createPreviewResolver(nodes, edges, {
+        querySchema,
+        queryMode: 'read'
+      });
+
+      const binding = resolver.getHandleBinding('join-1', 'input-a');
+      expect(binding).toBeDefined();
+      expect(binding!.sourceNodeId).toBe('table-1');
+      expect(binding!.value).toContain('SELECT');
+      expect(binding!.value).toContain('FROM users');
+    });
+
+    it('resolves binding when table output is connected to where input-data', () => {
+      const nodes: Node<LogicEditorNodeData>[] = [
+        {
+          id: 'table-1',
+          type: 'query-table',
+          position: basePosition,
+          data: {
+            kind: 'query-table',
+            tableId: 't-users',
+            tableName: 'users',
+            schemaId: 'schema-1',
+            selectedColumns: [],
+            columnDefaults: {},
+            aggregationInputCount: 0
+          } satisfies QueryTableNodeData
+        },
+        {
+          id: 'where-1',
+          type: 'query-where',
+          position: basePosition,
+          data: {
+            kind: 'query-where',
+            operator: '=',
+            leftOperand: 'users.id',
+            rightOperand: '1',
+            leftIsColumn: true,
+            rightIsColumn: false
+          } satisfies QueryWhereNodeData
+        }
+      ];
+
+      const edges: Edge[] = [
+        {
+          id: 'e1',
+          source: 'table-1',
+          target: 'where-1',
+          sourceHandle: 'output',
+          targetHandle: 'input-data'
+        }
+      ];
+
+      const resolver = createPreviewResolver(nodes, edges, {
+        querySchema,
+        queryMode: 'read'
+      });
+
+      const binding = resolver.getHandleBinding('where-1', 'input-data');
+      expect(binding).toBeDefined();
+      expect(binding!.sourceNodeId).toBe('table-1');
+    });
+
+    it('resolves binding when where output is connected to output node input', () => {
+      const nodes: Node<LogicEditorNodeData>[] = [
+        {
+          id: 'where-1',
+          type: 'query-where',
+          position: basePosition,
+          data: {
+            kind: 'query-where',
+            operator: '>',
+            leftOperand: 'users.age',
+            rightOperand: '18',
+            leftIsColumn: true,
+            rightIsColumn: false
+          } satisfies QueryWhereNodeData
+        },
+        {
+          id: 'out-1',
+          type: 'query-output',
+          position: basePosition,
+          data: {
+            kind: 'query-output',
+            outputId: 'out-1'
+          } satisfies QueryOutputNodeData
+        }
+      ];
+
+      const edges: Edge[] = [
+        {
+          id: 'e1',
+          source: 'where-1',
+          target: 'out-1',
+          sourceHandle: 'output',
+          targetHandle: 'input'
+        }
+      ];
+
+      const resolver = createPreviewResolver(nodes, edges, {
+        querySchema,
+        queryMode: 'read'
+      });
+
+      const binding = resolver.getHandleBinding('out-1', 'input');
+      expect(binding).toBeDefined();
+      expect(binding!.sourceNodeId).toBe('where-1');
+      expect(binding!.value).toContain('WHERE');
+    });
+
+    it('resolves binding for argument connected to where input', () => {
+      const nodes: Node<LogicEditorNodeData>[] = [
+        {
+          id: 'arg-1',
+          type: 'query-argument',
+          position: basePosition,
+          data: {
+            kind: 'query-argument',
+            argumentId: 'arg-1',
+            name: 'userId',
+            type: 'string'
+          } satisfies QueryArgumentNodeData
+        },
+        {
+          id: 'where-1',
+          type: 'query-where',
+          position: basePosition,
+          data: {
+            kind: 'query-where',
+            operator: '=',
+            leftOperand: 'users.id',
+            rightOperand: ':userId',
+            leftIsColumn: true,
+            rightIsColumn: false
+          } satisfies QueryWhereNodeData
+        }
+      ];
+
+      const edges: Edge[] = [
+        {
+          id: 'e1',
+          source: 'arg-1',
+          target: 'where-1',
+          sourceHandle: 'output',
+          targetHandle: 'input-right'
+        }
+      ];
+
+      const resolver = createPreviewResolver(nodes, edges, {
+        querySchema,
+        queryMode: 'read'
+      });
+
+      const binding = resolver.getHandleBinding('where-1', 'input-right');
+      expect(binding).toBeDefined();
+      expect(binding!.sourceNodeId).toBe('arg-1');
+      expect(binding!.value).toBe(':userId');
+    });
+
+    it('resolves binding for aggregation connected to table', () => {
+      const nodes: Node<LogicEditorNodeData>[] = [
+        {
+          id: 'agg-1',
+          type: 'query-aggregation',
+          position: basePosition,
+          data: {
+            kind: 'query-aggregation',
+            function: 'count'
+          } satisfies QueryAggregationNodeData
+        },
+        {
+          id: 'table-1',
+          type: 'query-table',
+          position: basePosition,
+          data: {
+            kind: 'query-table',
+            tableId: 't-users',
+            tableName: 'users',
+            schemaId: 'schema-1',
+            selectedColumns: ['name'],
+            columnDefaults: {},
+            aggregationInputCount: 1
+          } satisfies QueryTableNodeData
+        }
+      ];
+
+      const edges: Edge[] = [
+        {
+          id: 'e1',
+          source: 'agg-1',
+          target: 'table-1',
+          sourceHandle: 'output',
+          targetHandle: 'input-agg-0'
+        }
+      ];
+
+      const resolver = createPreviewResolver(nodes, edges, {
+        querySchema,
+        queryMode: 'read'
+      });
+
+      const binding = resolver.getHandleBinding('table-1', 'input-agg-0');
+      expect(binding).toBeDefined();
+      expect(binding!.sourceNodeId).toBe('agg-1');
+      expect(binding!.value).toBe('COUNT(*)');
+    });
+
+    it('resolves binding for groupby connected to orderby', () => {
+      const nodes: Node<LogicEditorNodeData>[] = [
+        {
+          id: 'gb-1',
+          type: 'query-groupby',
+          position: basePosition,
+          data: {
+            kind: 'query-groupby',
+            groupingAttributeCount: 1,
+            attributes: ['users.name']
+          } satisfies QueryGroupByNodeData
+        },
+        {
+          id: 'ob-1',
+          type: 'query-orderby',
+          position: basePosition,
+          data: {
+            kind: 'query-orderby',
+            sortCount: 1,
+            sortAttributes: ['users.name'],
+            sortOrders: ['asc']
+          } satisfies QueryOrderByNodeData
+        }
+      ];
+
+      const edges: Edge[] = [
+        {
+          id: 'e1',
+          source: 'gb-1',
+          target: 'ob-1',
+          sourceHandle: 'output',
+          targetHandle: 'input-data'
+        }
+      ];
+
+      const resolver = createPreviewResolver(nodes, edges, {
+        querySchema,
+        queryMode: 'read'
+      });
+
+      const binding = resolver.getHandleBinding('ob-1', 'input-data');
+      expect(binding).toBeDefined();
+      expect(binding!.sourceNodeId).toBe('gb-1');
+      expect(binding!.value).toContain('GROUP BY');
+    });
+
+    it('resolves binding for limit node with data input', () => {
+      const nodes: Node<LogicEditorNodeData>[] = [
+        {
+          id: 'ob-1',
+          type: 'query-orderby',
+          position: basePosition,
+          data: {
+            kind: 'query-orderby',
+            sortCount: 1,
+            sortAttributes: ['users.name'],
+            sortOrders: ['desc']
+          } satisfies QueryOrderByNodeData
+        },
+        {
+          id: 'limit-1',
+          type: 'query-limit',
+          position: basePosition,
+          data: {
+            kind: 'query-limit',
+            limitValue: 10
+          } satisfies QueryLimitNodeData
+        }
+      ];
+
+      const edges: Edge[] = [
+        {
+          id: 'e1',
+          source: 'ob-1',
+          target: 'limit-1',
+          sourceHandle: 'output',
+          targetHandle: 'input-data'
+        }
+      ];
+
+      const resolver = createPreviewResolver(nodes, edges, {
+        querySchema,
+        queryMode: 'read'
+      });
+
+      const binding = resolver.getHandleBinding('limit-1', 'input-data');
+      expect(binding).toBeDefined();
+      expect(binding!.sourceNodeId).toBe('ob-1');
+      expect(binding!.value).toContain('ORDER BY');
+    });
+
+    it('resolves binding for attribute connected to where', () => {
+      const nodes: Node<LogicEditorNodeData>[] = [
+        {
+          id: 'attr-1',
+          type: 'query-attribute',
+          position: basePosition,
+          data: {
+            kind: 'query-attribute',
+            tableName: 'users',
+            attributeName: 'email'
+          } satisfies QueryAttributeNodeData
+        },
+        {
+          id: 'where-1',
+          type: 'query-where',
+          position: basePosition,
+          data: {
+            kind: 'query-where',
+            operator: '=',
+            leftIsColumn: true,
+            rightIsColumn: false
+          } satisfies QueryWhereNodeData
+        }
+      ];
+
+      const edges: Edge[] = [
+        {
+          id: 'e1',
+          source: 'attr-1',
+          target: 'where-1',
+          sourceHandle: 'output',
+          targetHandle: 'input-left'
+        }
+      ];
+
+      const resolver = createPreviewResolver(nodes, edges, {
+        querySchema,
+        queryMode: 'read'
+      });
+
+      const binding = resolver.getHandleBinding('where-1', 'input-left');
+      expect(binding).toBeDefined();
+      expect(binding!.sourceNodeId).toBe('attr-1');
+      expect(binding!.value).toBe('users.email');
+    });
+
+    it('returns undefined binding for unready attribute node (no table/attribute selected)', () => {
+      const nodes: Node<LogicEditorNodeData>[] = [
+        {
+          id: 'attr-1',
+          type: 'query-attribute',
+          position: basePosition,
+          data: {
+            kind: 'query-attribute'
+          } satisfies QueryAttributeNodeData
+        },
+        {
+          id: 'where-1',
+          type: 'query-where',
+          position: basePosition,
+          data: {
+            kind: 'query-where',
+            operator: '=',
+            leftIsColumn: true,
+            rightIsColumn: false
+          } satisfies QueryWhereNodeData
+        }
+      ];
+
+      const edges: Edge[] = [
+        {
+          id: 'e1',
+          source: 'attr-1',
+          target: 'where-1',
+          sourceHandle: 'output',
+          targetHandle: 'input-left'
+        }
+      ];
+
+      const resolver = createPreviewResolver(nodes, edges, {
+        querySchema,
+        queryMode: 'read'
+      });
+
+      const binding = resolver.getHandleBinding('where-1', 'input-left');
+      expect(binding).toBeUndefined();
+    });
+
+    it('resolves binding for having connected to output', () => {
+      const nodes: Node<LogicEditorNodeData>[] = [
+        {
+          id: 'having-1',
+          type: 'query-having',
+          position: basePosition,
+          data: {
+            kind: 'query-having',
+            operator: '>',
+            leftOperand: 'COUNT(*)',
+            rightOperand: '5',
+            leftIsColumn: true,
+            rightIsColumn: false
+          } satisfies QueryHavingNodeData
+        },
+        {
+          id: 'out-1',
+          type: 'query-output',
+          position: basePosition,
+          data: {
+            kind: 'query-output',
+            outputId: 'out-1'
+          } satisfies QueryOutputNodeData
+        }
+      ];
+
+      const edges: Edge[] = [
+        {
+          id: 'e1',
+          source: 'having-1',
+          target: 'out-1',
+          sourceHandle: 'output',
+          targetHandle: 'input'
+        }
+      ];
+
+      const resolver = createPreviewResolver(nodes, edges, {
+        querySchema,
+        queryMode: 'read'
+      });
+
+      const binding = resolver.getHandleBinding('out-1', 'input');
+      expect(binding).toBeDefined();
+      expect(binding!.sourceNodeId).toBe('having-1');
+      expect(binding!.value).toContain('HAVING');
+    });
+
+    it('resolves full pipeline: table -> where -> output with all bindings valid', () => {
+      const nodes: Node<LogicEditorNodeData>[] = [
+        {
+          id: 'table-1',
+          type: 'query-table',
+          position: basePosition,
+          data: {
+            kind: 'query-table',
+            tableId: 't-users',
+            tableName: 'users',
+            schemaId: 'schema-1',
+            selectedColumns: ['name'],
+            columnDefaults: {},
+            aggregationInputCount: 0
+          } satisfies QueryTableNodeData
+        },
+        {
+          id: 'where-1',
+          type: 'query-where',
+          position: basePosition,
+          data: {
+            kind: 'query-where',
+            operator: '=',
+            leftOperand: 'users.name',
+            rightOperand: 'Alice',
+            leftIsColumn: true,
+            rightIsColumn: false
+          } satisfies QueryWhereNodeData
+        },
+        {
+          id: 'out-1',
+          type: 'query-output',
+          position: basePosition,
+          data: {
+            kind: 'query-output',
+            outputId: 'out-1'
+          } satisfies QueryOutputNodeData
+        }
+      ];
+
+      const edges: Edge[] = [
+        {
+          id: 'e1',
+          source: 'table-1',
+          target: 'where-1',
+          sourceHandle: 'output',
+          targetHandle: 'input-data'
+        },
+        {
+          id: 'e2',
+          source: 'where-1',
+          target: 'out-1',
+          sourceHandle: 'output',
+          targetHandle: 'input'
+        }
+      ];
+
+      const resolver = createPreviewResolver(nodes, edges, {
+        querySchema,
+        queryMode: 'read'
+      });
+
+      // Table -> Where binding
+      const tableToWhere = resolver.getHandleBinding('where-1', 'input-data');
+      expect(tableToWhere).toBeDefined();
+      expect(tableToWhere!.sourceNodeId).toBe('table-1');
+
+      // Where -> Output binding
+      const whereToOutput = resolver.getHandleBinding('out-1', 'input');
+      expect(whereToOutput).toBeDefined();
+      expect(whereToOutput!.sourceNodeId).toBe('where-1');
+
+      // Output node preview should have value set
+      const outputPreview = resolver.getNodePreview('out-1');
+      expect(outputPreview.state).toBe('ready');
+      expect(outputPreview.value).toBeDefined();
+      expect(outputPreview.sql).toContain('SELECT');
+    });
+
+    it('returns no binding when table node has no table name', () => {
+      const nodes: Node<LogicEditorNodeData>[] = [
+        {
+          id: 'table-1',
+          type: 'query-table',
+          position: basePosition,
+          data: {
+            kind: 'query-table',
+            tableId: '',
+            tableName: '',
+            schemaId: '',
+            selectedColumns: [],
+            columnDefaults: {},
+            aggregationInputCount: 0
+          } satisfies QueryTableNodeData
+        },
+        {
+          id: 'where-1',
+          type: 'query-where',
+          position: basePosition,
+          data: {
+            kind: 'query-where',
+            operator: '=',
+            leftIsColumn: true,
+            rightIsColumn: false
+          } satisfies QueryWhereNodeData
+        }
+      ];
+
+      const edges: Edge[] = [
+        {
+          id: 'e1',
+          source: 'table-1',
+          target: 'where-1',
+          sourceHandle: 'output',
+          targetHandle: 'input-data'
+        }
+      ];
+
+      const resolver = createPreviewResolver(nodes, edges, {
+        querySchema,
+        queryMode: 'read'
+      });
+
+      // Table has no name => preview is 'unknown' with no value => binding should be undefined
+      const binding = resolver.getHandleBinding('where-1', 'input-data');
+      expect(binding).toBeUndefined();
     });
   });
 });
