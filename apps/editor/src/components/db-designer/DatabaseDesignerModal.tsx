@@ -1,4 +1,4 @@
-import { DragEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { DragEvent, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   Background,
   Connection,
@@ -7,6 +7,7 @@ import {
   EdgeChange,
   MarkerType,
   MiniMap,
+  Node,
   NodeChange,
   NodePositionChange,
   ReactFlow,
@@ -28,7 +29,11 @@ import type {
 } from '@buildweaver/libs';
 import { DbTableNode, DbTableNodeData } from './DbTableNode';
 import { generateNodeId } from '../logic/nodeFactories';
-import { logicLogger } from '../../lib/logger';
+import { dbDesignerLogger } from '../../lib/logger';
+import { processEditorShortcut } from '../../lib/editorShortcuts';
+import { useDeleteNodesShortcut } from '../../hooks/useDeleteNodesShortcut';
+import { useEdgeCutGesture } from '../../hooks/useEdgeCutGesture';
+import { SnapshotHistory } from '../../lib/snapshotHistory';
 
 const nodeTypes = {
   'db-table': DbTableNode
@@ -48,6 +53,21 @@ type RelationshipDraft = {
   cardinality: RelationshipCardinality;
   modality: RelationshipModality;
 };
+
+/** Snapshot of the designable portions of the schema used for undo/redo. */
+export type DbDesignerSnapshot = {
+  tables: DatabaseTable[];
+  relationships: DatabaseRelationship[];
+  name: string;
+};
+
+const DB_DESIGNER_HISTORY_LIMIT = 100;
+
+const cloneDbSnapshot = (snapshot: DbDesignerSnapshot): DbDesignerSnapshot =>
+  JSON.parse(JSON.stringify(snapshot));
+
+const hashDbSnapshot = (snapshot: DbDesignerSnapshot): string =>
+  JSON.stringify({ t: snapshot.tables, r: snapshot.relationships, n: snapshot.name });
 
 const defaultConnection = (): DatabaseConnectionSettings => ({
   host: 'localhost',
@@ -165,18 +185,115 @@ const DesignerCanvas = ({ initialSchema, onSave, onApply, onLoadFromDatabase, on
   const [edges, setEdges] = useEdgesState([]);
   const [pendingRelationship, setPendingRelationship] = useState<RelationshipDraft | null>(null);
   const [status, setStatus] = useState('');
+  const [feedback, setFeedback] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [isApplying, setIsApplying] = useState(false);
   const [isLoadingFromDb, setIsLoadingFromDb] = useState(false);
+  const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>([]);
 
+  // -- Undo / redo history --------------------------------------------------
+  const historyRef = useRef(
+    new SnapshotHistory<DbDesignerSnapshot>({
+      clone: cloneDbSnapshot,
+      hash: hashDbSnapshot,
+      limit: DB_DESIGNER_HISTORY_LIMIT,
+      logger: (message, meta) => dbDesignerLogger.debug(message, meta)
+    })
+  );
+
+  /** Observe schema changes and record snapshots for undo/redo. */
+  useLayoutEffect(() => {
+    const snapshot: DbDesignerSnapshot = {
+      tables: schema.tables,
+      relationships: schema.relationships,
+      name: schema.name
+    };
+    historyRef.current.observe(snapshot, {
+      tables: snapshot.tables.length,
+      relationships: snapshot.relationships.length,
+      reason: 'schema-observer'
+    });
+  }, [schema.tables, schema.relationships, schema.name]);
+
+  const restoreSnapshot = useCallback(
+    (snapshot: DbDesignerSnapshot, action: 'undo' | 'redo') => {
+      historyRef.current.suppressNextDiff();
+      setSchema((current) => ({
+        ...current,
+        tables: snapshot.tables,
+        relationships: snapshot.relationships,
+        name: snapshot.name
+      }));
+      const label = action === 'undo' ? 'Undid change' : 'Redid change';
+      setFeedback(label);
+      setTimeout(() => setFeedback(''), 2000);
+      dbDesignerLogger.info(`Schema ${action} applied`, {
+        undoDepth: historyRef.current.getUndoDepth(),
+        redoDepth: historyRef.current.getRedoDepth(),
+        tables: snapshot.tables.length,
+        relationships: snapshot.relationships.length
+      });
+    },
+    []
+  );
+
+  const handleUndo = useCallback(() => {
+    const current: DbDesignerSnapshot = {
+      tables: schema.tables,
+      relationships: schema.relationships,
+      name: schema.name
+    };
+    const snapshot = historyRef.current.undo(current);
+    if (!snapshot) {
+      dbDesignerLogger.debug('Undo ignored — no history');
+      return;
+    }
+    restoreSnapshot(snapshot, 'undo');
+  }, [restoreSnapshot, schema.name, schema.relationships, schema.tables]);
+
+  const handleRedo = useCallback(() => {
+    const current: DbDesignerSnapshot = {
+      tables: schema.tables,
+      relationships: schema.relationships,
+      name: schema.name
+    };
+    const snapshot = historyRef.current.redo(current);
+    if (!snapshot) {
+      dbDesignerLogger.debug('Redo ignored — no future history');
+      return;
+    }
+    restoreSnapshot(snapshot, 'redo');
+  }, [restoreSnapshot, schema.name, schema.relationships, schema.tables]);
+
+  // -- Select all nodes ------------------------------------------------------
+  const handleSelectAll = useCallback(() => {
+    setNodes((nds) => nds.map((node) => ({ ...node, selected: true })));
+    setEdges((eds) => eds.map((edge) => ({ ...edge, selected: true })));
+    const count = nodes.length;
+    dbDesignerLogger.info('Select all triggered', { nodeCount: count, edgeCount: edges.length });
+    setFeedback(count ? `Selected ${count} table${count > 1 ? 's' : ''}` : 'No tables to select');
+    setTimeout(() => setFeedback(''), 2000);
+  }, [edges.length, nodes.length, setEdges, setNodes]);
+
+  // -- Initial schema sync ---------------------------------------------------
   useEffect(() => {
-    setSchema(normalizeSchema(initialSchema));
+    const next = normalizeSchema(initialSchema);
+    setSchema(next);
+    historyRef.current.reset(
+      { tables: next.tables, relationships: next.relationships, name: next.name },
+      { reason: 'initial-schema-load' }
+    );
+    dbDesignerLogger.info('Initial schema loaded into designer', {
+      schemaId: next.id,
+      tables: next.tables.length,
+      relationships: next.relationships.length
+    });
   }, [initialSchema]);
 
   useEffect(() => {
     setNodes(buildFlowNodes(schema.tables, {
       onRename: (tableId, name) => {
-        logicLogger.debug('Database table rename requested', { tableId, name });
+        dbDesignerLogger.debug('Database table rename requested', { tableId, name });
         setSchema((current) => ({
           ...current,
           tables: current.tables.map((table) => (table.id === tableId ? { ...table, name } : table))
@@ -184,7 +301,7 @@ const DesignerCanvas = ({ initialSchema, onSave, onApply, onLoadFromDatabase, on
       },
       onAddField: (tableId) => {
         const fieldId = `${tableId}-field-${generateNodeId()}`;
-        logicLogger.info('Database table field added', { tableId, fieldId });
+        dbDesignerLogger.info('Database table field added', { tableId, fieldId });
         setSchema((current) => ({
           ...current,
           tables: current.tables.map((table) =>
@@ -205,7 +322,7 @@ const DesignerCanvas = ({ initialSchema, onSave, onApply, onLoadFromDatabase, on
         }));
       },
       onRemoveField: (tableId, fieldId) => {
-        logicLogger.info('Database table field removed', { tableId, fieldId });
+        dbDesignerLogger.info('Database table field removed', { tableId, fieldId });
         setSchema((current) => ({
           ...current,
           tables: current.tables.map((table) =>
@@ -219,7 +336,7 @@ const DesignerCanvas = ({ initialSchema, onSave, onApply, onLoadFromDatabase, on
         }));
       },
       onUpdateField: (tableId, fieldId, patch) => {
-        logicLogger.debug('Database table field updated', { tableId, fieldId, patch });
+        dbDesignerLogger.debug('Database table field updated', { tableId, fieldId, patch });
         setSchema((current) => ({
           ...current,
           tables: current.tables.map((table) =>
@@ -239,6 +356,46 @@ const DesignerCanvas = ({ initialSchema, onSave, onApply, onLoadFromDatabase, on
     setEdges(buildFlowEdges(schema.relationships));
   }, [schema.relationships, setEdges]);
 
+  // -- Selection tracking ----------------------------------------------------
+  const handleSelectionChange = useCallback(({ nodes: selected }: { nodes: Node[] }) => {
+    setSelectedNodeIds(selected.map((node) => node.id));
+  }, []);
+
+  // -- Delete selected tables ------------------------------------------------
+  const deleteElements = useCallback(
+    (elements: { nodes?: Node<DbTableNodeData>[]; edges?: Edge[] }) => {
+      if (elements.nodes?.length) {
+        const removedIds = new Set(elements.nodes.map((n) => n.id));
+        dbDesignerLogger.info('Deleting tables from canvas', {
+          tableIds: [...removedIds]
+        });
+        setSchema((current) => ({
+          ...current,
+          tables: current.tables.filter((t) => !removedIds.has(t.id)),
+          relationships: current.relationships.filter(
+            (r) => !removedIds.has(r.sourceTableId) && !removedIds.has(r.targetTableId)
+          )
+        }));
+      }
+    },
+    []
+  );
+
+  const deleteSelection = useDeleteNodesShortcut<DbTableNodeData>({
+    selectedNodeIds,
+    nodes,
+    deleteElements,
+    onNodesDeleted: (removedIds) => {
+      if (!removedIds.length) {
+        return;
+      }
+      setSelectedNodeIds((current) => current.filter((id) => !removedIds.includes(id)));
+      setFeedback(`Deleted ${removedIds.length} table${removedIds.length > 1 ? 's' : ''}`);
+      setTimeout(() => setFeedback(''), 2000);
+    },
+    logger: (message, meta) => dbDesignerLogger.warn(message, meta)
+  });
+
   const handleNodesChange = useCallback(
     (changes: NodeChange[]) => {
       onNodesChange(changes);
@@ -246,7 +403,7 @@ const DesignerCanvas = ({ initialSchema, onSave, onApply, onLoadFromDatabase, on
         (change): change is NodePositionChange => change.type === 'position' && Boolean((change as NodePositionChange).position)
       );
       if (positionChanges.length) {
-        logicLogger.debug('Database table positions updated', {
+        dbDesignerLogger.debug('Database table positions updated', {
           updatedCount: positionChanges.length,
           tableIds: positionChanges.map((change) => change.id)
         });
@@ -270,7 +427,7 @@ const DesignerCanvas = ({ initialSchema, onSave, onApply, onLoadFromDatabase, on
       setEdges((eds) => applyEdgeChanges(changes, eds));
       const removedIds = changes.filter((change) => change.type === 'remove').map((change) => change.id);
       if (removedIds.length) {
-        logicLogger.info('Database relationships removed', { relationshipIds: removedIds });
+        dbDesignerLogger.info('Database relationships removed', { relationshipIds: removedIds });
         setSchema((current) => ({
           ...current,
           relationships: current.relationships.filter((rel) => !removedIds.includes(rel.id))
@@ -283,10 +440,10 @@ const DesignerCanvas = ({ initialSchema, onSave, onApply, onLoadFromDatabase, on
   const handleConnect = useCallback(
     (connection: Connection) => {
       if (!connection.source || !connection.target) {
-        logicLogger.warn('Database relationship connection missing endpoints', { connection });
+        dbDesignerLogger.warn('Database relationship connection missing endpoints', { connection });
         return;
       }
-      logicLogger.info('Database relationship draft created', {
+      dbDesignerLogger.info('Database relationship draft created', {
         sourceTableId: connection.source,
         targetTableId: connection.target,
         sourceHandle: connection.sourceHandle,
@@ -311,7 +468,7 @@ const DesignerCanvas = ({ initialSchema, onSave, onApply, onLoadFromDatabase, on
     );
     if (exists) {
       setStatus('Relationship already exists between these tables.');
-      logicLogger.warn('Database relationship already exists', {
+      dbDesignerLogger.warn('Database relationship already exists', {
         sourceTableId: pendingRelationship.sourceTableId,
         targetTableId: pendingRelationship.targetTableId
       });
@@ -322,7 +479,7 @@ const DesignerCanvas = ({ initialSchema, onSave, onApply, onLoadFromDatabase, on
       id: `rel-${generateNodeId()}`,
       ...pendingRelationship
     };
-    logicLogger.info('Database relationship added', {
+    dbDesignerLogger.info('Database relationship added', {
       relationshipId: nextRelationship.id,
       sourceTableId: nextRelationship.sourceTableId,
       targetTableId: nextRelationship.targetTableId,
@@ -359,7 +516,7 @@ const DesignerCanvas = ({ initialSchema, onSave, onApply, onLoadFromDatabase, on
       event.preventDefault();
       const position = projectPointer(event);
       const tableId = `table-${generateNodeId()}`;
-      logicLogger.info('Database table dropped into canvas', { tableId, position });
+      dbDesignerLogger.info('Database table dropped into canvas', { tableId, position });
       setSchema((current) => ({
         ...current,
         tables: current.tables.concat({
@@ -384,7 +541,7 @@ const DesignerCanvas = ({ initialSchema, onSave, onApply, onLoadFromDatabase, on
 
   const handleAddTable = useCallback(() => {
     const tableId = `table-${generateNodeId()}`;
-    logicLogger.info('Database table added', { tableId });
+    dbDesignerLogger.info('Database table added', { tableId });
     setSchema((current) => ({
       ...current,
       tables: current.tables.concat({
@@ -407,7 +564,7 @@ const DesignerCanvas = ({ initialSchema, onSave, onApply, onLoadFromDatabase, on
 
   const handleConnectionChange = useCallback(
     (key: keyof DatabaseConnectionSettings, value: string | number | boolean) => {
-      logicLogger.debug('Database connection setting updated', { key, value });
+      dbDesignerLogger.debug('Database connection setting updated', { key, value });
       setSchema((current) => ({
         ...current,
         connection: {
@@ -426,7 +583,7 @@ const DesignerCanvas = ({ initialSchema, onSave, onApply, onLoadFromDatabase, on
       try {
         await Promise.resolve(onSave(normalized));
         setStatus('Schema saved');
-        logicLogger.info('Database schema saved', {
+        dbDesignerLogger.info('Database schema saved', {
           schemaId: normalized.id,
           tableCount: normalized.tables.length,
           relationshipCount: normalized.relationships.length
@@ -437,7 +594,7 @@ const DesignerCanvas = ({ initialSchema, onSave, onApply, onLoadFromDatabase, on
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Unable to save schema';
         setStatus(message);
-        logicLogger.error('Database schema save failed', { schemaId: schema.id, message });
+        dbDesignerLogger.error('Database schema save failed', { schemaId: schema.id, message });
       } finally {
         setIsSaving(false);
         setTimeout(() => setStatus(''), 2000);
@@ -457,7 +614,7 @@ const DesignerCanvas = ({ initialSchema, onSave, onApply, onLoadFromDatabase, on
     try {
       await Promise.resolve(onApply(normalized));
       setStatus('Schema applied to database');
-      logicLogger.info('Database schema apply requested', {
+      dbDesignerLogger.info('Database schema apply requested', {
         schemaId: normalized.id,
         connectionHost: normalized.connection?.host,
         connectionDb: normalized.connection?.database
@@ -465,7 +622,7 @@ const DesignerCanvas = ({ initialSchema, onSave, onApply, onLoadFromDatabase, on
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unable to apply schema';
       setStatus(message);
-      logicLogger.error('Database schema apply failed', { schemaId: schema.id, message });
+      dbDesignerLogger.error('Database schema apply failed', { schemaId: schema.id, message });
     } finally {
       setIsApplying(false);
       setTimeout(() => setStatus(''), 2000);
@@ -485,8 +642,12 @@ const DesignerCanvas = ({ initialSchema, onSave, onApply, onLoadFromDatabase, on
       const loaded = await Promise.resolve(onLoadFromDatabase(connection, normalized));
       const nextSchema = normalizeSchema({ ...loaded, connection });
       setSchema(nextSchema);
+      historyRef.current.reset(
+        { tables: nextSchema.tables, relationships: nextSchema.relationships, name: nextSchema.name },
+        { reason: 'loaded-from-database' }
+      );
       setStatus('Schema loaded from database');
-      logicLogger.info('Database schema loaded from database', {
+      dbDesignerLogger.info('Database schema loaded from database', {
         schemaId: nextSchema.id,
         tableCount: nextSchema.tables.length,
         relationshipCount: nextSchema.relationships.length,
@@ -496,7 +657,7 @@ const DesignerCanvas = ({ initialSchema, onSave, onApply, onLoadFromDatabase, on
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unable to load schema from database';
       setStatus(message);
-      logicLogger.error('Database schema load failed', {
+      dbDesignerLogger.error('Database schema load failed', {
         schemaId: normalized.id,
         host: connection.host,
         database: connection.database,
@@ -508,7 +669,55 @@ const DesignerCanvas = ({ initialSchema, onSave, onApply, onLoadFromDatabase, on
     }
   }, [onLoadFromDatabase, schema]);
 
+  // -- Keyboard shortcuts (Ctrl+S, Ctrl+Z, Ctrl+Y, Ctrl+A) ------------------
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      processEditorShortcut(event, {
+        onSave: () => {
+          dbDesignerLogger.info('Save shortcut triggered');
+          persistSchema(false);
+        },
+        onUndo: handleUndo,
+        onRedo: handleRedo,
+        onSelectAll: handleSelectAll,
+        logger: (message, meta) => dbDesignerLogger.info(message, { ...meta, context: 'db-designer' })
+      });
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [handleRedo, handleSelectAll, handleUndo, persistSchema]);
+
+  // -- Edge cut gesture (Ctrl+LMB drag) -------------------------------------
+  const severEdges = useCallback(
+    (edgeIds: string[]) => {
+      if (!edgeIds.length) {
+        dbDesignerLogger.debug('Edge sever requested without targets');
+        return;
+      }
+      setSchema((current) => ({
+        ...current,
+        relationships: current.relationships.filter((rel) => !edgeIds.includes(rel.id))
+      }));
+      setFeedback(`Removed ${edgeIds.length} relationship${edgeIds.length > 1 ? 's' : ''}`);
+      setTimeout(() => setFeedback(''), 2000);
+      dbDesignerLogger.info('Relationships severed via cut gesture', {
+        count: edgeIds.length,
+        edgeIds
+      });
+    },
+    []
+  );
+
+  const { edgeCutGesture } = useEdgeCutGesture({
+    wrapperRef: reactFlowWrapper,
+    reactFlowInstance,
+    edges,
+    onSever: severEdges,
+    logger: (message, meta) => dbDesignerLogger.debug(message, meta)
+  });
+
   const connection = useMemo(() => schema.connection ?? defaultConnection(), [schema.connection]);
+  const connectionLineStyle = useMemo(() => ({ stroke: '#F9E7B2', strokeWidth: 2 }), []);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-6">
@@ -524,6 +733,7 @@ const DesignerCanvas = ({ initialSchema, onSave, onApply, onLoadFromDatabase, on
             />
           </div>
           <div className="flex items-center gap-2 text-sm">
+            {feedback && <span className="text-bw-platinum/70">{feedback}</span>}
             <button
               type="button"
               onClick={handleAddTable}
@@ -533,11 +743,19 @@ const DesignerCanvas = ({ initialSchema, onSave, onApply, onLoadFromDatabase, on
             </button>
             <button
               type="button"
+              onClick={deleteSelection}
+              disabled={selectedNodeIds.length === 0}
+              className="rounded-xl border border-white/20 px-3 py-2 text-white transition hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              Delete selection
+            </button>
+            <button
+              type="button"
               onClick={() => persistSchema(false)}
               disabled={isSaving}
               className="rounded-xl border border-white/20 px-3 py-2 text-white transition hover:-translate-y-0.5 disabled:opacity-60"
             >
-              {isSaving ? 'Saving…' : 'Save'}
+              {isSaving ? 'Saving\u2026' : 'Save'}
             </button>
             <button
               type="button"
@@ -545,7 +763,7 @@ const DesignerCanvas = ({ initialSchema, onSave, onApply, onLoadFromDatabase, on
               disabled={isLoadingFromDb}
               className="rounded-xl border border-white/20 px-3 py-2 text-white transition hover:-translate-y-0.5 disabled:opacity-60"
             >
-              {isLoadingFromDb ? 'Loading…' : 'Load from DB'}
+              {isLoadingFromDb ? 'Loading\u2026' : 'Load from DB'}
             </button>
             <button
               type="button"
@@ -553,7 +771,7 @@ const DesignerCanvas = ({ initialSchema, onSave, onApply, onLoadFromDatabase, on
               disabled={isApplying}
               className="rounded-xl border border-white/20 px-3 py-2 text-white transition hover:-translate-y-0.5 disabled:opacity-60"
             >
-              {isApplying ? 'Applying…' : 'Apply to DB'}
+              {isApplying ? 'Applying\u2026' : 'Apply to DB'}
             </button>
             <button
               type="button"
@@ -581,18 +799,34 @@ const DesignerCanvas = ({ initialSchema, onSave, onApply, onLoadFromDatabase, on
               onNodesChange={handleNodesChange}
               onEdgesChange={handleEdgesChange}
               onConnect={handleConnect}
+              onSelectionChange={handleSelectionChange}
               onDragOver={handleDragOver}
               onDrop={handleDrop}
               fitView
               panOnDrag
               panOnScroll
               zoomOnScroll
-              connectionLineStyle={{ stroke: '#F9E7B2', strokeWidth: 2 }}
+              connectionLineStyle={connectionLineStyle}
             >
               <MiniMap pannable zoomable className="!bg-bw-ink/70" />
               <Controls />
               <Background gap={16} color="#ffffff33" />
             </ReactFlow>
+            {edgeCutGesture && (
+              <div className="pointer-events-none absolute inset-0">
+                <svg className="h-full w-full" data-testid="db-edge-cut-overlay">
+                  <line
+                    x1={edgeCutGesture.startScreen.x}
+                    y1={edgeCutGesture.startScreen.y}
+                    x2={edgeCutGesture.currentScreen.x}
+                    y2={edgeCutGesture.currentScreen.y}
+                    stroke="#D34E4E"
+                    strokeWidth={2}
+                    strokeDasharray="6 4"
+                  />
+                </svg>
+              </div>
+            )}
             {pendingRelationship && (
               <div className="pointer-events-none absolute inset-0 flex items-start justify-center pt-6">
                 <div className="pointer-events-auto w-80 rounded-2xl border border-white/10 bg-bw-ink/90 p-4 text-white shadow-xl">
@@ -700,7 +934,7 @@ const DesignerCanvas = ({ initialSchema, onSave, onApply, onLoadFromDatabase, on
                   value={connection.password}
                   onChange={(event) => handleConnectionChange('password', event.target.value)}
                   className="w-full rounded-lg border border-white/15 bg-white/5 px-3 py-2 text-xs"
-                  placeholder="••••••"
+                  placeholder={"\u2022\u2022\u2022\u2022\u2022\u2022"}
                 />
               </label>
               <label className="flex items-center gap-2 text-[11px] text-bw-platinum/80">

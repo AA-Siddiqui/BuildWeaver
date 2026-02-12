@@ -1,4 +1,4 @@
-import { DragEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { DragEvent, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   Background,
   Connection,
@@ -30,8 +30,11 @@ import {
   toFlowNodes
 } from '../graphSerialization';
 import { PreviewResolverProvider, createPreviewResolver } from '../previewResolver';
-import { logicLogger } from '../../../lib/logger';
+import { queryEditorLogger } from '../../../lib/logger';
+import { processEditorShortcut } from '../../../lib/editorShortcuts';
 import { useDeleteNodesShortcut } from '../../../hooks/useDeleteNodesShortcut';
+import { useEdgeCutGesture } from '../../../hooks/useEdgeCutGesture';
+import { SnapshotHistory } from '../../../lib/snapshotHistory';
 import { QuerySchemaProvider } from './QuerySchemaContext';
 import { QueryNodePalette, QueryPaletteNodeType } from './QueryNodePalette';
 import { QueryArgumentNode } from './QueryArgumentNode';
@@ -98,6 +101,22 @@ export const createQueryInnerNode = (type: QueryInnerNodeType, position = { x: 0
   return { id: nodeId, type, position, data: defaults[type] };
 };
 
+/** Snapshot for query editor undo/redo. */
+export type QueryEditorSnapshot = {
+  nodes: FlowNode[];
+  edges: FlowEdge[];
+  name: string;
+  mode: QueryMode;
+};
+
+const QUERY_HISTORY_LIMIT = 100;
+
+const cloneQuerySnapshot = (snapshot: QueryEditorSnapshot): QueryEditorSnapshot =>
+  JSON.parse(JSON.stringify(snapshot));
+
+const hashQuerySnapshot = (snapshot: QueryEditorSnapshot): string =>
+  JSON.stringify({ n: snapshot.nodes.map((n) => ({ id: n.id, d: n.data, p: n.position })), e: snapshot.edges.map((e) => e.id), nm: snapshot.name, m: snapshot.mode });
+
 interface QueryEditorModalProps {
   queryDef: QueryDefinition;
   schema: DatabaseSchema | null;
@@ -121,6 +140,77 @@ const QueryEditorCanvas = ({ queryDef, schema, onSave, onClose }: QueryEditorMod
   );
   const connectionLineStyle = useMemo(() => ({ stroke: '#F9E7B2', strokeWidth: 2 }), []);
 
+  // -- Undo / redo history --------------------------------------------------
+  const historyRef = useRef(
+    new SnapshotHistory<QueryEditorSnapshot>({
+      clone: cloneQuerySnapshot,
+      hash: hashQuerySnapshot,
+      limit: QUERY_HISTORY_LIMIT,
+      logger: (message, meta) => queryEditorLogger.debug(message, meta)
+    })
+  );
+
+  /** Observe query state changes for undo/redo snapshots. */
+  useLayoutEffect(() => {
+    const snapshot: QueryEditorSnapshot = { nodes, edges, name, mode };
+    historyRef.current.observe(snapshot, {
+      nodeCount: nodes.length,
+      edgeCount: edges.length,
+      reason: 'query-state-observer'
+    });
+  }, [nodes, edges, name, mode]);
+
+  const restoreSnapshot = useCallback(
+    (snapshot: QueryEditorSnapshot, action: 'undo' | 'redo') => {
+      historyRef.current.suppressNextDiff();
+      setNodes(snapshot.nodes);
+      setEdges(snapshot.edges);
+      setName(snapshot.name);
+      setMode(snapshot.mode);
+      setHasUnsavedChanges(true);
+      const label = action === 'undo' ? 'Undid change' : 'Redid change';
+      setFeedback(label);
+      setTimeout(() => setFeedback(''), 2000);
+      queryEditorLogger.info(`Query ${action} applied`, {
+        undoDepth: historyRef.current.getUndoDepth(),
+        redoDepth: historyRef.current.getRedoDepth(),
+        nodes: snapshot.nodes.length,
+        edges: snapshot.edges.length
+      });
+    },
+    [setEdges, setNodes]
+  );
+
+  const handleUndo = useCallback(() => {
+    const current: QueryEditorSnapshot = { nodes, edges, name, mode };
+    const snapshot = historyRef.current.undo(current);
+    if (!snapshot) {
+      queryEditorLogger.debug('Undo ignored — no history');
+      return;
+    }
+    restoreSnapshot(snapshot, 'undo');
+  }, [edges, mode, name, nodes, restoreSnapshot]);
+
+  const handleRedo = useCallback(() => {
+    const current: QueryEditorSnapshot = { nodes, edges, name, mode };
+    const snapshot = historyRef.current.redo(current);
+    if (!snapshot) {
+      queryEditorLogger.debug('Redo ignored — no future history');
+      return;
+    }
+    restoreSnapshot(snapshot, 'redo');
+  }, [edges, mode, name, nodes, restoreSnapshot]);
+
+  // -- Select all nodes ------------------------------------------------------
+  const handleSelectAll = useCallback(() => {
+    setNodes((nds) => nds.map((node) => ({ ...node, selected: true })));
+    setEdges((eds) => eds.map((edge) => ({ ...edge, selected: true })));
+    const count = nodes.length;
+    queryEditorLogger.info('Select all triggered', { nodeCount: count, edgeCount: edges.length });
+    setFeedback(count ? `Selected ${count} node${count > 1 ? 's' : ''}` : 'No nodes to select');
+    setTimeout(() => setFeedback(''), 2000);
+  }, [edges.length, nodes.length, setEdges, setNodes]);
+
   // Sync nodes/edges from queryDef and auto-create query-output if missing
   useEffect(() => {
     const flowNodes = toFlowNodes(queryDef.nodes);
@@ -128,7 +218,7 @@ const QueryEditorCanvas = ({ queryDef, schema, onSave, onClose }: QueryEditorMod
     if (!hasOutput) {
       const outputNode = createQueryInnerNode('query-output', { x: 600, y: 200 });
       flowNodes.push(outputNode);
-      logicLogger.info('Auto-created query-output node', { queryId: queryDef.id, nodeId: outputNode.id });
+      queryEditorLogger.info('Auto-created query-output node', { queryId: queryDef.id, nodeId: outputNode.id });
     }
     setNodes(flowNodes);
     setEdges(toFlowEdges(queryDef.edges));
@@ -137,6 +227,16 @@ const QueryEditorCanvas = ({ queryDef, schema, onSave, onClose }: QueryEditorMod
     setHasUnsavedChanges(false);
     setSelectedNodeIds([]);
     setFeedback('');
+    historyRef.current.reset(
+      { nodes: flowNodes, edges: toFlowEdges(queryDef.edges), name: queryDef.name, mode: queryDef.mode },
+      { reason: 'query-def-loaded', queryId: queryDef.id }
+    );
+    queryEditorLogger.info('Query definition loaded into editor', {
+      queryId: queryDef.id,
+      nodeCount: flowNodes.length,
+      edgeCount: queryDef.edges.length,
+      mode: queryDef.mode
+    });
   }, [queryDef, setEdges, setNodes]);
 
   const deleteElements = useCallback(
@@ -147,6 +247,9 @@ const QueryEditorCanvas = ({ queryDef, schema, onSave, onClose }: QueryEditorMod
         if (outputNodes.length > 0) {
           setFeedback('Cannot delete the output node');
           setTimeout(() => setFeedback(''), 2000);
+          queryEditorLogger.warn('Attempted to delete protected query-output node', {
+            outputNodeIds: outputNodes.map((n) => n.id)
+          });
           const filtered = elements.nodes.filter((node) => node.type !== 'query-output');
           if (filtered.length === 0 && !elements.edges?.length) {
             return;
@@ -172,7 +275,8 @@ const QueryEditorCanvas = ({ queryDef, schema, onSave, onClose }: QueryEditorMod
       setHasUnsavedChanges(true);
       setFeedback(`Deleted ${removedIds.length} node${removedIds.length > 1 ? 's' : ''}`);
       setTimeout(() => setFeedback(''), 2000);
-    }
+    },
+    logger: (message, meta) => queryEditorLogger.warn(message, meta)
   });
 
   const handleNodesChange = useCallback(
@@ -184,6 +288,7 @@ const QueryEditorCanvas = ({ queryDef, schema, onSave, onClose }: QueryEditorMod
           if (node?.type === 'query-output') {
             setFeedback('Cannot delete the output node');
             setTimeout(() => setFeedback(''), 2000);
+            queryEditorLogger.warn('Blocked removal of query-output node', { nodeId: change.id });
             return false;
           }
         }
@@ -205,7 +310,24 @@ const QueryEditorCanvas = ({ queryDef, schema, onSave, onClose }: QueryEditorMod
 
   const handleConnect = useCallback(
     (connection: Connection) => {
-      logicLogger.info('Query editor connection created', {
+      // Enforce single-input restriction on query-output nodes
+      const targetNode = nodes.find((n) => n.id === connection.target);
+      if (targetNode?.type === 'query-output') {
+        const existing = edges.filter(
+          (e) => e.target === connection.target && e.targetHandle === (connection.targetHandle ?? 'input')
+        );
+        if (existing.length > 0) {
+          queryEditorLogger.warn('Blocked duplicate connection to query-output node', {
+            target: connection.target,
+            existingEdge: existing[0].id,
+            attemptedSource: connection.source
+          });
+          setFeedback('Output node already has an input — remove the existing connection first');
+          setTimeout(() => setFeedback(''), 2500);
+          return;
+        }
+      }
+      queryEditorLogger.info('Query editor connection created', {
         source: connection.source,
         sourceHandle: connection.sourceHandle,
         target: connection.target,
@@ -214,12 +336,13 @@ const QueryEditorCanvas = ({ queryDef, schema, onSave, onClose }: QueryEditorMod
       setEdges((eds) => addEdge({ ...connection, id: `${connection.source}-${connection.target}-${Date.now()}` }, eds));
       setHasUnsavedChanges(true);
     },
-    [setEdges]
+    [edges, nodes, setEdges]
   );
 
   const handleAddNode = useCallback(
     (type: QueryPaletteNodeType, position?: { x: number; y: number }) => {
       const node = createQueryInnerNode(type, position);
+      queryEditorLogger.info('Query node added', { type, nodeId: node.id, position });
       setNodes((current) => current.concat(node));
       setHasUnsavedChanges(true);
     },
@@ -276,7 +399,7 @@ const QueryEditorCanvas = ({ queryDef, schema, onSave, onClose }: QueryEditorMod
       arguments: serializedArguments(),
       updatedAt: new Date().toISOString()
     };
-    logicLogger.info('Query editor saved changes', {
+    queryEditorLogger.info('Query editor saved changes', {
       queryId: updated.id,
       mode: updated.mode,
       nodes: updated.nodes.length,
@@ -291,10 +414,77 @@ const QueryEditorCanvas = ({ queryDef, schema, onSave, onClose }: QueryEditorMod
 
   const handleClose = useCallback(() => {
     if (hasUnsavedChanges) {
+      queryEditorLogger.info('Auto-saving query before close', { queryId: queryDef.id });
       handleSave();
     }
     onClose();
-  }, [handleSave, hasUnsavedChanges, onClose]);
+  }, [handleSave, hasUnsavedChanges, onClose, queryDef.id]);
+
+  // -- Keyboard shortcuts (Ctrl+S, Ctrl+Z, Ctrl+Y, Ctrl+A) ------------------
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      processEditorShortcut(event, {
+        onSave: () => {
+          queryEditorLogger.info('Save shortcut triggered', { queryId: queryDef.id });
+          handleSave();
+        },
+        onUndo: handleUndo,
+        onRedo: handleRedo,
+        onSelectAll: handleSelectAll,
+        logger: (message, meta) => queryEditorLogger.info(message, { ...meta, context: 'query-editor' })
+      });
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [handleRedo, handleSave, handleSelectAll, handleUndo, queryDef.id]);
+
+  // -- Edge cut gesture (Ctrl+LMB drag) -------------------------------------
+  const severEdges = useCallback(
+    (edgeIds: string[]) => {
+      if (!edgeIds.length) {
+        queryEditorLogger.debug('Edge sever requested without targets');
+        return;
+      }
+      setEdges((current) => current.filter((edge) => !edgeIds.includes(edge.id)));
+      setHasUnsavedChanges(true);
+      setFeedback(`Removed ${edgeIds.length} connection${edgeIds.length > 1 ? 's' : ''}`);
+      setTimeout(() => setFeedback(''), 2000);
+      queryEditorLogger.info('Connections severed via cut gesture', {
+        count: edgeIds.length,
+        edgeIds
+      });
+    },
+    [setEdges]
+  );
+
+  const { edgeCutGesture } = useEdgeCutGesture({
+    wrapperRef: reactFlowWrapper,
+    reactFlowInstance,
+    edges,
+    onSever: severEdges,
+    logger: (message, meta) => queryEditorLogger.debug(message, meta)
+  });
+
+  // -- Restrict query-output node to a single input connection ---------------
+  const isValidConnection = useCallback(
+    (connection: Connection) => {
+      const targetNode = nodes.find((n) => n.id === connection.target);
+      if (targetNode?.type === 'query-output') {
+        const existing = edges.filter(
+          (e) => e.target === connection.target && e.targetHandle === (connection.targetHandle ?? 'input')
+        );
+        if (existing.length > 0) {
+          queryEditorLogger.info('Rejected connection to query-output — already has an input', {
+            target: connection.target,
+            existingEdge: existing[0].id
+          });
+          return false;
+        }
+      }
+      return true;
+    },
+    [edges, nodes]
+  );
 
   return (
     <div className="fixed inset-0 z-50 flex h-screen bg-bw-ink text-white">
@@ -374,6 +564,7 @@ const QueryEditorCanvas = ({ queryDef, schema, onSave, onClose }: QueryEditorMod
                   onNodesChange={handleNodesChange}
                   onEdgesChange={handleEdgesChange}
                   onConnect={handleConnect}
+                  isValidConnection={isValidConnection}
                   onDrop={handleDrop}
                   onDragOver={handleDragOver}
                   onSelectionChange={handleSelectionChange}
@@ -390,6 +581,21 @@ const QueryEditorCanvas = ({ queryDef, schema, onSave, onClose }: QueryEditorMod
               </PreviewResolverProvider>
             </QuerySchemaProvider>
           </div>
+          {edgeCutGesture && (
+            <div className="pointer-events-none absolute inset-0">
+              <svg className="h-full w-full" data-testid="query-edge-cut-overlay">
+                <line
+                  x1={edgeCutGesture.startScreen.x}
+                  y1={edgeCutGesture.startScreen.y}
+                  x2={edgeCutGesture.currentScreen.x}
+                  y2={edgeCutGesture.currentScreen.y}
+                  stroke="#D34E4E"
+                  strokeWidth={2}
+                  strokeDasharray="6 4"
+                />
+              </svg>
+            </div>
+          )}
         </div>
       </div>
     </div>

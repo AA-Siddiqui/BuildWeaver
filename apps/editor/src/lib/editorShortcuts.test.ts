@@ -81,4 +81,58 @@ describe('processEditorShortcut', () => {
     expect(onUndo).toHaveBeenCalledTimes(1);
     expect(preventDefault).toHaveBeenCalledTimes(1);
   });
+
+  // SelectAll shortcut tests
+
+  it('invokes onSelectAll for Ctrl+A when not focused in input', () => {
+    const onSelectAll = jest.fn();
+    const { event, preventDefault } = createEvent('a');
+    const handled = processEditorShortcut(event, { onSelectAll });
+    expect(handled).toBe(true);
+    expect(onSelectAll).toHaveBeenCalledTimes(1);
+    expect(preventDefault).toHaveBeenCalledTimes(1);
+  });
+
+  it('skips selectAll when target is an input element', () => {
+    const onSelectAll = jest.fn();
+    const input = document.createElement('input');
+    const { event, preventDefault } = createEvent('a', { target: input });
+    const handled = processEditorShortcut(event, { onSelectAll });
+    expect(handled).toBe(false);
+    expect(onSelectAll).not.toHaveBeenCalled();
+    expect(preventDefault).not.toHaveBeenCalled();
+  });
+
+  it('respects allowInputTargets when selecting all inside form fields', () => {
+    const input = document.createElement('input');
+    const onSelectAll = jest.fn();
+    const { event, preventDefault } = createEvent('a', { target: input });
+    const handled = processEditorShortcut(event, { onSelectAll, allowInputTargets: true });
+    expect(handled).toBe(true);
+    expect(onSelectAll).toHaveBeenCalledTimes(1);
+    expect(preventDefault).toHaveBeenCalledTimes(1);
+  });
+
+  it('logs when selectAll is handled', () => {
+    const logger = jest.fn();
+    const onSelectAll = jest.fn();
+    const { event } = createEvent('a');
+    processEditorShortcut(event, { onSelectAll, logger });
+    expect(logger).toHaveBeenCalledWith(expect.stringContaining('SelectAll shortcut handled'), expect.objectContaining({ combo: expect.any(String) }));
+  });
+
+  it('does not handle Ctrl+A when onSelectAll is not provided', () => {
+    const { event, preventDefault } = createEvent('a');
+    const handled = processEditorShortcut(event, {});
+    expect(handled).toBe(false);
+    expect(preventDefault).not.toHaveBeenCalled();
+  });
+
+  it('logs when selectAll is ignored due to editable target', () => {
+    const logger = jest.fn();
+    const textarea = document.createElement('textarea');
+    const { event } = createEvent('a', { target: textarea });
+    processEditorShortcut(event, { onSelectAll: jest.fn(), logger });
+    expect(logger).toHaveBeenCalledWith(expect.stringContaining('ignored'), expect.objectContaining({ combo: expect.any(String) }));
+  });
 });

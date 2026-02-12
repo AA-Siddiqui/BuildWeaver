@@ -2,6 +2,32 @@ import React from 'react';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { DatabaseSchema } from '@buildweaver/libs';
 import { DatabaseDesignerModal } from './DatabaseDesignerModal';
+import type { DbDesignerSnapshot } from './DatabaseDesignerModal';
+import { SnapshotHistory } from '../../lib/snapshotHistory';
+
+jest.mock('../../lib/logger', () => ({
+  dbDesignerLogger: { debug: jest.fn(), info: jest.fn(), warn: jest.fn(), error: jest.fn() }
+}));
+
+jest.mock('../../lib/editorShortcuts', () => ({
+  processEditorShortcut: jest.fn()
+}));
+
+jest.mock('../../hooks/useDeleteNodesShortcut', () => ({
+  useDeleteNodesShortcut: jest.fn().mockReturnValue(jest.fn())
+}));
+
+jest.mock('../../lib/snapshotHistory', () => ({
+  SnapshotHistory: jest.fn().mockImplementation(() => ({
+    observe: jest.fn(),
+    undo: jest.fn().mockReturnValue(null),
+    redo: jest.fn().mockReturnValue(null),
+    reset: jest.fn(),
+    suppressNextDiff: jest.fn(),
+    getUndoDepth: jest.fn().mockReturnValue(0),
+    getRedoDepth: jest.fn().mockReturnValue(0)
+  }))
+}));
 
 jest.mock('reactflow', () => {
   return {
@@ -204,5 +230,115 @@ describe('DatabaseDesignerModal', () => {
     const saved = onSave.mock.calls[0][0] as DatabaseSchema;
 
     expect(saved.tables.find((table) => table.name === 'Orders')).toBeDefined();
+  });
+});
+
+// -- DB Designer SnapshotHistory tests --
+// Use the real SnapshotHistory for these tests (the mock above is only for render tests)
+const { SnapshotHistory: RealSnapshotHistory } = jest.requireActual<typeof import('../../lib/snapshotHistory')>('../../lib/snapshotHistory');
+
+const cloneSnap = (snap: DbDesignerSnapshot): DbDesignerSnapshot =>
+  JSON.parse(JSON.stringify(snap));
+
+const hashSnap = (snap: DbDesignerSnapshot): string =>
+  JSON.stringify({ t: snap.tables, r: snap.relationships, n: snap.name });
+
+const makeSnap = (overrides: Partial<DbDesignerSnapshot> = {}): DbDesignerSnapshot => ({
+  tables: [],
+  relationships: [],
+  name: 'Test DB',
+  ...overrides
+});
+
+describe('DbDesigner SnapshotHistory', () => {
+  let history: SnapshotHistory<DbDesignerSnapshot>;
+
+  beforeEach(() => {
+    history = new RealSnapshotHistory<DbDesignerSnapshot>({
+      clone: cloneSnap,
+      hash: hashSnap,
+      limit: 50
+    });
+  });
+
+  it('records a snapshot when schema changes', () => {
+    history.observe(makeSnap({ name: 'DB1' }));
+    history.observe(makeSnap({ name: 'DB2' }));
+    expect(history.getUndoDepth()).toBe(1);
+  });
+
+  it('does not record if hash is unchanged', () => {
+    history.observe(makeSnap({ name: 'DB1' }));
+    history.observe(makeSnap({ name: 'DB1' }));
+    expect(history.getUndoDepth()).toBe(0);
+  });
+
+  it('supports undo to restore previous schema state', () => {
+    history.observe(makeSnap({ name: 'DB1', tables: [{ id: 't1', name: 'users', fields: [], position: { x: 0, y: 0 } }] }));
+    history.observe(makeSnap({ name: 'DB2', tables: [] }));
+
+    const restored = history.undo(makeSnap({ name: 'DB2', tables: [] }));
+    expect(restored).not.toBeNull();
+    expect(restored!.name).toBe('DB1');
+    expect(restored!.tables).toHaveLength(1);
+  });
+
+  it('supports redo after undo', () => {
+    history.observe(makeSnap({ name: 'DB1' }));
+    history.observe(makeSnap({ name: 'DB2' }));
+    history.observe(makeSnap({ name: 'DB3' }));
+
+    const afterUndo = history.undo(makeSnap({ name: 'DB3' }));
+    expect(afterUndo!.name).toBe('DB2');
+
+    const afterRedo = history.redo(afterUndo!);
+    expect(afterRedo!.name).toBe('DB3');
+  });
+
+  it('returns null when no undo or redo available', () => {
+    history.observe(makeSnap());
+    expect(history.undo(makeSnap())).toBeNull();
+    expect(history.redo(makeSnap())).toBeNull();
+  });
+
+  it('suppresses next diff after restoration', () => {
+    history.observe(makeSnap({ name: 'DB1' }));
+    history.observe(makeSnap({ name: 'DB2' }));
+
+    history.suppressNextDiff();
+    history.observe(makeSnap({ name: 'DB1' }));
+    expect(history.getUndoDepth()).toBe(1);
+  });
+
+  it('resets history when schema is loaded from database', () => {
+    history.observe(makeSnap({ name: 'DB1' }));
+    history.observe(makeSnap({ name: 'DB2' }));
+
+    history.reset(makeSnap({ name: 'Loaded' }));
+    expect(history.getUndoDepth()).toBe(0);
+    expect(history.getRedoDepth()).toBe(0);
+  });
+
+  it('clones snapshots to prevent mutation', () => {
+    history.observe(makeSnap({ tables: [{ id: 't1', name: 'users', fields: [], position: { x: 0, y: 0 } }] }));
+    history.observe(makeSnap({ tables: [{ id: 't1', name: 'modified', fields: [], position: { x: 0, y: 0 } }] }));
+
+    const restored = history.undo(makeSnap({ tables: [{ id: 't1', name: 'modified', fields: [], position: { x: 0, y: 0 } }] }));
+    expect(restored!.tables[0].name).toBe('users');
+
+    restored!.tables[0].name = 'hacked';
+    const afterRedo = history.redo(restored!);
+    expect(afterRedo!.tables[0].name).toBe('modified');
+  });
+
+  it('tracks relationships in snapshots', () => {
+    history.observe(makeSnap({
+      relationships: [{ id: 'r1', sourceTableId: 't1', targetTableId: 't2', cardinality: 'many', modality: 0 }]
+    }));
+    history.observe(makeSnap({ relationships: [] }));
+
+    const restored = history.undo(makeSnap({ relationships: [] }));
+    expect(restored!.relationships).toHaveLength(1);
+    expect(restored!.relationships[0].id).toBe('r1');
   });
 });

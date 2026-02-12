@@ -4,6 +4,7 @@ export type EditorShortcutHandlers = {
   onSave?: () => void;
   onUndo?: () => void;
   onRedo?: () => void;
+  onSelectAll?: () => void;
   logger?: ShortcutLogger;
   allowInputTargets?: boolean;
 };
@@ -79,6 +80,17 @@ export const processEditorShortcut = (event: KeyboardEvent, handlers: EditorShor
       log('Redo shortcut handled', { combo: describeKeyCombo(event) });
       return true;
     }
+  }
+
+  if (normalizedKey === 'a' && handlers.onSelectAll) {
+    if (isEditable && !allowInputTargets) {
+      log('SelectAll shortcut ignored due to editable target', { combo: describeKeyCombo(event) });
+      return false;
+    }
+    event.preventDefault();
+    handlers.onSelectAll();
+    log('SelectAll shortcut handled', { combo: describeKeyCombo(event) });
+    return true;
   }
 
   return false;
