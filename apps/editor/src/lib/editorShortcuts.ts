@@ -5,6 +5,7 @@ export type EditorShortcutHandlers = {
   onUndo?: () => void;
   onRedo?: () => void;
   onSelectAll?: () => void;
+  onAiPalette?: () => void;
   logger?: ShortcutLogger;
   allowInputTargets?: boolean;
 };
@@ -80,6 +81,13 @@ export const processEditorShortcut = (event: KeyboardEvent, handlers: EditorShor
       log('Redo shortcut handled', { combo: describeKeyCombo(event) });
       return true;
     }
+  }
+
+  if (normalizedKey === 'k' && handlers.onAiPalette) {
+    event.preventDefault();
+    handlers.onAiPalette();
+    log('AI palette shortcut handled', { combo: describeKeyCombo(event) });
+    return true;
   }
 
   if (normalizedKey === 'a' && handlers.onSelectAll) {

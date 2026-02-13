@@ -135,4 +135,40 @@ describe('processEditorShortcut', () => {
     processEditorShortcut(event, { onSelectAll: jest.fn(), logger });
     expect(logger).toHaveBeenCalledWith(expect.stringContaining('ignored'), expect.objectContaining({ combo: expect.any(String) }));
   });
+
+  // AI palette shortcut tests
+
+  it('invokes onAiPalette for Ctrl+K', () => {
+    const onAiPalette = jest.fn();
+    const { event, preventDefault } = createEvent('k');
+    const handled = processEditorShortcut(event, { onAiPalette });
+    expect(handled).toBe(true);
+    expect(onAiPalette).toHaveBeenCalledTimes(1);
+    expect(preventDefault).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not handle Ctrl+K when onAiPalette is not provided', () => {
+    const { event, preventDefault } = createEvent('k');
+    const handled = processEditorShortcut(event, {});
+    expect(handled).toBe(false);
+    expect(preventDefault).not.toHaveBeenCalled();
+  });
+
+  it('invokes onAiPalette even when target is an input element', () => {
+    const onAiPalette = jest.fn();
+    const input = document.createElement('input');
+    const { event, preventDefault } = createEvent('k', { target: input });
+    const handled = processEditorShortcut(event, { onAiPalette });
+    expect(handled).toBe(true);
+    expect(onAiPalette).toHaveBeenCalledTimes(1);
+    expect(preventDefault).toHaveBeenCalledTimes(1);
+  });
+
+  it('logs when AI palette shortcut is handled', () => {
+    const logger = jest.fn();
+    const onAiPalette = jest.fn();
+    const { event } = createEvent('k');
+    processEditorShortcut(event, { onAiPalette, logger });
+    expect(logger).toHaveBeenCalledWith(expect.stringContaining('AI palette shortcut handled'), expect.objectContaining({ combo: expect.any(String) }));
+  });
 });

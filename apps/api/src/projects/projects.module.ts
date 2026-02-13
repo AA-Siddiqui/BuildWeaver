@@ -9,9 +9,11 @@ import { ProjectComponentsController } from './components/components.controller'
 import { ProjectComponentsService } from './components/components.service';
 import { ProjectDatabasesController } from './databases/project-databases.controller';
 import { ProjectDatabasesService } from './databases/project-databases.service';
+import { ProjectAiController } from './ai/ai.controller';
+import { ProjectAiService } from './ai/ai.service';
 
 @Module({
-  controllers: [ProjectsController, ProjectGraphController, ProjectPagesController, ProjectComponentsController, ProjectDatabasesController],
-  providers: [ProjectsService, ProjectGraphService, ProjectPagesService, ProjectComponentsService, ProjectDatabasesService]
+  controllers: [ProjectsController, ProjectGraphController, ProjectPagesController, ProjectComponentsController, ProjectDatabasesController, ProjectAiController],
+  providers: [ProjectsService, ProjectGraphService, ProjectPagesService, ProjectComponentsService, ProjectDatabasesService, ProjectAiService]
 })
 export class ProjectsModule {}

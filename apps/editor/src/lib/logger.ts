@@ -42,3 +42,4 @@ export class ScopedLogger {
 export const logicLogger = new ScopedLogger('LogicEditor');
 export const dbDesignerLogger = new ScopedLogger('DbDesigner');
 export const queryEditorLogger = new ScopedLogger('QueryEditor');
+export const aiLogger = new ScopedLogger('AiLogic');

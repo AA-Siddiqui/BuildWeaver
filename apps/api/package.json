@@ -14,6 +14,8 @@
   },
   "dependencies": {
     "@buildweaver/db": "workspace:*",
+    "@buildweaver/libs": "workspace:*",
+    "@buildweaver/llm": "workspace:*",
     "@nestjs/common": "^10.3.0",
     "@nestjs/config": "^3.1.1",
     "@nestjs/core": "^10.3.0",

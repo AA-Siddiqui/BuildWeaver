@@ -1,5 +1,5 @@
 import { useAuthStore } from '../stores/auth-store';
-import { AuthUser, DatabaseSchema, Project } from '../types/api';
+import { AuthUser, DatabaseSchema, LogicEditorEdge, LogicEditorNode, Project } from '../types/api';
 import type {
   ComponentBindingReference,
   PageBuilderState,
@@ -193,5 +193,19 @@ export const projectDatabasesApi = {
     apiFetch<{ schema: DatabaseSchema }>(`/projects/${projectId}/databases/introspect`, {
       method: 'POST',
       body: serialize(payload)
+    })
+};
+
+export interface AiGenerateLogicResult {
+  nodes: LogicEditorNode[];
+  edges: LogicEditorEdge[];
+  summary: string;
+}
+
+export const projectAiApi = {
+  generateLogic: (projectId: string, prompt: string) =>
+    apiFetch<AiGenerateLogicResult>(`/projects/${projectId}/ai/generate-logic`, {
+      method: 'POST',
+      body: serialize({ prompt })
     })
 };

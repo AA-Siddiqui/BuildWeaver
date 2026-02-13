@@ -34,7 +34,7 @@ import type {
   QueryDefinition,
   QueryNodeData
 } from '../types/api';
-import { projectDatabasesApi, projectGraphApi, projectPagesApi } from '../lib/api-client';
+import { projectDatabasesApi, projectGraphApi, projectPagesApi, projectAiApi } from '../lib/api-client';
 import { LogicNodePalette, FUNCTION_DRAG_DATA, QUERY_DRAG_DATA } from '../components/logic/LogicNodePalette';
 import { DummyNode } from '../components/logic/DummyNode';
 import { PageNode } from '../components/logic/PageNode';
@@ -47,7 +47,7 @@ import { LogicalOperatorNode } from '../components/logic/LogicalOperatorNode';
 import { RelationalOperatorNode } from '../components/logic/RelationalOperatorNode';
 import { PreviewResolverProvider, createPreviewResolver } from '../components/logic/previewResolver';
 import { SeverableEdge } from '../components/logic/SeverableEdge';
-import { logicLogger } from '../lib/logger';
+import { logicLogger, aiLogger } from '../lib/logger';
 import { projectGraphQueryKey, invalidateProjectGraphCache } from '../lib/query-helpers';
 import { SnapshotHistory } from '../lib/snapshotHistory';
 import { processEditorShortcut } from '../lib/editorShortcuts';
@@ -90,6 +90,7 @@ import {
 } from '../lib/graphInteractions';
 import { cloneGraphSnapshot, GraphSnapshot, hashGraphSnapshot } from '../lib/graphSnapshot';
 import { DragHistoryBuffer } from '../lib/dragHistoryBuffer';
+import { AiCommandPalette } from '../components/logic/AiCommandPalette';
 
 const nodeTypes = {
   dummy: DummyNode,
@@ -250,6 +251,8 @@ const LogicEditorView = () => {
   const [feedback, setFeedback] = useState('');
   const [edgeCutGesture, setEdgeCutGesture] = useState<GestureState | null>(null);
   const [marqueeGesture, setMarqueeGesture] = useState<GestureState | null>(null);
+  const [isAiPaletteOpen, setIsAiPaletteOpen] = useState(false);
+  const [isAiGenerating, setIsAiGenerating] = useState(false);
   const previewResolver = useMemo(
     () => createPreviewResolver(nodes, edges, { functions, queryDefinitions: queries, databases }),
     [nodes, edges, functions, queries, databases]
@@ -736,6 +739,84 @@ const LogicEditorView = () => {
     }
     restoreGraphSnapshot(snapshot, 'redo');
   }, [databases, edges, functions, nodes, projectId, queries, restoreGraphSnapshot]);
+
+  const handleToggleAiPalette = useCallback(() => {
+    setIsAiPaletteOpen((prev) => !prev);
+    aiLogger.debug('AI palette toggled', { projectId });
+  }, [projectId]);
+
+  const handleAiGenerate = useCallback(
+    async (prompt: string) => {
+      if (!projectId) return;
+      setIsAiGenerating(true);
+      aiLogger.info('AI generation started', { projectId, promptLength: prompt.length });
+
+      try {
+        const result = await projectAiApi.generateLogic(projectId, prompt);
+
+        aiLogger.info('AI generation result received', {
+          projectId,
+          nodeCount: result.nodes.length,
+          edgeCount: result.edges.length,
+          summary: result.summary
+        });
+
+        if (result.nodes.length === 0) {
+          setFeedback('AI returned no nodes');
+          setTimeout(() => setFeedback(''), 2000);
+          aiLogger.warn('AI returned empty result', { projectId });
+          return;
+        }
+
+        // Get the current viewport center to offset new nodes
+        const viewport = reactFlowInstance.getViewport();
+        const wrapperBounds = reactFlowWrapper.current?.getBoundingClientRect();
+        const centerX = wrapperBounds
+          ? (wrapperBounds.width / 2 - viewport.x) / viewport.zoom
+          : 400;
+        const centerY = wrapperBounds
+          ? (wrapperBounds.height / 2 - viewport.y) / viewport.zoom
+          : 300;
+
+        // Convert to FlowNode/FlowEdge with offset positions
+        const flowNodes = toFlowNodes(result.nodes).map((node) => ({
+          ...node,
+          position: {
+            x: node.position.x + centerX,
+            y: node.position.y + centerY
+          }
+        }));
+        const flowEdges = toFlowEdges(result.edges).map((edge) => ({
+          ...edge,
+          type: 'severable' as const
+        }));
+
+        // Apply all at once — React batches these into a single render,
+        // so SnapshotHistory records it as one undo step
+        setNodes((prev) => [...prev, ...flowNodes]);
+        setEdges((prev) => [...prev, ...flowEdges]);
+        setHasUnsavedChanges(true);
+        setIsAiPaletteOpen(false);
+        setFeedback(`AI generated ${result.nodes.length} node${result.nodes.length > 1 ? 's' : ''}`);
+        setTimeout(() => setFeedback(''), 3000);
+
+        aiLogger.info('AI nodes applied to canvas', {
+          projectId,
+          addedNodes: flowNodes.length,
+          addedEdges: flowEdges.length,
+          summary: result.summary
+        });
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        aiLogger.error('AI generation failed', { projectId, error: errorMessage });
+        setFeedback('AI generation failed');
+        setTimeout(() => setFeedback(''), 3000);
+      } finally {
+        setIsAiGenerating(false);
+      }
+    },
+    [projectId, reactFlowInstance, setEdges, setNodes]
+  );
 
   const syncDatabaseNodesWithSchema = useCallback(
     (schema: DatabaseSchema) => {
@@ -1264,6 +1345,7 @@ const LogicEditorView = () => {
         onSave: handleSave,
         onUndo: handleUndoAction,
         onRedo: handleRedoAction,
+        onAiPalette: handleToggleAiPalette,
         allowInputTargets: true,
         logger: (message, meta) =>
           logicLogger.info(message, {
@@ -1274,7 +1356,7 @@ const LogicEditorView = () => {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [handleRedoAction, handleSave, handleUndoAction, projectId]);
+  }, [handleRedoAction, handleSave, handleToggleAiPalette, handleUndoAction, projectId]);
 
   const handleSelectionChange = useCallback(({ nodes: selected }: { nodes: FlowNode[] }) => {
     setSelectedNodeIds(selected.map((node) => node.id));
@@ -1618,6 +1700,15 @@ const LogicEditorView = () => {
               </button>
               <button
                 type="button"
+                onClick={handleToggleAiPalette}
+                data-testid="ai-logic-button"
+                className="rounded-xl border border-bw-amber/30 bg-bw-amber/10 px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-bw-amber transition hover:-translate-y-0.5"
+                title="AI Logic Builder (Ctrl+K)"
+              >
+                AI
+              </button>
+              <button
+                type="button"
                 onClick={deleteSelection}
                 disabled={selectedNodeIds.length === 0}
                 className="rounded-xl border border-white/20 px-4 py-2 text-bw-platinum transition hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-60"
@@ -1749,6 +1840,12 @@ const LogicEditorView = () => {
           onClose={handleCloseDatabaseDesigner}
         />
       )}
+      <AiCommandPalette
+        isOpen={isAiPaletteOpen}
+        isLoading={isAiGenerating}
+        onSubmit={handleAiGenerate}
+        onClose={() => setIsAiPaletteOpen(false)}
+      />
     </>
   );
 };
