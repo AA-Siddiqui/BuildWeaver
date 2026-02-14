@@ -44,3 +44,33 @@ export interface LlmAdapter {
     request: StructuredCompletionRequest<T>
   ): Promise<StructuredCompletionResult<T>>;
 }
+
+/** Supported adapter types. */
+export type AdapterType = 'OPENAI' | 'GOOGLE' | 'ANTHROPIC';
+
+/** Configuration for a single named provider in the provider list. */
+export interface ProviderConfig {
+  /** Unique provider name as declared in PROVIDER_LIST (e.g. "OPENAI", "GROQ"). */
+  name: string;
+  /** Base URL of the API. */
+  baseUrl: string;
+  /** API key / bearer token. */
+  apiKey: string;
+  /** Model identifier. */
+  model: string;
+  /** Which adapter implementation to use. */
+  adapterType: AdapterType;
+}
+
+/** Configuration for the multi-provider manager. */
+export interface ProviderManagerConfig {
+  /** Ordered list of provider configs. First provider is tried first. */
+  providers: ProviderConfig[];
+  /** Cooldown period in seconds. A failed provider is skipped for this duration. */
+  cooldownPeriodSeconds: number;
+  /** Optional logger function. */
+  logger?: LogFn;
+}
+
+/** Logger callback compatible with NestJS Logger and plain functions. */
+export type LogFn = (message: string, meta?: Record<string, unknown>) => void;

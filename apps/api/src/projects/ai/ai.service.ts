@@ -1,12 +1,12 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
-  createLlmAdapter,
+  LlmProviderManager,
   AiLogicGenerationResultSchema,
   LOGIC_GENERATION_SYSTEM_PROMPT,
   transformAiLogicOutput
 } from '@buildweaver/llm';
-import type { LlmAdapter, TransformedLogic } from '@buildweaver/llm';
+import type { LlmAdapter, ProviderConfig, AdapterType, TransformedLogic } from '@buildweaver/llm';
 
 @Injectable()
 export class ProjectAiService {
@@ -18,28 +18,79 @@ export class ProjectAiService {
   private getAdapter(): LlmAdapter {
     if (this.adapter) return this.adapter;
 
-    const baseUrl = this.config.get<string>('LLM_BASE_URL');
-    const apiKey = this.config.get<string>('LLM_API_KEY');
-    const model = this.config.get<string>('LLM_MODEL');
-
-    if (!baseUrl || !apiKey || !model) {
-      this.logger.error('LLM configuration incomplete', {
-        hasBaseUrl: !!baseUrl,
-        hasApiKey: !!apiKey,
-        hasModel: !!model
-      });
+    const providerListRaw = this.config.get<string>('PROVIDER_LIST');
+    if (!providerListRaw) {
+      this.logger.error('PROVIDER_LIST is not set in environment');
       throw new Error(
-        'LLM is not configured. Set LLM_BASE_URL, LLM_API_KEY, and LLM_MODEL in environment.'
+        'LLM is not configured. Set PROVIDER_LIST and provider-specific env vars.'
       );
     }
 
-    this.logger.log('Initializing LLM adapter', {
-      baseUrl,
-      model,
-      provider: new URL(baseUrl).hostname
+    const cooldownPeriod = Number(this.config.get<string>('LLM_COOLDOWN_PERIOD') ?? '300');
+    if (Number.isNaN(cooldownPeriod) || cooldownPeriod < 0) {
+      this.logger.error('LLM_COOLDOWN_PERIOD is invalid', { raw: cooldownPeriod });
+      throw new Error('LLM_COOLDOWN_PERIOD must be a non-negative number (in seconds).');
+    }
+
+    const providerNames = providerListRaw
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (providerNames.length === 0) {
+      this.logger.error('PROVIDER_LIST is empty after parsing');
+      throw new Error('PROVIDER_LIST must contain at least one provider name.');
+    }
+
+    this.logger.log('Parsing provider configuration', {
+      providerNames,
+      cooldownPeriodSeconds: cooldownPeriod
     });
 
-    this.adapter = createLlmAdapter({ baseUrl, apiKey, model });
+    const providers: ProviderConfig[] = [];
+
+    for (const name of providerNames) {
+      const baseUrl = this.config.get<string>(`${name}_BASE_URL`);
+      const apiKey = this.config.get<string>(`${name}_API_KEY`);
+      const model = this.config.get<string>(`${name}_MODEL`);
+      const adapterRaw = this.config.get<string>(`${name}_ADAPTER`);
+
+      if (!baseUrl || !apiKey || !model || !adapterRaw) {
+        this.logger.error(`Incomplete config for provider ${name}`, {
+          provider: name,
+          hasBaseUrl: !!baseUrl,
+          hasApiKey: !!apiKey,
+          hasModel: !!model,
+          hasAdapter: !!adapterRaw
+        });
+        throw new Error(
+          `Provider ${name} is missing required env vars. ` +
+            `Set ${name}_BASE_URL, ${name}_API_KEY, ${name}_MODEL, and ${name}_ADAPTER.`
+        );
+      }
+
+      const adapterType = adapterRaw.toUpperCase() as AdapterType;
+
+      this.logger.log(`Registered provider: ${name}`, {
+        provider: name,
+        baseUrl,
+        model,
+        adapterType
+      });
+
+      providers.push({ name, baseUrl, apiKey, model, adapterType });
+    }
+
+    this.adapter = new LlmProviderManager({
+      providers,
+      cooldownPeriodSeconds: cooldownPeriod,
+      logger: (message, meta) => this.logger.log(message, meta)
+    });
+
+    this.logger.log('LlmProviderManager initialised successfully', {
+      providerCount: providers.length,
+      providerOrder: providers.map((p) => p.name)
+    });
+
     return this.adapter;
   }
 

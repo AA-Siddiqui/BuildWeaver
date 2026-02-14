@@ -2,15 +2,20 @@ export type { PromptRequest } from './compat';
 export { mockPrompt } from './compat';
 
 export type {
+  AdapterType,
   LlmAdapter,
   LlmAdapterConfig,
   LlmMessage,
   LlmUsage,
+  LogFn,
+  ProviderConfig,
+  ProviderManagerConfig,
   StructuredCompletionRequest,
   StructuredCompletionResult
 } from './types';
 
 export { OpenAIAdapter } from './openai-adapter';
+export { LlmProviderManager } from './provider-manager';
 
 export {
   AiNodeSchema,

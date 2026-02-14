@@ -6,8 +6,8 @@ import { ProjectAiService } from '../src/projects/ai/ai.service';
 const mockStructuredCompletion = jest.fn();
 
 jest.mock('@buildweaver/llm', () => ({
-  createLlmAdapter: jest.fn(() => ({
-    providerName: 'openai-compat(api.openai.com)',
+  LlmProviderManager: jest.fn().mockImplementation(() => ({
+    providerName: 'multi-provider(OPENAI)',
     structuredCompletion: mockStructuredCompletion
   })),
   AiLogicGenerationResultSchema: {},
@@ -27,6 +27,19 @@ jest.mock('@buildweaver/llm', () => ({
   })
 }));
 
+function createConfigGet(overrides: Record<string, string | undefined> = {}) {
+  const env: Record<string, string | undefined> = {
+    PROVIDER_LIST: 'OPENAI',
+    LLM_COOLDOWN_PERIOD: '300',
+    OPENAI_BASE_URL: 'https://api.openai.com/v1',
+    OPENAI_API_KEY: 'test-key',
+    OPENAI_MODEL: 'gpt-4o',
+    OPENAI_ADAPTER: 'OPENAI',
+    ...overrides
+  };
+  return jest.fn((key: string) => env[key]);
+}
+
 describe('ProjectAiService', () => {
   let service: ProjectAiService;
   let configService: ConfigService;
@@ -39,16 +52,7 @@ describe('ProjectAiService', () => {
         ProjectAiService,
         {
           provide: ConfigService,
-          useValue: {
-            get: jest.fn((key: string) => {
-              const env: Record<string, string> = {
-                LLM_BASE_URL: 'https://api.openai.com/v1',
-                LLM_API_KEY: 'test-key',
-                LLM_MODEL: 'gpt-4o'
-              };
-              return env[key];
-            })
-          }
+          useValue: { get: createConfigGet() }
         }
       ]
     }).compile();
@@ -91,19 +95,13 @@ describe('ProjectAiService', () => {
     );
   });
 
-  it('should throw when LLM configuration is missing', async () => {
-    // Override config to return undefined
-    jest.spyOn(configService, 'get').mockReturnValue(undefined);
-
-    // Reset the cached adapter by creating a new service
+  it('should throw when PROVIDER_LIST is missing', async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         ProjectAiService,
         {
           provide: ConfigService,
-          useValue: {
-            get: jest.fn().mockReturnValue(undefined)
-          }
+          useValue: { get: jest.fn().mockReturnValue(undefined) }
         }
       ]
     }).compile();
@@ -112,6 +110,26 @@ describe('ProjectAiService', () => {
 
     await expect(unconfiguredService.generateLogic('test')).rejects.toThrow(
       'LLM is not configured'
+    );
+  });
+
+  it('should throw when a provider config is incomplete', async () => {
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        ProjectAiService,
+        {
+          provide: ConfigService,
+          useValue: {
+            get: createConfigGet({ OPENAI_API_KEY: undefined })
+          }
+        }
+      ]
+    }).compile();
+
+    const svc = module.get(ProjectAiService);
+
+    await expect(svc.generateLogic('test')).rejects.toThrow(
+      'Provider OPENAI is missing required env vars'
     );
   });
 
@@ -131,6 +149,48 @@ describe('ProjectAiService', () => {
         messages: expect.arrayContaining([
           expect.objectContaining({ role: 'user', content: 'some prompt' })
         ])
+      })
+    );
+  });
+
+  it('should parse multiple providers from PROVIDER_LIST', async () => {
+    const { LlmProviderManager } = jest.requireMock('@buildweaver/llm') as {
+      LlmProviderManager: jest.Mock;
+    };
+
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        ProjectAiService,
+        {
+          provide: ConfigService,
+          useValue: {
+            get: createConfigGet({
+              PROVIDER_LIST: 'OPENAI,GROQ',
+              GROQ_BASE_URL: 'https://api.groq.com/openai/v1',
+              GROQ_API_KEY: 'groq-key',
+              GROQ_MODEL: 'llama-3',
+              GROQ_ADAPTER: 'OPENAI'
+            })
+          }
+        }
+      ]
+    }).compile();
+
+    const svc = module.get(ProjectAiService);
+
+    mockStructuredCompletion.mockResolvedValueOnce({
+      data: { nodes: [], edges: [], summary: 'ok' }
+    });
+
+    await svc.generateLogic('test');
+
+    expect(LlmProviderManager).toHaveBeenCalledWith(
+      expect.objectContaining({
+        providers: expect.arrayContaining([
+          expect.objectContaining({ name: 'OPENAI' }),
+          expect.objectContaining({ name: 'GROQ' })
+        ]),
+        cooldownPeriodSeconds: 300
       })
     );
   });
