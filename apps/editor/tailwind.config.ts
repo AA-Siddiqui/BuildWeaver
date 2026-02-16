@@ -17,6 +17,15 @@ const config: Config = {
       },
       boxShadow: {
         'glow-sm': '0 10px 30px rgba(211, 78, 78, 0.25)'
+      },
+      keyframes: {
+        shimmer: {
+          '0%': { transform: 'translateX(-100%)' },
+          '100%': { transform: 'translateX(400%)' }
+        }
+      },
+      animation: {
+        shimmer: 'shimmer 1.5s ease-in-out infinite'
       }
     }
   },

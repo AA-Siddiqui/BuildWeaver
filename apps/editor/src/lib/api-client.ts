@@ -202,9 +202,23 @@ export interface AiGenerateLogicResult {
   summary: string;
 }
 
+export interface AiGenerateUiResult {
+  data: {
+    root: { id: string; props: Record<string, unknown>; children: unknown[] };
+    content: Array<{ type: string; props: Record<string, unknown> }>;
+    zones?: Record<string, Array<{ type: string; props: Record<string, unknown> }>>;
+  };
+  summary: string;
+}
+
 export const projectAiApi = {
   generateLogic: (projectId: string, prompt: string) =>
     apiFetch<AiGenerateLogicResult>(`/projects/${projectId}/ai/generate-logic`, {
+      method: 'POST',
+      body: serialize({ prompt })
+    }),
+  generateUi: (projectId: string, prompt: string) =>
+    apiFetch<AiGenerateUiResult>(`/projects/${projectId}/ai/generate-ui`, {
       method: 'POST',
       body: serialize({ prompt })
     })

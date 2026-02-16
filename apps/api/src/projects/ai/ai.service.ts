@@ -3,10 +3,13 @@ import { ConfigService } from '@nestjs/config';
 import {
   LlmProviderManager,
   AiLogicGenerationResultSchema,
+  AiUiGenerationResultSchema,
   LOGIC_GENERATION_SYSTEM_PROMPT,
-  transformAiLogicOutput
+  UI_GENERATION_SYSTEM_PROMPT,
+  transformAiLogicOutput,
+  transformAiUiOutput
 } from '@buildweaver/llm';
-import type { LlmAdapter, ProviderConfig, AdapterType, TransformedLogic } from '@buildweaver/llm';
+import type { LlmAdapter, ProviderConfig, AdapterType, TransformedLogic, TransformedUi } from '@buildweaver/llm';
 
 @Injectable()
 export class ProjectAiService {
@@ -127,6 +130,44 @@ export class ProjectAiService {
     this.logger.log('Logic transformation complete', {
       outputNodes: transformed.nodes.length,
       outputEdges: transformed.edges.length,
+      summary: transformed.summary
+    });
+
+    return transformed;
+  }
+
+  async generateUi(prompt: string): Promise<TransformedUi> {
+    const adapter = this.getAdapter();
+    const sanitizedPrompt = prompt.trim();
+
+    this.logger.log('Generating UI from prompt', {
+      promptLength: sanitizedPrompt.length,
+      promptPreview: sanitizedPrompt.slice(0, 100)
+    });
+
+    const result = await adapter.structuredCompletion({
+      messages: [
+        { role: 'system', content: UI_GENERATION_SYSTEM_PROMPT },
+        { role: 'user', content: sanitizedPrompt }
+      ],
+      schema: AiUiGenerationResultSchema,
+      schemaName: 'ui_generation'
+    });
+
+    this.logger.log('LLM UI response received', {
+      sectionCount: result.data.sections.length,
+      summary: result.data.summary,
+      usage: result.usage
+    });
+
+    const transformed = transformAiUiOutput(
+      result.data,
+      (message, meta) => this.logger.debug(message, meta)
+    );
+
+    this.logger.log('UI transformation complete', {
+      contentItems: transformed.data.content.length,
+      zoneCount: Object.keys(transformed.data.zones ?? {}).length,
       summary: transformed.summary
     });
 

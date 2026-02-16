@@ -24,10 +24,17 @@ export {
 } from './schemas/logic-generation';
 export type { AiNode, AiEdge, AiLogicGenerationResult } from './schemas/logic-generation';
 
+export { AiUiGenerationResultSchema } from './schemas/ui-generation';
+export type { AiUiGenerationResult } from './schemas/ui-generation';
+
 export { LOGIC_GENERATION_SYSTEM_PROMPT } from './prompts/logic-system-prompt';
+export { UI_GENERATION_SYSTEM_PROMPT } from './prompts/ui-system-prompt';
 
 export { transformAiLogicOutput } from './logic-transformer';
 export type { TransformedLogic } from './logic-transformer';
+
+export { transformAiUiOutput, resetUiTransformerIdCounter } from './ui-transformer';
+export type { TransformedUi } from './ui-transformer';
 
 import type { LlmAdapterConfig } from './types';
 import { OpenAIAdapter } from './openai-adapter';

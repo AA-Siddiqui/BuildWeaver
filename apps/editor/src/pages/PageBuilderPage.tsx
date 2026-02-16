@@ -7,7 +7,7 @@ import type { ComponentData, Content, Data } from '@measured/puck';
 import '@measured/puck/puck.css';
 import type { PageBuilderState, PageDocument, PageDynamicInput } from '../types/api';
 import type { ScalarValue } from '@buildweaver/libs';
-import { projectComponentsApi, projectGraphApi, projectPagesApi } from '../lib/api-client';
+import { projectComponentsApi, projectGraphApi, projectPagesApi, projectAiApi } from '../lib/api-client';
 import { projectGraphQueryKey, invalidateProjectGraphCache } from '../lib/query-helpers';
 import { SnapshotHistory } from '../lib/snapshotHistory';
 import { processEditorShortcut } from '../lib/editorShortcuts';
@@ -26,6 +26,7 @@ import {
 import { ComponentLibraryProvider, type SaveComponentRequest } from './page-builder/component-library-context';
 import { COMPONENT_ACTIONS_FIELD_KEY } from './page-builder/component-library';
 import { formatScalar } from '../components/logic/preview';
+import { AiCommandPalette } from '../components/ai-command-palette';
 
 const randomId = () => {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -236,6 +237,7 @@ export const PageBuilderPage = () => {
   const sheetToggleButtonRef = useRef<HTMLButtonElement | null>(null);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [feedback, setFeedback] = useState('');
+  const [isAiPaletteOpen, setIsAiPaletteOpen] = useState(false);
   const draftStatusRef = useRef<{ restored: boolean; savedAt?: number }>({ restored: false });
   const draftPersistHandle = useRef<number | null>(null);
   const pendingSaveRef = useRef<Promise<unknown> | null>(null);
@@ -512,6 +514,75 @@ export const PageBuilderPage = () => {
     },
     [saveComponentMutation]
   );
+
+  const aiUiMutation = useMutation({
+    mutationFn: (prompt: string) => {
+      if (!projectId) {
+        throw new Error('Missing project id');
+      }
+      logPageBuilderEvent('AI UI generation requested', {
+        projectId,
+        pageId,
+        promptLength: prompt.length
+      });
+      return projectAiApi.generateUi(projectId, prompt);
+    },
+    onSuccess: (result) => {
+      logPageBuilderEvent('AI UI generation succeeded', {
+        projectId,
+        pageId,
+        contentItems: result.data.content.length,
+        zoneCount: Object.keys(result.data.zones ?? {}).length,
+        summary: result.summary
+      });
+
+      const aiGeneratedState = result.data as Data;
+      builderHistoryRef.current.observe(getCurrentBuilderSnapshot(), {
+        pageId,
+        projectId,
+        reason: 'pre-ai-ui-generation'
+      });
+
+      setBuilderState(aiGeneratedState);
+      setHasUnsavedChanges(true);
+      setPuckSessionKey(derivePuckSessionKey(undefined, pageId) + ':ai-' + Date.now());
+      scheduleDraftPersist(aiGeneratedState, dynamicInputs);
+
+      setFeedback(`AI generated: ${result.summary}`);
+      setTimeout(() => setFeedback(''), 4000);
+      setIsAiPaletteOpen(false);
+    },
+    onError: (error: unknown) => {
+      const message = error instanceof Error ? error.message : 'AI UI generation failed';
+      logPageBuilderEvent('AI UI generation failed', {
+        projectId,
+        pageId,
+        error: message
+      });
+      setFeedback(message);
+      setTimeout(() => setFeedback(''), 4000);
+    }
+  });
+
+  const handleAiUiSubmit = useCallback(
+    (prompt: string) => {
+      logPageBuilderEvent('AI UI prompt submitted', {
+        pageId,
+        projectId,
+        promptLength: prompt.length
+      });
+      aiUiMutation.mutate(prompt);
+    },
+    [aiUiMutation, pageId, projectId]
+  );
+
+  const handleAiPaletteToggle = useCallback(() => {
+    setIsAiPaletteOpen((prev) => {
+      const next = !prev;
+      logPageBuilderEvent(next ? 'AI palette opened' : 'AI palette closed', { pageId, projectId });
+      return next;
+    });
+  }, [pageId, projectId]);
 
   const builderConfig = useMemo(
     () =>
@@ -951,6 +1022,7 @@ export const PageBuilderPage = () => {
         onSave: handleSave,
         onUndo: handleUndo,
         onRedo: handleRedo,
+        onAiPalette: handleAiPaletteToggle,
         allowInputTargets: true,
         logger: (message, meta) =>
           logPageBuilderEvent(message, {
@@ -962,7 +1034,7 @@ export const PageBuilderPage = () => {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [handleRedo, handleSave, handleUndo, pageId, projectId]);
+  }, [handleAiPaletteToggle, handleRedo, handleSave, handleUndo, pageId, projectId]);
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -1129,6 +1201,15 @@ export const PageBuilderPage = () => {
           <div className="flex items-center gap-3 text-sm">
             <button
               type="button"
+              className="rounded-lg border border-bw-amber/40 px-3 py-1 text-gray-700 transition hover:border-bw-amber hover:text-bw-ink disabled:opacity-60"
+              onClick={handleAiPaletteToggle}
+              disabled={aiUiMutation.isPending}
+              title="AI generate UI (Ctrl+K)"
+            >
+              {aiUiMutation.isPending ? 'Generating…' : 'AI'}
+            </button>
+            <button
+              type="button"
               className="rounded-lg border border-gray-300 px-3 py-1 text-gray-700 disabled:opacity-60"
               onClick={handleNavigateBack}
               disabled={saveMutation.isPending}
@@ -1171,6 +1252,12 @@ export const PageBuilderPage = () => {
         </div>
       </div>
       </div>
+      <AiCommandPalette
+        open={isAiPaletteOpen}
+        loading={aiUiMutation.isPending}
+        onClose={() => setIsAiPaletteOpen(false)}
+        onSubmit={handleAiUiSubmit}
+      />
     </>
   );
 };
