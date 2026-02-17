@@ -24,8 +24,8 @@ export {
 } from './schemas/logic-generation';
 export type { AiNode, AiEdge, AiLogicGenerationResult } from './schemas/logic-generation';
 
-export { AiUiGenerationResultSchema } from './schemas/ui-generation';
-export type { AiUiGenerationResult } from './schemas/ui-generation';
+export { AiUiGenerationResultSchema, AI_DEFAULT_STYLE } from './schemas/ui-generation';
+export type { AiUiGenerationResult, AiComponentStyle } from './schemas/ui-generation';
 
 export { LOGIC_GENERATION_SYSTEM_PROMPT } from './prompts/logic-system-prompt';
 export { UI_GENERATION_SYSTEM_PROMPT } from './prompts/ui-system-prompt';

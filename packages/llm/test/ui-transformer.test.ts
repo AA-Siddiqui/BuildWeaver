@@ -1,38 +1,24 @@
 import { transformAiUiOutput, resetUiTransformerIdCounter } from '../src/ui-transformer';
-import type { AiUiGenerationResult } from '../src/schemas/ui-generation';
+import { AI_DEFAULT_STYLE } from '../src/schemas/ui-generation';
+import type { AiUiGenerationResult, AiComponentStyle } from '../src/schemas/ui-generation';
+
+const S = AI_DEFAULT_STYLE;
+const style = (overrides: Partial<AiComponentStyle> = {}): AiComponentStyle => ({ ...S, ...overrides });
 
 describe('transformAiUiOutput', () => {
-  beforeEach(() => {
-    resetUiTransformerIdCounter();
-  });
+  beforeEach(() => { resetUiTransformerIdCounter(); });
 
   it('should transform a single section with a heading', () => {
-    const input: AiUiGenerationResult = {
-      sections: [
-        {
-          type: 'Section',
-          backgroundColor: '#FFFFFF',
-          children: [
-            { type: 'Heading', content: 'Hello World', size: 'h1' }
-          ]
-        }
-      ],
-      summary: 'Simple page'
-    };
-
+    const input: AiUiGenerationResult = { sections: [{ type: 'Section', backgroundColor: '#FFFFFF', style: S, children: [{ type: 'Heading', content: 'Hello World', size: 'h1', style: S }] }], summary: 'Simple page' };
     const result = transformAiUiOutput(input);
-
     expect(result.summary).toBe('Simple page');
     expect(result.data.root).toEqual({ id: 'root', props: {}, children: [] });
     expect(result.data.content).toHaveLength(1);
     expect(result.data.content[0].type).toBe('Section');
     expect(result.data.content[0].props.backgroundColor).toBe('#FFFFFF');
-
-    // Section children go to zones
     const sectionId = result.data.content[0].props.id as string;
     expect(sectionId).toMatch(/^section-ai-/);
-
-    const zoneKey = `${sectionId}:contentSlot`;
+    const zoneKey = sectionId + ':contentSlot';
     expect(result.data.zones).toBeDefined();
     expect(result.data.zones![zoneKey]).toHaveLength(1);
     expect(result.data.zones![zoneKey][0].type).toBe('Heading');
@@ -41,415 +27,270 @@ describe('transformAiUiOutput', () => {
   });
 
   it('should transform multiple sections', () => {
-    const input: AiUiGenerationResult = {
-      sections: [
-        {
-          type: 'Section',
-          backgroundColor: '#FFFFFF',
-          children: [{ type: 'Heading', content: 'Hero', size: 'h1' }]
-        },
-        {
-          type: 'Section',
-          backgroundColor: '#F0F0F0',
-          children: [{ type: 'Paragraph', content: 'About' }]
-        }
-      ],
-      summary: 'Two sections'
-    };
-
+    const input: AiUiGenerationResult = { sections: [
+      { type: 'Section', backgroundColor: '#FFFFFF', style: S, children: [{ type: 'Heading', content: 'Hero', size: 'h1', style: S }] },
+      { type: 'Section', backgroundColor: '#F0F0F0', style: S, children: [{ type: 'Paragraph', content: 'About', style: S }] }
+    ], summary: 'Two sections' };
     const result = transformAiUiOutput(input);
-
     expect(result.data.content).toHaveLength(2);
     expect(result.data.content[0].type).toBe('Section');
     expect(result.data.content[1].type).toBe('Section');
   });
 
   it('should transform all leaf component types', () => {
-    const input: AiUiGenerationResult = {
-      sections: [
-        {
-          type: 'Section',
-          backgroundColor: '#FFFFFF',
-          children: [
-            { type: 'Heading', content: 'Title', size: 'h2' },
-            { type: 'Paragraph', content: 'Body' },
-            { type: 'Button', label: 'Click', variant: 'primary', href: 'https://example.com' },
-            { type: 'Image', src: 'https://placehold.co/800x400', alt: 'Img', objectFit: 'cover', aspectRatio: '16/9' },
-            { type: 'Card', heading: 'Card', content: 'Content', eyebrow: 'New', imageUrl: '', actionLabel: '', actionHref: '' },
-            { type: 'List', items: [{ text: 'A', description: '' }, { text: 'B', description: 'Desc' }], variant: 'ordered' },
-            { type: 'Divider' },
-            { type: 'Spacer', height: '48px' }
-          ]
-        }
-      ],
-      summary: 'All types'
-    };
-
+    const input: AiUiGenerationResult = { sections: [{ type: 'Section', backgroundColor: '#FFFFFF', style: S, children: [
+      { type: 'Heading', content: 'Title', size: 'h2', style: S }, { type: 'Paragraph', content: 'Body', style: S },
+      { type: 'Button', label: 'Click', variant: 'primary', href: 'https://example.com', style: S },
+      { type: 'Image', src: 'https://placehold.co/800x400', alt: 'Img', objectFit: 'cover', aspectRatio: '16/9', style: S },
+      { type: 'Card', heading: 'Card', content: 'Content', eyebrow: 'New', imageUrl: '', actionLabel: '', actionHref: '', style: S },
+      { type: 'List', items: [{ text: 'A', description: '' }, { text: 'B', description: 'Desc' }], variant: 'ordered', style: S },
+      { type: 'Divider', style: S }, { type: 'Spacer', height: '48px', style: S }
+    ] }], summary: 'All types' };
     const result = transformAiUiOutput(input);
-    const sectionId = result.data.content[0].props.id as string;
-    const children = result.data.zones![`${sectionId}:contentSlot`];
-
-    expect(children).toHaveLength(8);
-    expect(children[0].type).toBe('Heading');
-    expect(children[1].type).toBe('Paragraph');
-    expect(children[2].type).toBe('Button');
-    expect(children[2].props.href).toBe('https://example.com');
-    expect(children[3].type).toBe('Image');
-    expect(children[3].props.objectFit).toBe('cover');
-    expect(children[3].props.aspectRatio).toBe('16/9');
-    expect(children[4].type).toBe('Card');
-    expect(children[4].props.eyebrow).toBe('New');
-    expect(children[5].type).toBe('List');
-    expect(children[5].props.items).toHaveLength(2);
-    expect(children[5].props.variant).toBe('ordered');
-    expect(children[6].type).toBe('Divider');
-    expect(children[7].type).toBe('Spacer');
-    expect(children[7].props.height).toBe('48px');
+    const sid = result.data.content[0].props.id as string;
+    const ch = result.data.zones![sid + ':contentSlot'];
+    expect(ch).toHaveLength(8);
+    expect(ch[0].type).toBe('Heading'); expect(ch[1].type).toBe('Paragraph');
+    expect(ch[2].type).toBe('Button'); expect(ch[2].props.href).toBe('https://example.com');
+    expect(ch[3].type).toBe('Image'); expect(ch[3].props.objectFit).toBe('cover'); expect(ch[3].props.aspectRatio).toBe('16/9');
+    expect(ch[4].type).toBe('Card'); expect(ch[4].props.eyebrow).toBe('New');
+    expect(ch[5].type).toBe('List'); expect(ch[5].props.items).toHaveLength(2); expect(ch[5].props.variant).toBe('ordered');
+    expect(ch[6].type).toBe('Divider'); expect(ch[7].type).toBe('Spacer'); expect(ch[7].props.height).toBe('48px');
   });
 
   it('should transform columns into zones', () => {
-    const input: AiUiGenerationResult = {
-      sections: [
-        {
-          type: 'Section',
-          backgroundColor: '#FFFFFF',
-          children: [
-            {
-              type: 'Columns',
-              layout: 'wideLeft',
-              left: [{ type: 'Heading', content: 'Left', size: 'h2' }],
-              right: [{ type: 'Paragraph', content: 'Right' }]
-            }
-          ]
-        }
-      ],
-      summary: 'Columns test'
-    };
-
+    const input: AiUiGenerationResult = { sections: [{ type: 'Section', backgroundColor: '#FFFFFF', style: S, children: [
+      { type: 'Columns', layout: 'wideLeft', style: S, left: [{ type: 'Heading', content: 'Left', size: 'h2', style: S }], right: [{ type: 'Paragraph', content: 'Right', style: S }] }
+    ] }], summary: 'Columns test' };
     const result = transformAiUiOutput(input);
-
-    const sectionId = result.data.content[0].props.id as string;
-    const sectionChildren = result.data.zones![`${sectionId}:contentSlot`];
-    expect(sectionChildren).toHaveLength(1);
-    expect(sectionChildren[0].type).toBe('Columns');
-
-    const columnsId = sectionChildren[0].props.id as string;
-    expect(columnsId).toMatch(/^columns-ai-/);
-    expect(sectionChildren[0].props.layout).toBe('wideLeft');
-
-    const leftChildren = result.data.zones![`${columnsId}:left`];
-    const rightChildren = result.data.zones![`${columnsId}:right`];
-
-    expect(leftChildren).toHaveLength(1);
-    expect(leftChildren[0].type).toBe('Heading');
-    expect(rightChildren).toHaveLength(1);
-    expect(rightChildren[0].type).toBe('Paragraph');
+    const sid = result.data.content[0].props.id as string;
+    const sc = result.data.zones![sid + ':contentSlot'];
+    expect(sc).toHaveLength(1); expect(sc[0].type).toBe('Columns');
+    const cid = sc[0].props.id as string;
+    expect(cid).toMatch(/^columns-ai-/); expect(sc[0].props.layout).toBe('wideLeft');
+    expect(result.data.zones![cid + ':left']).toHaveLength(1);
+    expect(result.data.zones![cid + ':left'][0].type).toBe('Heading');
+    expect(result.data.zones![cid + ':right']).toHaveLength(1);
+    expect(result.data.zones![cid + ':right'][0].type).toBe('Paragraph');
   });
 
   it('should generate unique IDs for all components', () => {
-    const input: AiUiGenerationResult = {
-      sections: [
-        {
-          type: 'Section',
-          backgroundColor: '#FFFFFF',
-          children: [
-            { type: 'Heading', content: 'A', size: 'h1' },
-            { type: 'Heading', content: 'B', size: 'h2' }
-          ]
-        }
-      ],
-      summary: 'IDs test'
-    };
-
+    const input: AiUiGenerationResult = { sections: [{ type: 'Section', backgroundColor: '#FFFFFF', style: S, children: [
+      { type: 'Heading', content: 'A', size: 'h1', style: S }, { type: 'Heading', content: 'B', size: 'h2', style: S }
+    ] }], summary: 'IDs test' };
     const result = transformAiUiOutput(input);
-    const sectionId = result.data.content[0].props.id as string;
-    const children = result.data.zones![`${sectionId}:contentSlot`];
-
-    const ids = new Set([
-      sectionId,
-      children[0].props.id as string,
-      children[1].props.id as string
-    ]);
-
+    const sid = result.data.content[0].props.id as string;
+    const ch = result.data.zones![sid + ':contentSlot'];
+    const ids = new Set([sid, ch[0].props.id as string, ch[1].props.id as string]);
     expect(ids.size).toBe(3);
   });
 
-  it('should set default section props', () => {
-    const input: AiUiGenerationResult = {
-      sections: [
-        {
-          type: 'Section',
-          backgroundColor: '#FFFFFF',
-          children: [{ type: 'Heading', content: 'Test', size: 'h1' }]
-        }
-      ],
-      summary: 'Defaults'
-    };
-
+  it('should set default section props when style is all defaults', () => {
+    const input: AiUiGenerationResult = { sections: [{ type: 'Section', backgroundColor: '#FFFFFF', style: S, children: [{ type: 'Heading', content: 'Test', size: 'h1', style: S }] }], summary: 'Defaults' };
     const result = transformAiUiOutput(input);
-    const sectionProps = result.data.content[0].props;
-
-    expect(sectionProps.minHeight).toBe('0');
-    expect(sectionProps.padding).toBe('0px');
-    expect(sectionProps.margin).toBe('0px');
-    expect(sectionProps.backgroundColor).toBe('#FFFFFF');
+    const p = result.data.content[0].props;
+    expect(p.minHeight).toBe('0'); expect(p.padding).toBe('0px'); expect(p.margin).toBe('0px'); expect(p.backgroundColor).toBe('#FFFFFF');
   });
 
   it('should use provided backgroundColor for section', () => {
-    const input: AiUiGenerationResult = {
-      sections: [
-        {
-          type: 'Section',
-          backgroundColor: '#1a1a2e',
-          children: [{ type: 'Heading', content: 'Dark', size: 'h1' }]
-        }
-      ],
-      summary: 'Dark section'
-    };
-
-    const result = transformAiUiOutput(input);
-    expect(result.data.content[0].props.backgroundColor).toBe('#1a1a2e');
+    const input: AiUiGenerationResult = { sections: [{ type: 'Section', backgroundColor: '#1a1a2e', style: S, children: [{ type: 'Heading', content: 'Dark', size: 'h1', style: S }] }], summary: 'Dark section' };
+    expect(transformAiUiOutput(input).data.content[0].props.backgroundColor).toBe('#1a1a2e');
   });
 
   it('should strip empty-string sentinel values from Button href', () => {
-    const input: AiUiGenerationResult = {
-      sections: [
-        {
-          type: 'Section',
-          backgroundColor: '#FFFFFF',
-          children: [
-            { type: 'Button', label: 'Click', variant: 'ghost', href: '' }
-          ]
-        }
-      ],
-      summary: 'Empty href'
-    };
-
+    const input: AiUiGenerationResult = { sections: [{ type: 'Section', backgroundColor: '#FFFFFF', style: S, children: [{ type: 'Button', label: 'Click', variant: 'ghost', href: '', style: S }] }], summary: 'Empty href' };
     const result = transformAiUiOutput(input);
-    const sectionId = result.data.content[0].props.id as string;
-    const children = result.data.zones![`${sectionId}:contentSlot`];
-
-    expect(children[0].props.href).toBeUndefined();
+    const sid = result.data.content[0].props.id as string;
+    expect(result.data.zones![sid + ':contentSlot'][0].props.href).toBeUndefined();
   });
 
   it('should strip empty-string sentinel values from Card fields', () => {
-    const input: AiUiGenerationResult = {
-      sections: [
-        {
-          type: 'Section',
-          backgroundColor: '#FFFFFF',
-          children: [
-            {
-              type: 'Card',
-              heading: 'Card',
-              content: 'Text',
-              eyebrow: '',
-              imageUrl: '',
-              actionLabel: '',
-              actionHref: ''
-            }
-          ]
-        }
-      ],
-      summary: 'Card sentinels'
-    };
-
+    const input: AiUiGenerationResult = { sections: [{ type: 'Section', backgroundColor: '#FFFFFF', style: S, children: [
+      { type: 'Card', heading: 'Card', content: 'Text', eyebrow: '', imageUrl: '', actionLabel: '', actionHref: '', style: S }
+    ] }], summary: 'Card sentinels' };
     const result = transformAiUiOutput(input);
-    const sectionId = result.data.content[0].props.id as string;
-    const children = result.data.zones![`${sectionId}:contentSlot`];
-
-    expect(children[0].props.eyebrow).toBeUndefined();
-    expect(children[0].props.imageUrl).toBeUndefined();
-    expect(children[0].props.actionLabel).toBeUndefined();
-    expect(children[0].props.actionHref).toBeUndefined();
+    const sid = result.data.content[0].props.id as string;
+    const card = result.data.zones![sid + ':contentSlot'][0];
+    expect(card.props.eyebrow).toBeUndefined(); expect(card.props.imageUrl).toBeUndefined();
+    expect(card.props.actionLabel).toBeUndefined(); expect(card.props.actionHref).toBeUndefined();
   });
 
-  it('should keep non-empty Card optional-like fields', () => {
-    const input: AiUiGenerationResult = {
-      sections: [
-        {
-          type: 'Section',
-          backgroundColor: '#FFFFFF',
-          children: [
-            {
-              type: 'Card',
-              heading: 'Full Card',
-              content: 'Text',
-              eyebrow: 'New',
-              imageUrl: 'https://img.com/pic.jpg',
-              actionLabel: 'Learn more',
-              actionHref: '/details'
-            }
-          ]
-        }
-      ],
-      summary: 'Full card'
-    };
-
+  it('should keep non-empty Card fields', () => {
+    const input: AiUiGenerationResult = { sections: [{ type: 'Section', backgroundColor: '#FFFFFF', style: S, children: [
+      { type: 'Card', heading: 'Full Card', content: 'Content', eyebrow: 'Featured', imageUrl: 'https://placehold.co/400', actionLabel: 'Learn more', actionHref: '/details', style: S }
+    ] }], summary: 'Full card' };
     const result = transformAiUiOutput(input);
-    const sectionId = result.data.content[0].props.id as string;
-    const children = result.data.zones![`${sectionId}:contentSlot`];
-
-    expect(children[0].props.eyebrow).toBe('New');
-    expect(children[0].props.imageUrl).toBe('https://img.com/pic.jpg');
-    expect(children[0].props.actionLabel).toBe('Learn more');
-    expect(children[0].props.actionHref).toBe('/details');
+    const sid = result.data.content[0].props.id as string;
+    const card = result.data.zones![sid + ':contentSlot'][0];
+    expect(card.props.heading).toBe('Full Card');
+    expect(card.props.content).toBe('Content');
+    expect(card.props.eyebrow).toBe('Featured');
+    expect(card.props.imageUrl).toBe('https://placehold.co/400');
+    expect(card.props.actionLabel).toBe('Learn more');
+    expect(card.props.actionHref).toBe('/details');
   });
 
   it('should strip empty-string description from List items', () => {
-    const input: AiUiGenerationResult = {
-      sections: [
-        {
-          type: 'Section',
-          backgroundColor: '#FFFFFF',
-          children: [
-            {
-              type: 'List',
-              items: [
-                { text: 'A', description: '' },
-                { text: 'B', description: 'Has desc' }
-              ],
-              variant: 'unordered'
-            }
-          ]
-        }
-      ],
-      summary: 'List sentinels'
-    };
-
+    const input: AiUiGenerationResult = { sections: [{ type: 'Section', backgroundColor: '#FFFFFF', style: S, children: [
+      { type: 'List', items: [{ text: 'A', description: '' }, { text: 'B', description: 'Has desc' }], variant: 'unordered', style: S }
+    ] }], summary: 'List descriptions' };
     const result = transformAiUiOutput(input);
-    const sectionId = result.data.content[0].props.id as string;
-    const children = result.data.zones![`${sectionId}:contentSlot`];
-    const items = children[0].props.items as Array<{ text: string; description?: string }>;
-
+    const sid = result.data.content[0].props.id as string;
+    const list = result.data.zones![sid + ':contentSlot'][0];
+    const items = list.props.items as Array<{ text: string; description?: string }>;
     expect(items[0].description).toBeUndefined();
     expect(items[1].description).toBe('Has desc');
   });
 
   it('should always include objectFit and aspectRatio on Image', () => {
-    const input: AiUiGenerationResult = {
-      sections: [
-        {
-          type: 'Section',
-          backgroundColor: '#FFFFFF',
-          children: [
-            { type: 'Image', src: 'https://placehold.co/400', alt: 'Img', objectFit: 'cover', aspectRatio: 'auto' }
-          ]
-        }
-      ],
-      summary: 'Image defaults'
-    };
-
+    const input: AiUiGenerationResult = { sections: [{ type: 'Section', backgroundColor: '#FFFFFF', style: S, children: [
+      { type: 'Image', src: 'https://placehold.co/800x400', alt: 'Test', objectFit: 'contain', aspectRatio: 'auto', style: S }
+    ] }], summary: 'Image fields' };
     const result = transformAiUiOutput(input);
-    const sectionId = result.data.content[0].props.id as string;
-    const children = result.data.zones![`${sectionId}:contentSlot`];
-
-    expect(children[0].props.objectFit).toBe('cover');
-    expect(children[0].props.aspectRatio).toBe('auto');
+    const sid = result.data.content[0].props.id as string;
+    const img = result.data.zones![sid + ':contentSlot'][0];
+    expect(img.props.objectFit).toBe('contain');
+    expect(img.props.aspectRatio).toBe('auto');
+    expect(img.props.src).toBe('https://placehold.co/800x400');
+    expect(img.props.alt).toBe('Test');
   });
 
   it('should call the logger during transformation', () => {
     const logger = jest.fn();
-    const input: AiUiGenerationResult = {
-      sections: [
-        {
-          type: 'Section',
-          backgroundColor: '#FFFFFF',
-          children: [{ type: 'Heading', content: 'Logged', size: 'h1' }]
-        }
-      ],
-      summary: 'Logger test'
-    };
-
+    const input: AiUiGenerationResult = { sections: [{ type: 'Section', backgroundColor: '#FFFFFF', style: S, children: [{ type: 'Heading', content: 'Test', size: 'h1', style: S }] }], summary: 'Logger test' };
     transformAiUiOutput(input, logger);
-
-    expect(logger).toHaveBeenCalledWith(
-      'Starting UI transformation',
-      expect.objectContaining({ sectionCount: 1 })
-    );
-    expect(logger).toHaveBeenCalledWith(
-      'UI transformation complete',
-      expect.objectContaining({ contentItems: 1 })
-    );
-    expect(logger).toHaveBeenCalledWith(
-      'Transforming Section',
-      expect.objectContaining({ childCount: 1 })
-    );
-    expect(logger).toHaveBeenCalledWith(
-      'Transforming Heading component',
-      expect.objectContaining({ size: 'h1' })
-    );
+    expect(logger).toHaveBeenCalled();
+    expect(logger).toHaveBeenCalledWith('Starting UI transformation', expect.objectContaining({ sectionCount: 1, summary: 'Logger test' }));
+    expect(logger).toHaveBeenCalledWith('UI transformation complete', expect.objectContaining({ contentItems: 1 }));
   });
-
   it('should log sentinel stripping info for Button', () => {
     const logger = jest.fn();
-    const input: AiUiGenerationResult = {
-      sections: [
-        {
-          type: 'Section',
-          backgroundColor: '#FFFFFF',
-          children: [{ type: 'Button', label: 'Click', variant: 'primary', href: '' }]
-        }
-      ],
-      summary: 'Logger sentinel test'
-    };
-
+    const input: AiUiGenerationResult = { sections: [{ type: 'Section', backgroundColor: '#FFFFFF', style: S, children: [{ type: 'Button', label: 'Click', variant: 'primary', href: '', style: S }] }], summary: 'Button log' };
     transformAiUiOutput(input, logger);
-
-    expect(logger).toHaveBeenCalledWith(
-      'Transforming Button component',
-      expect.objectContaining({ hasHref: false })
-    );
+    expect(logger).toHaveBeenCalledWith('Transforming Button component', expect.objectContaining({ hasHref: false }));
   });
 
   it('should log sentinel stripping info for Card', () => {
     const logger = jest.fn();
-    const input: AiUiGenerationResult = {
-      sections: [
-        {
-          type: 'Section',
-          backgroundColor: '#FFFFFF',
-          children: [
-            {
-              type: 'Card',
-              heading: 'C',
-              content: 'T',
-              eyebrow: 'E',
-              imageUrl: '',
-              actionLabel: '',
-              actionHref: ''
-            }
-          ]
-        }
-      ],
-      summary: 'Logger card test'
-    };
-
+    const input: AiUiGenerationResult = { sections: [{ type: 'Section', backgroundColor: '#FFFFFF', style: S, children: [
+      { type: 'Card', heading: 'Card', content: 'Text', eyebrow: '', imageUrl: '', actionLabel: '', actionHref: '', style: S }
+    ] }], summary: 'Card log' };
     transformAiUiOutput(input, logger);
-
-    expect(logger).toHaveBeenCalledWith(
-      'Transforming Card component',
-      expect.objectContaining({
-        hasEyebrow: true,
-        hasImageUrl: false,
-        hasActionLabel: false,
-        hasActionHref: false
-      })
-    );
+    expect(logger).toHaveBeenCalledWith('Transforming Card component', expect.objectContaining({ hasEyebrow: false, hasImageUrl: false, hasActionLabel: false, hasActionHref: false }));
   });
 
   it('should work without a logger', () => {
-    const input: AiUiGenerationResult = {
-      sections: [
-        {
-          type: 'Section',
-          backgroundColor: '#FFFFFF',
-          children: [{ type: 'Heading', content: 'No logger', size: 'h1' }]
-        }
-      ],
-      summary: 'No logger'
-    };
-
+    const input: AiUiGenerationResult = { sections: [{ type: 'Section', backgroundColor: '#FFFFFF', style: S, children: [{ type: 'Heading', content: 'No logger', size: 'h1', style: S }] }], summary: 'No logger' };
     expect(() => transformAiUiOutput(input)).not.toThrow();
+    const result = transformAiUiOutput(input);
+    expect(result.data.content).toHaveLength(1);
+  });
+
+  // Style-specific tests
+
+  it('should map style props to Heading component', () => {
+    const input: AiUiGenerationResult = { sections: [{ type: 'Section', backgroundColor: '#FFFFFF', style: S, children: [
+      { type: 'Heading', content: 'Styled', size: 'h1', style: style({ textColor: '#FF0000', fontSize: '3rem', fontWeight: '700' }) }
+    ] }], summary: 'Styled heading' };
+    const result = transformAiUiOutput(input);
+    const sid = result.data.content[0].props.id as string;
+    const heading = result.data.zones![sid + ':contentSlot'][0];
+    expect(heading.props.textColor).toBe('#FF0000');
+    expect(heading.props.fontSize).toBe('3rem');
+    expect(heading.props.fontWeight).toBe('700');
+  });
+
+  it('should map style props to Section component', () => {
+    const input: AiUiGenerationResult = { sections: [{ type: 'Section', backgroundColor: '#1a1a2e', style: style({ textColor: '#FFFFFF', padding: '48px 64px' }), children: [
+      { type: 'Heading', content: 'Dark hero', size: 'h1', style: S }
+    ] }], summary: 'Styled section' };
+    const result = transformAiUiOutput(input);
+    const p = result.data.content[0].props;
+    expect(p.textColor).toBe('#FFFFFF');
+    expect(p.padding).toBe('48px 64px');
+  });
+  it('should let section dedicated backgroundColor override style.backgroundColor', () => {
+    const input: AiUiGenerationResult = { sections: [{ type: 'Section', backgroundColor: '#1a1a2e', style: style({ backgroundColor: '#FF0000' }), children: [
+      { type: 'Heading', content: 'Override', size: 'h1', style: S }
+    ] }], summary: 'BG override' };
+    const result = transformAiUiOutput(input);
+    expect(result.data.content[0].props.backgroundColor).toBe('#1a1a2e');
+  });
+
+  it('should NOT include sentinel style values in props', () => {
+    const input: AiUiGenerationResult = { sections: [{ type: 'Section', backgroundColor: '#FFFFFF', style: S, children: [
+      { type: 'Heading', content: 'Clean', size: 'h1', style: S }
+    ] }], summary: 'No sentinels' };
+    const result = transformAiUiOutput(input);
+    const sid = result.data.content[0].props.id as string;
+    const heading = result.data.zones![sid + ':contentSlot'][0];
+    const propKeys = Object.keys(heading.props);
+    expect(propKeys).toContain('id');
+    expect(propKeys).toContain('content');
+    expect(propKeys).toContain('size');
+    expect(propKeys).not.toContain('textColor');
+    expect(propKeys).not.toContain('backgroundColor');
+    expect(propKeys).not.toContain('padding');
+    expect(propKeys).not.toContain('margin');
+    expect(propKeys).not.toContain('fontSize');
+    expect(propKeys).not.toContain('fontWeight');
+    expect(propKeys).not.toContain('textAlign');
+    expect(propKeys).not.toContain('borderRadius');
+    expect(propKeys).not.toContain('boxShadow');
+    expect(propKeys).not.toContain('maxWidth');
+    expect(propKeys).not.toContain('opacity');
+  });
+
+  it('should map style props to Button component', () => {
+    const input: AiUiGenerationResult = { sections: [{ type: 'Section', backgroundColor: '#FFFFFF', style: S, children: [
+      { type: 'Button', label: 'Styled', variant: 'primary', href: '/signup', style: style({ padding: '12px 24px', borderRadius: '999px', backgroundColor: '#4F46E5', textColor: '#FFFFFF' }) }
+    ] }], summary: 'Styled button' };
+    const result = transformAiUiOutput(input);
+    const sid = result.data.content[0].props.id as string;
+    const btn = result.data.zones![sid + ':contentSlot'][0];
+    expect(btn.props.padding).toBe('12px 24px');
+    expect(btn.props.borderRadius).toBe('999px');
+    expect(btn.props.backgroundColor).toBe('#4F46E5');
+    expect(btn.props.textColor).toBe('#FFFFFF');
+  });
+  it('should map style props to Card component', () => {
+    const input: AiUiGenerationResult = { sections: [{ type: 'Section', backgroundColor: '#FFFFFF', style: S, children: [
+      { type: 'Card', heading: 'Styled Card', content: 'Content', eyebrow: '', imageUrl: '', actionLabel: '', actionHref: '', style: style({ borderRadius: '12px', boxShadow: '0 4px 12px rgba(0,0,0,0.08)', padding: '24px' }) }
+    ] }], summary: 'Styled card' };
+    const result = transformAiUiOutput(input);
+    const sid = result.data.content[0].props.id as string;
+    const card = result.data.zones![sid + ':contentSlot'][0];
+    expect(card.props.borderRadius).toBe('12px');
+    expect(card.props.boxShadow).toBe('0 4px 12px rgba(0,0,0,0.08)');
+    expect(card.props.padding).toBe('24px');
+  });
+
+  it('should map style props to Columns component', () => {
+    const input: AiUiGenerationResult = { sections: [{ type: 'Section', backgroundColor: '#FFFFFF', style: S, children: [
+      { type: 'Columns', layout: 'equal', style: style({ padding: '16px' }), left: [{ type: 'Paragraph', content: 'Left', style: S }], right: [{ type: 'Paragraph', content: 'Right', style: S }] }
+    ] }], summary: 'Styled columns' };
+    const result = transformAiUiOutput(input);
+    const sid = result.data.content[0].props.id as string;
+    const cols = result.data.zones![sid + ':contentSlot'][0];
+    expect(cols.props.padding).toBe('16px');
+  });
+
+  it('should let section style override default padding', () => {
+    const input: AiUiGenerationResult = { sections: [{ type: 'Section', backgroundColor: '#FFFFFF', style: style({ padding: '64px 80px', margin: '0 auto' }), children: [
+      { type: 'Heading', content: 'Padded', size: 'h1', style: S }
+    ] }], summary: 'Styled section padding' };
+    const result = transformAiUiOutput(input);
+    const p = result.data.content[0].props;
+    expect(p.padding).toBe('64px 80px');
+    expect(p.margin).toBe('0 auto');
+  });
+
+  it('should log style mapping when styles are applied', () => {
+    const logger = jest.fn();
+    const input: AiUiGenerationResult = { sections: [{ type: 'Section', backgroundColor: '#FFFFFF', style: S, children: [
+      { type: 'Heading', content: 'Styled', size: 'h1', style: style({ textColor: '#FF0000', fontSize: '3rem', fontWeight: '700' }) }
+    ] }], summary: 'Log style' };
+    transformAiUiOutput(input, logger);
+    expect(logger).toHaveBeenCalledWith('Mapped style properties to component props', expect.objectContaining({ appliedCount: 3, keys: expect.arrayContaining(['textColor', 'fontSize', 'fontWeight']) }));
   });
 });

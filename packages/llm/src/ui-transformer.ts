@@ -1,4 +1,4 @@
-import type { AiSectionChild, AiSectionComponent, AiSectionContentItem, AiUiGenerationResult } from './schemas/ui-generation';
+import type { AiComponentStyle, AiSectionChild, AiSectionComponent, AiSectionContentItem, AiUiGenerationResult } from './schemas/ui-generation';
 
 /**
  * Result of transforming AI UI output into the Puck-compatible data format.
@@ -48,43 +48,98 @@ export const resetUiTransformerIdCounter = () => {
  */
 const isEmptyString = (value: string): boolean => value === '';
 
+/**
+ * Maps AI style properties to Puck-compatible component prop entries.
+ *
+ * Sentinel values ("" for strings, "inherit" for enums) are filtered out
+ * so only explicitly styled properties appear in the output props.
+ */
+const mapStyleToProps = (
+  style: AiComponentStyle,
+  log: LogFn
+): Record<string, string> => {
+  const props: Record<string, string> = {};
+  let appliedCount = 0;
+
+  const applyString = (styleKey: keyof AiComponentStyle, propKey: string) => {
+    const value = style[styleKey];
+    if (typeof value === 'string' && !isEmptyString(value)) {
+      props[propKey] = value;
+      appliedCount += 1;
+    }
+  };
+
+  const applyEnum = (styleKey: keyof AiComponentStyle, propKey: string, sentinel: string) => {
+    const value = style[styleKey];
+    if (typeof value === 'string' && value !== sentinel) {
+      props[propKey] = value;
+      appliedCount += 1;
+    }
+  };
+
+  applyString('textColor', 'textColor');
+  applyString('backgroundColor', 'backgroundColor');
+  applyString('padding', 'padding');
+  applyString('margin', 'margin');
+  applyString('fontSize', 'fontSize');
+  applyEnum('fontWeight', 'fontWeight', 'inherit');
+  applyEnum('textAlign', 'textAlign', 'inherit');
+  applyString('borderRadius', 'borderRadius');
+  applyString('borderWidth', 'borderWidth');
+  applyString('borderColor', 'borderColor');
+  applyString('boxShadow', 'boxShadow');
+  applyString('maxWidth', 'maxWidth');
+  applyString('opacity', 'opacity');
+
+  if (appliedCount > 0) {
+    log('Mapped style properties to component props', {
+      appliedCount,
+      keys: Object.keys(props)
+    });
+  }
+
+  return props;
+};
+
 const transformLeafComponent = (
   child: AiSectionChild,
   log: LogFn
 ): PuckComponent => {
   const id = generateId(child.type.toLowerCase());
+  const styleProps = mapStyleToProps(child.style, log);
 
   switch (child.type) {
     case 'Heading':
-      log('Transforming Heading component', { id, size: child.size });
+      log('Transforming Heading component', { id, size: child.size, styleApplied: Object.keys(styleProps).length > 0 });
       return {
         type: 'Heading',
-        props: { id, content: child.content, size: child.size }
+        props: { id, content: child.content, size: child.size, ...styleProps }
       };
 
     case 'Paragraph':
-      log('Transforming Paragraph component', { id });
+      log('Transforming Paragraph component', { id, styleApplied: Object.keys(styleProps).length > 0 });
       return {
         type: 'Paragraph',
-        props: { id, content: child.content }
+        props: { id, content: child.content, ...styleProps }
       };
 
     case 'Button': {
       const hasHref = !isEmptyString(child.href);
-      log('Transforming Button component', { id, variant: child.variant, hasHref });
+      log('Transforming Button component', { id, variant: child.variant, hasHref, styleApplied: Object.keys(styleProps).length > 0 });
       return {
         type: 'Button',
         props: {
           id,
           label: child.label,
           variant: child.variant,
-          ...(hasHref ? { href: child.href } : {})
+          ...(hasHref ? { href: child.href } : {}),
+          ...styleProps
         }
       };
     }
 
     case 'Image':
-      log('Transforming Image component', { id, src: child.src, objectFit: child.objectFit, aspectRatio: child.aspectRatio });
+      log('Transforming Image component', { id, src: child.src, objectFit: child.objectFit, aspectRatio: child.aspectRatio, styleApplied: Object.keys(styleProps).length > 0 });
       return {
         type: 'Image',
         props: {
@@ -92,7 +147,8 @@ const transformLeafComponent = (
           src: child.src,
           alt: child.alt,
           objectFit: child.objectFit,
-          aspectRatio: child.aspectRatio
+          aspectRatio: child.aspectRatio,
+          ...styleProps
         }
       };
 
@@ -101,7 +157,7 @@ const transformLeafComponent = (
       const hasImageUrl = !isEmptyString(child.imageUrl);
       const hasActionLabel = !isEmptyString(child.actionLabel);
       const hasActionHref = !isEmptyString(child.actionHref);
-      log('Transforming Card component', { id, hasEyebrow, hasImageUrl, hasActionLabel, hasActionHref });
+      log('Transforming Card component', { id, hasEyebrow, hasImageUrl, hasActionLabel, hasActionHref, styleApplied: Object.keys(styleProps).length > 0 });
       return {
         type: 'Card',
         props: {
@@ -111,13 +167,14 @@ const transformLeafComponent = (
           ...(hasEyebrow ? { eyebrow: child.eyebrow } : {}),
           ...(hasImageUrl ? { imageUrl: child.imageUrl } : {}),
           ...(hasActionLabel ? { actionLabel: child.actionLabel } : {}),
-          ...(hasActionHref ? { actionHref: child.actionHref } : {})
+          ...(hasActionHref ? { actionHref: child.actionHref } : {}),
+          ...styleProps
         }
       };
     }
 
     case 'List': {
-      log('Transforming List component', { id, itemCount: child.items.length, variant: child.variant });
+      log('Transforming List component', { id, itemCount: child.items.length, variant: child.variant, styleApplied: Object.keys(styleProps).length > 0 });
       return {
         type: 'List',
         props: {
@@ -126,20 +183,21 @@ const transformLeafComponent = (
             text: item.text,
             ...(!isEmptyString(item.description) ? { description: item.description } : {})
           })),
-          variant: child.variant
+          variant: child.variant,
+          ...styleProps
         }
       };
     }
 
     case 'Divider':
-      log('Transforming Divider component', { id });
-      return { type: 'Divider', props: { id } };
+      log('Transforming Divider component', { id, styleApplied: Object.keys(styleProps).length > 0 });
+      return { type: 'Divider', props: { id, ...styleProps } };
 
     case 'Spacer':
-      log('Transforming Spacer component', { id, height: child.height });
+      log('Transforming Spacer component', { id, height: child.height, styleApplied: Object.keys(styleProps).length > 0 });
       return {
         type: 'Spacer',
-        props: { id, height: child.height }
+        props: { id, height: child.height, ...styleProps }
       };
   }
 };
@@ -152,11 +210,13 @@ const transformSectionContentItem = (
 ): PuckComponent => {
   if (item.type === 'Columns') {
     const columnsId = generateId('columns');
+    const styleProps = mapStyleToProps(item.style, log);
     log('Transforming Columns component', {
       id: columnsId,
       layout: item.layout,
       leftCount: item.left.length,
-      rightCount: item.right.length
+      rightCount: item.right.length,
+      styleApplied: Object.keys(styleProps).length > 0
     });
 
     const leftChildren = item.left.map((child) => transformLeafComponent(child, log));
@@ -167,7 +227,7 @@ const transformSectionContentItem = (
 
     return {
       type: 'Columns',
-      props: { id: columnsId, layout: item.layout }
+      props: { id: columnsId, layout: item.layout, ...styleProps }
     };
   }
 
@@ -180,10 +240,13 @@ const transformSection = (
   log: LogFn
 ): PuckComponent => {
   const sectionId = generateId('section');
+  const styleProps = mapStyleToProps(section.style, log);
   log('Transforming Section', {
     id: sectionId,
     backgroundColor: section.backgroundColor,
-    childCount: section.children.length
+    childCount: section.children.length,
+    styleApplied: Object.keys(styleProps).length > 0,
+    styleKeys: Object.keys(styleProps)
   });
 
   const sectionChildren = section.children.map((item) =>
@@ -205,6 +268,9 @@ const transformSection = (
       marginY: '0px',
       borderWidth: '',
       borderColor: '',
+      // Style props override the hardcoded defaults above
+      ...styleProps,
+      // Section's dedicated backgroundColor always takes priority
       backgroundColor: section.backgroundColor
     }
   };
@@ -220,6 +286,9 @@ const transformSection = (
  *
  * Empty-string sentinel values from the schema are stripped so they don't
  * appear as props on the resulting Puck components.
+ *
+ * Style properties from each component's `style` object are flattened into
+ * top-level props on the Puck component, matching the editor's style field keys.
  */
 export function transformAiUiOutput(
   aiResult: AiUiGenerationResult,

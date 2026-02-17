@@ -1,5 +1,8 @@
 import { ConfigService } from '@nestjs/config';
+import { AI_DEFAULT_STYLE } from '@buildweaver/llm';
 import { ProjectAiService } from './ai.service';
+
+const S = AI_DEFAULT_STYLE;
 
 // --- Mock the @buildweaver/llm module ---
 const mockStructuredCompletion = jest.fn();
@@ -43,8 +46,9 @@ describe('ProjectAiService', () => {
             {
               type: 'Section',
               backgroundColor: '#FFFFFF',
+              style: S,
               children: [
-                { type: 'Heading', content: 'Hello', size: 'h1' }
+                { type: 'Heading', content: 'Hello', size: 'h1', style: S }
               ]
             }
           ],
@@ -71,7 +75,8 @@ describe('ProjectAiService', () => {
             {
               type: 'Section',
               backgroundColor: '#FFFFFF',
-              children: [{ type: 'Paragraph', content: 'Test' }]
+              style: S,
+              children: [{ type: 'Paragraph', content: 'Test', style: S }]
             }
           ],
           summary: 'Test page'
@@ -100,7 +105,8 @@ describe('ProjectAiService', () => {
             {
               type: 'Section',
               backgroundColor: '#FFFFFF',
-              children: [{ type: 'Heading', content: 'Trimmed', size: 'h1' }]
+              style: S,
+              children: [{ type: 'Heading', content: 'Trimmed', size: 'h1', style: S }]
             }
           ],
           summary: 'Trimmed'
@@ -143,9 +149,10 @@ describe('ProjectAiService', () => {
             {
               type: 'Section',
               backgroundColor: '#FFFFFF',
+              style: S,
               children: [
-                { type: 'Heading', content: 'Title', size: 'h1' },
-                { type: 'Paragraph', content: 'Body' }
+                { type: 'Heading', content: 'Title', size: 'h1', style: S },
+                { type: 'Paragraph', content: 'Body', style: S }
               ]
             }
           ],
@@ -173,8 +180,9 @@ describe('ProjectAiService', () => {
             {
               type: 'Section',
               backgroundColor: '#FFFFFF',
+              style: S,
               children: [
-                { type: 'Button', label: 'Click', variant: 'primary', href: '' },
+                { type: 'Button', label: 'Click', variant: 'primary', href: '', style: S },
                 {
                   type: 'Card',
                   heading: 'Card',
@@ -182,7 +190,8 @@ describe('ProjectAiService', () => {
                   eyebrow: '',
                   imageUrl: '',
                   actionLabel: '',
-                  actionHref: ''
+                  actionHref: '',
+                  style: S
                 }
               ]
             }
