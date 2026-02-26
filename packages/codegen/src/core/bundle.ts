@@ -1,5 +1,12 @@
-import { randomUUID } from 'node:crypto';
-import path from 'node:path';
+const generateUUID = (): string => {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    return (c === 'x' ? r : (r & 0x3) | 0x8).toString(16);
+  });
+};
 
 export type FileEncoding = 'utf8' | 'base64';
 
@@ -49,7 +56,7 @@ export const createBundle = (
   files: GeneratedFile[],
   options: BundleOptions
 ): GeneratedBundle => ({
-  id: randomUUID(),
+  id: generateUUID(),
   files: sortFiles(files),
   manifest: {
     adapter,
@@ -74,4 +81,4 @@ export const describeManifest = (bundle: GeneratedBundle): string => {
 };
 
 export const fileList = (bundle: GeneratedBundle): string[] =>
-  bundle.files.map((file) => path.posix.normalize(file.path));
+  bundle.files.map((file) => normalizePath(file.path));

@@ -91,6 +91,7 @@ import {
 import { cloneGraphSnapshot, GraphSnapshot, hashGraphSnapshot } from '../lib/graphSnapshot';
 import { DragHistoryBuffer } from '../lib/dragHistoryBuffer';
 import { AiCommandPalette } from '../components/logic/AiCommandPalette';
+import { CodegenModal } from '../components/codegen/CodegenModal';
 
 const nodeTypes = {
   dummy: DummyNode,
@@ -252,6 +253,7 @@ const LogicEditorView = () => {
   const [edgeCutGesture, setEdgeCutGesture] = useState<GestureState | null>(null);
   const [marqueeGesture, setMarqueeGesture] = useState<GestureState | null>(null);
   const [isAiPaletteOpen, setIsAiPaletteOpen] = useState(false);
+  const [isCodegenModalOpen, setIsCodegenModalOpen] = useState(false);
   const [isAiGenerating, setIsAiGenerating] = useState(false);
   const previewResolver = useMemo(
     () => createPreviewResolver(nodes, edges, { functions, queryDefinitions: queries, databases }),
@@ -1718,6 +1720,15 @@ const LogicEditorView = () => {
               {feedback && <span className="text-bw-platinum/70">{feedback}</span>}
               <button
                 type="button"
+                onClick={() => setIsCodegenModalOpen(true)}
+                data-testid="generate-code-button"
+                className="rounded-xl border border-bw-amber/30 bg-bw-amber/10 px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-bw-amber transition hover:-translate-y-0.5"
+                title="Generate application code"
+              >
+                Generate Code
+              </button>
+              <button
+                type="button"
                 onClick={handleSave}
                 disabled={!hasUnsavedChanges || isSaving}
                 className="rounded-xl bg-bw-sand px-4 py-2 font-semibold text-bw-ink transition hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-60"
@@ -1846,6 +1857,13 @@ const LogicEditorView = () => {
         onSubmit={handleAiGenerate}
         onClose={() => setIsAiPaletteOpen(false)}
       />
+      {isCodegenModalOpen && projectId && (
+        <CodegenModal
+          projectId={projectId}
+          projectName={`Project ${projectId}`}
+          onClose={() => setIsCodegenModalOpen(false)}
+        />
+      )}
     </>
   );
 };

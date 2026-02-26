@@ -15,6 +15,12 @@ export default defineConfig(({ mode }) => {
     plugins: [react()],
     // Tells Vite where to read .env files from
     envDir,
+    resolve: {
+      alias: {
+        '@buildweaver/codegen': resolve(__dirname, '../../packages/codegen/src'),
+        '@buildweaver/libs': resolve(__dirname, '../../packages/libs/src')
+      }
+    },
     server: {
       port: 5173
     }

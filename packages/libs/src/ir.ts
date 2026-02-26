@@ -255,6 +255,15 @@ export interface BlockInstance {
   order: number;
 }
 
+export interface PageDynamicInputRef {
+  id: string;
+  label: string;
+  description?: string;
+  dataType: string;
+  listItemType?: string;
+  objectSample?: Record<string, ScalarValue>;
+}
+
 export interface Page {
   id: string;
   name: string;
@@ -265,6 +274,8 @@ export interface Page {
   auth?: AuthRequirement;
   payment?: PaymentRequirement;
   blocks?: BlockInstance[];
+  builderState?: Record<string, unknown>;
+  dynamicInputs?: PageDynamicInputRef[];
 }
 
 export interface ThemeTokens {
