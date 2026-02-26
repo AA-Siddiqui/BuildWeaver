@@ -33,8 +33,8 @@ export { UI_GENERATION_SYSTEM_PROMPT } from './prompts/ui-system-prompt';
 export { transformAiLogicOutput } from './logic-transformer';
 export type { TransformedLogic } from './logic-transformer';
 
-export { transformAiUiOutput, resetUiTransformerIdCounter } from './ui-transformer';
-export type { TransformedUi } from './ui-transformer';
+export { transformAiUiOutput, resetUiTransformerIdCounter, parseCssSpacing } from './ui-transformer';
+export type { TransformedUi, ParsedSpacing } from './ui-transformer';
 
 import type { LlmAdapterConfig } from './types';
 import { OpenAIAdapter } from './openai-adapter';

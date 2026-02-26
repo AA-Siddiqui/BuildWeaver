@@ -27,6 +27,91 @@ export interface PuckComponent {
 
 type LogFn = (message: string, meta?: Record<string, unknown>) => void;
 
+// ── CSS spacing shorthand parser ──────────────────────────────────
+//
+// The editor uses separate fields for spacing: `padding` (all sides),
+// `paddingX` (left+right), `paddingY` (top+bottom) — same for margin.
+// The AI generates standard CSS shorthand (e.g. "48px 64px") which must
+// be decomposed into the editor's field model so that axis-specific
+// defaults don't override the shorthand values.
+
+/**
+ * Result of parsing a CSS spacing shorthand value into the editor's
+ * per-axis model.
+ */
+export interface ParsedSpacing {
+  /** Value for all four sides (only set for single-value shorthand). */
+  all: string;
+  /** Value for left+right (horizontal axis). */
+  x: string;
+  /** Value for top+bottom (vertical axis). */
+  y: string;
+}
+
+/**
+ * Parses a CSS spacing shorthand value (padding or margin) into the
+ * editor's per-axis format.
+ *
+ * CSS shorthand rules:
+ * - 1 value  → all sides equal         → { all: v, x: "", y: "" }
+ * - 2 values → vertical horizontal     → { all: "", x: h, y: v }
+ * - 3 values → top horizontal bottom   → { all: "", x: h, y: top }
+ * - 4 values → top right bottom left   → { all: "", x: right, y: top }
+ *
+ * For 3/4-value shorthands the editor only supports equal Y (top+bottom)
+ * and equal X (left+right), so the conversion is lossy and a warning is
+ * logged.
+ */
+export const parseCssSpacing = (
+  value: string,
+  log: LogFn
+): ParsedSpacing => {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    log('parseCssSpacing: empty value received, returning empty result', { raw: value });
+    return { all: '', x: '', y: '' };
+  }
+
+  const parts = trimmed.split(/\s+/);
+
+  switch (parts.length) {
+    case 1:
+      log('parseCssSpacing: single value → all sides', { raw: value, all: parts[0] });
+      return { all: parts[0], x: '', y: '' };
+
+    case 2:
+      log('parseCssSpacing: two values → Y (vertical) + X (horizontal)', {
+        raw: value,
+        y: parts[0],
+        x: parts[1]
+      });
+      return { all: '', x: parts[1], y: parts[0] };
+
+    case 3:
+      log('parseCssSpacing: three-value shorthand detected; using top for Y, horizontal for X (lossy)', {
+        raw: value,
+        top: parts[0],
+        horizontal: parts[1],
+        bottom: parts[2]
+      });
+      return { all: '', x: parts[1], y: parts[0] };
+
+    case 4:
+      log('parseCssSpacing: four-value shorthand detected; using top for Y, right for X (lossy)', {
+        raw: value,
+        top: parts[0],
+        right: parts[1],
+        bottom: parts[2],
+        left: parts[3]
+      });
+      return { all: '', x: parts[1], y: parts[0] };
+
+    default:
+      log('parseCssSpacing: unexpected format, treating as single value for all sides', { raw: value });
+      return { all: trimmed, x: '', y: '' };
+  }
+};
+
 let idCounter = 0;
 
 const generateId = (prefix: string): string => {
@@ -53,6 +138,10 @@ const isEmptyString = (value: string): boolean => value === '';
  *
  * Sentinel values ("" for strings, "inherit" for enums) are filtered out
  * so only explicitly styled properties appear in the output props.
+ *
+ * CSS shorthand padding/margin values (e.g. "48px 64px") are decomposed
+ * into the editor's per-axis format (padding/paddingX/paddingY) to prevent
+ * axis-specific defaults from overriding the intended spacing.
  */
 const mapStyleToProps = (
   style: AiComponentStyle,
@@ -77,10 +166,36 @@ const mapStyleToProps = (
     }
   };
 
+  const applySpacing = (styleKey: 'padding' | 'margin', baseProp: string) => {
+    const value = style[styleKey];
+    if (typeof value !== 'string' || isEmptyString(value)) {
+      return;
+    }
+    const parsed = parseCssSpacing(value, log);
+    log('Applying parsed spacing to props', {
+      field: baseProp,
+      raw: value,
+      parsedAll: parsed.all,
+      parsedX: parsed.x,
+      parsedY: parsed.y
+    });
+
+    // Always set all three keys so the stored props override Puck defaults.
+    // Empty strings ensure axis defaults ("0px") don't override the shorthand.
+    props[baseProp] = parsed.all;
+    props[`${baseProp}X`] = parsed.x;
+    props[`${baseProp}Y`] = parsed.y;
+
+    // Count only non-empty values as applied for logging
+    if (parsed.all) appliedCount += 1;
+    if (parsed.x) appliedCount += 1;
+    if (parsed.y) appliedCount += 1;
+  };
+
   applyString('textColor', 'textColor');
   applyString('backgroundColor', 'backgroundColor');
-  applyString('padding', 'padding');
-  applyString('margin', 'margin');
+  applySpacing('padding', 'padding');
+  applySpacing('margin', 'margin');
   applyString('fontSize', 'fontSize');
   applyEnum('fontWeight', 'fontWeight', 'inherit');
   applyEnum('textAlign', 'textAlign', 'inherit');
@@ -94,7 +209,7 @@ const mapStyleToProps = (
   if (appliedCount > 0) {
     log('Mapped style properties to component props', {
       appliedCount,
-      keys: Object.keys(props)
+      keys: Object.keys(props).filter((k) => props[k] !== '')
     });
   }
 
@@ -246,7 +361,7 @@ const transformSection = (
     backgroundColor: section.backgroundColor,
     childCount: section.children.length,
     styleApplied: Object.keys(styleProps).length > 0,
-    styleKeys: Object.keys(styleProps)
+    styleKeys: Object.keys(styleProps).filter((k) => styleProps[k] !== '')
   });
 
   const sectionChildren = section.children.map((item) =>
@@ -268,7 +383,10 @@ const transformSection = (
       marginY: '0px',
       borderWidth: '',
       borderColor: '',
-      // Style props override the hardcoded defaults above
+      // Style props override the hardcoded defaults above.
+      // parseCssSpacing ensures padding/margin shorthand values are
+      // decomposed into per-axis props (paddingX/paddingY etc.) so the
+      // editor applies them correctly.
       ...styleProps,
       // Section's dedicated backgroundColor always takes priority
       backgroundColor: section.backgroundColor
@@ -289,6 +407,9 @@ const transformSection = (
  *
  * Style properties from each component's `style` object are flattened into
  * top-level props on the Puck component, matching the editor's style field keys.
+ *
+ * CSS shorthand padding/margin values are automatically decomposed into the
+ * editor's per-axis model (padding/paddingX/paddingY) via {@link parseCssSpacing}.
  */
 export function transformAiUiOutput(
   aiResult: AiUiGenerationResult,
