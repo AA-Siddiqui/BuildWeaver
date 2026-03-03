@@ -1,3 +1,5 @@
+import type { DatabaseSchema, QueryDefinition, UserDefinedFunction } from './builders';
+
 export const IR_VERSION = '2025.02.0';
 
 export type ScalarValue =
@@ -287,6 +289,15 @@ export interface ThemeTokens {
   };
 }
 
+export interface PageQueryConnection {
+  pageId: string;
+  queryId: string;
+  inputId: string;
+  inputLabel: string;
+  queryMode: 'read' | 'insert' | 'update' | 'delete';
+  schemaId: string;
+}
+
 export interface ProjectIR {
   version: string;
   metadata: ProjectMetadata;
@@ -296,6 +307,10 @@ export interface ProjectIR {
   pages: Page[];
   logic: LogicGraph;
   theme?: ThemeTokens;
+  databases?: DatabaseSchema[];
+  queries?: QueryDefinition[];
+  userFunctions?: UserDefinedFunction[];
+  pageQueryConnections?: PageQueryConnection[];
 }
 
 const toSlug = (value: string): string =>

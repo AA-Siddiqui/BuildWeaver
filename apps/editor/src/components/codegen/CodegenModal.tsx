@@ -10,7 +10,8 @@ interface CodegenModalProps {
 const STATUS_LABELS: Record<CodegenStatus, string> = {
   idle: '',
   'fetching-pages': 'Fetching pages from project...',
-  generating: 'Generating React application...',
+  'fetching-graph': 'Fetching logic graph...',
+  generating: 'Generating frontend & backend...',
   zipping: 'Packaging zip archive...',
   complete: 'Download started!',
   error: 'Generation failed'
@@ -19,7 +20,7 @@ const STATUS_LABELS: Record<CodegenStatus, string> = {
 export const CodegenModal = ({ projectId, projectName, onClose }: CodegenModalProps) => {
   const { status, error, progress, generate, reset } = useCodegen(projectId, projectName);
 
-  const isProcessing = status === 'fetching-pages' || status === 'generating' || status === 'zipping';
+  const isProcessing = status === 'fetching-pages' || status === 'fetching-graph' || status === 'generating' || status === 'zipping';
   const isComplete = status === 'complete';
   const isError = status === 'error';
 
@@ -110,7 +111,7 @@ export const CodegenModal = ({ projectId, projectName, onClose }: CodegenModalPr
                 </div>
                 <p className="text-sm font-medium text-green-400">Download started!</p>
                 <p className="text-xs text-bw-platinum/50">
-                  Your React application has been generated and is downloading.
+                  Your application has been generated and is downloading.
                 </p>
                 <button
                   type="button"

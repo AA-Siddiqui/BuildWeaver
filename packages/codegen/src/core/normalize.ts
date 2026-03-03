@@ -70,5 +70,30 @@ export const normalizeProject = (ir: ProjectIR): ProjectIR => {
     edges: [...project.logic.edges].sort((a, b) => a.id.localeCompare(b.id))
   };
 
+  if (project.databases) {
+    project.databases = [...project.databases]
+      .map((db) => ({
+        ...db,
+        tables: [...db.tables]
+          .map((t) => ({ ...t, fields: [...t.fields].sort((a, b) => a.name.localeCompare(b.name)) }))
+          .sort((a, b) => a.name.localeCompare(b.name))
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  if (project.queries) {
+    project.queries = [...project.queries].sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  if (project.userFunctions) {
+    project.userFunctions = [...project.userFunctions].sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  if (project.pageQueryConnections) {
+    project.pageQueryConnections = [...project.pageQueryConnections].sort(
+      (a, b) => a.pageId.localeCompare(b.pageId) || a.queryId.localeCompare(b.queryId)
+    );
+  }
+
   return project;
 };
