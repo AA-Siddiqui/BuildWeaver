@@ -302,6 +302,305 @@ describe('ExpressAdapter', () => {
     });
   });
 
+  /* ── Dummy node sample values in dynamic inputs ──────────────── */
+
+  describe('generate with dummy node sample values', () => {
+    it('emits integer sample value instead of null', async () => {
+      const bundle = await ExpressAdapter.generate(
+        makeProject({
+          pages: [
+            makePage('Metrics', '/metrics', {
+              dynamicInputs: [
+                { id: 'user-count', label: 'User Count', dataType: 'number', sampleValue: 42 },
+              ],
+            }),
+          ],
+        }),
+      );
+      const route = bundle.files.find(
+        (f) => f.path === 'src/routes/metrics.ts',
+      );
+      expect(route).toBeDefined();
+      const content = route!.contents as string;
+      expect(content).toContain('User_Count: 42,');
+      expect(content).not.toContain('User_Count: null');
+    });
+
+    it('emits string sample value instead of null', async () => {
+      const bundle = await ExpressAdapter.generate(
+        makeProject({
+          pages: [
+            makePage('Profile', '/profile', {
+              dynamicInputs: [
+                { id: 'site-name', label: 'Site Name', dataType: 'string', sampleValue: 'My App' },
+              ],
+            }),
+          ],
+        }),
+      );
+      const route = bundle.files.find(
+        (f) => f.path === 'src/routes/profile.ts',
+      );
+      const content = route!.contents as string;
+      expect(content).toContain('Site_Name: "My App",');
+      expect(content).not.toContain('Site_Name: null');
+    });
+
+    it('emits boolean sample value instead of null', async () => {
+      const bundle = await ExpressAdapter.generate(
+        makeProject({
+          pages: [
+            makePage('Settings', '/settings', {
+              dynamicInputs: [
+                { id: 'is-active', label: 'Is Active', dataType: 'boolean', sampleValue: true },
+              ],
+            }),
+          ],
+        }),
+      );
+      const route = bundle.files.find(
+        (f) => f.path === 'src/routes/settings.ts',
+      );
+      const content = route!.contents as string;
+      expect(content).toContain('Is_Active: true,');
+      expect(content).not.toContain('Is_Active: null');
+    });
+
+    it('emits list sample value instead of null', async () => {
+      const bundle = await ExpressAdapter.generate(
+        makeProject({
+          pages: [
+            makePage('Tags', '/tags', {
+              dynamicInputs: [
+                { id: 'tag-list', label: 'Tag List', dataType: 'list', sampleValue: ['alpha', 'beta', 'gamma'] },
+              ],
+            }),
+          ],
+        }),
+      );
+      const route = bundle.files.find(
+        (f) => f.path === 'src/routes/tags.ts',
+      );
+      const content = route!.contents as string;
+      expect(content).toContain('Tag_List: ["alpha","beta","gamma"],');
+      expect(content).not.toContain('Tag_List: null');
+    });
+
+    it('emits object sample value instead of null', async () => {
+      const bundle = await ExpressAdapter.generate(
+        makeProject({
+          pages: [
+            makePage('Config', '/config', {
+              dynamicInputs: [
+                {
+                  id: 'app-config',
+                  label: 'App Config',
+                  dataType: 'object',
+                  sampleValue: { theme: 'dark', version: 2 },
+                },
+              ],
+            }),
+          ],
+        }),
+      );
+      const route = bundle.files.find(
+        (f) => f.path === 'src/routes/config.ts',
+      );
+      const content = route!.contents as string;
+      expect(content).toContain('App_Config: {"theme":"dark","version":2},');
+      expect(content).not.toContain('App_Config: null');
+    });
+
+    it('emits null sample value when sampleValue is explicitly null', async () => {
+      const bundle = await ExpressAdapter.generate(
+        makeProject({
+          pages: [
+            makePage('Empty', '/empty', {
+              dynamicInputs: [
+                { id: 'nullable', label: 'Nullable Field', dataType: 'string', sampleValue: null },
+              ],
+            }),
+          ],
+        }),
+      );
+      const route = bundle.files.find(
+        (f) => f.path === 'src/routes/empty.ts',
+      );
+      const content = route!.contents as string;
+      expect(content).toContain('Nullable_Field: null,');
+      // Should NOT have the TODO comment since sampleValue was explicitly set
+      expect(content).not.toContain('TODO');
+    });
+
+    it('handles multiple inputs with different sample types', async () => {
+      const bundle = await ExpressAdapter.generate(
+        makeProject({
+          pages: [
+            makePage('Dashboard', '/dashboard', {
+              dynamicInputs: [
+                { id: 'count', label: 'Count', dataType: 'number', sampleValue: 100 },
+                { id: 'title', label: 'Title', dataType: 'string', sampleValue: 'Hello World' },
+                { id: 'active', label: 'Active', dataType: 'boolean', sampleValue: false },
+                { id: 'items', label: 'Items', dataType: 'list', sampleValue: [1, 2, 3] },
+              ],
+            }),
+          ],
+        }),
+      );
+      const route = bundle.files.find(
+        (f) => f.path === 'src/routes/dashboard.ts',
+      );
+      const content = route!.contents as string;
+      expect(content).toContain('Count: 100,');
+      expect(content).toContain('Title: "Hello World",');
+      expect(content).toContain('Active: false,');
+      expect(content).toContain('Items: [1,2,3],');
+      expect(content).not.toContain('TODO');
+    });
+
+    it('mixes sample values with unresolved inputs', async () => {
+      const bundle = await ExpressAdapter.generate(
+        makeProject({
+          pages: [
+            makePage('Mixed', '/mixed', {
+              dynamicInputs: [
+                { id: 'resolved', label: 'Resolved', dataType: 'number', sampleValue: 7 },
+                { id: 'unresolved', label: 'Unresolved', dataType: 'string' },
+              ],
+            }),
+          ],
+        }),
+      );
+      const route = bundle.files.find(
+        (f) => f.path === 'src/routes/mixed.ts',
+      );
+      const content = route!.contents as string;
+      expect(content).toContain('Resolved: 7,');
+      expect(content).toContain('Unresolved: null');
+      expect(content).toContain('TODO');
+    });
+
+    it('logs sample data source in generated comments', async () => {
+      const bundle = await ExpressAdapter.generate(
+        makeProject({
+          pages: [
+            makePage('Info', '/info', {
+              dynamicInputs: [
+                { id: 'data', label: 'Data', dataType: 'number', sampleValue: 99 },
+              ],
+            }),
+          ],
+        }),
+      );
+      const route = bundle.files.find(
+        (f) => f.path === 'src/routes/info.ts',
+      );
+      const content = route!.contents as string;
+      expect(content).toContain('[sample]');
+      expect(content).toContain('from sample data');
+    });
+
+    it('mixes query-connected inputs with sample value inputs', async () => {
+      const db = makeDatabase('Shop DB', [
+        {
+          id: 'table-products',
+          name: 'products',
+          fields: [
+            { id: 'f1', name: 'id', type: 'uuid', nullable: false, unique: true, isId: true },
+            { id: 'f2', name: 'name', type: 'string', nullable: false, unique: false },
+          ],
+        },
+      ]);
+      const readQuery = makeQuery('Get Products', 'read', db.id, 'products', ['id', 'name']);
+
+      const bundle = await ExpressAdapter.generate(
+        makeProject({
+          pages: [
+            makePage('Products', '/products', {
+              dynamicInputs: [
+                { id: 'product-list', label: 'Product List', dataType: 'list' },
+                { id: 'page-title', label: 'Page Title', dataType: 'string', sampleValue: 'Our Products' },
+              ],
+            }),
+          ],
+          databases: [db],
+          queries: [readQuery],
+          pageQueryConnections: [
+            {
+              pageId: 'page-products',
+              queryId: readQuery.id,
+              inputId: 'product-list',
+              inputLabel: 'Product List',
+              queryMode: 'read',
+              schemaId: db.id,
+            },
+          ],
+        }),
+      );
+      const route = bundle.files.find(
+        (f) => f.path === 'src/routes/products.ts',
+      );
+      expect(route).toBeDefined();
+      const content = route!.contents as string;
+
+      // Query-connected input uses query result
+      expect(content).toContain('executeGetProducts');
+      expect(content).toContain('Product_List');
+      expect(content).toContain('Product_ListResult.rows');
+
+      // Dummy-connected input uses sample value
+      expect(content).toContain('Page_Title: "Our Products",');
+
+      // Both sources mentioned in log
+      expect(content).toContain('from queries');
+      expect(content).toContain('from sample data');
+    });
+
+    it('decimal sample value is emitted correctly', async () => {
+      const bundle = await ExpressAdapter.generate(
+        makeProject({
+          pages: [
+            makePage('Pricing', '/pricing', {
+              dynamicInputs: [
+                { id: 'price', label: 'Price', dataType: 'number', sampleValue: 9.99 },
+              ],
+            }),
+          ],
+        }),
+      );
+      const route = bundle.files.find(
+        (f) => f.path === 'src/routes/pricing.ts',
+      );
+      const content = route!.contents as string;
+      expect(content).toContain('Price: 9.99,');
+    });
+
+    it('zero and empty-string sample values are emitted (not treated as undefined)', async () => {
+      const bundle = await ExpressAdapter.generate(
+        makeProject({
+          pages: [
+            makePage('Zeros', '/zeros', {
+              dynamicInputs: [
+                { id: 'zero-num', label: 'Zero Num', dataType: 'number', sampleValue: 0 },
+                { id: 'empty-str', label: 'Empty Str', dataType: 'string', sampleValue: '' },
+                { id: 'false-bool', label: 'False Bool', dataType: 'boolean', sampleValue: false },
+              ],
+            }),
+          ],
+        }),
+      );
+      const route = bundle.files.find(
+        (f) => f.path === 'src/routes/zeros.ts',
+      );
+      const content = route!.contents as string;
+      expect(content).toContain('Zero_Num: 0,');
+      expect(content).toContain('Empty_Str: "",');
+      expect(content).toContain('False_Bool: false,');
+      // None should fall through to TODO/null
+      expect(content).not.toContain('TODO');
+    });
+  });
+
   /* ── Project with databases ──────────────────────────────────── */
 
   describe('generate with databases', () => {

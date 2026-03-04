@@ -264,6 +264,7 @@ export interface PageDynamicInputRef {
   dataType: string;
   listItemType?: string;
   objectSample?: Record<string, ScalarValue>;
+  sampleValue?: ScalarValue;
 }
 
 export interface Page {

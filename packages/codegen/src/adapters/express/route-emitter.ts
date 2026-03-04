@@ -1,8 +1,10 @@
 import type {
   Page,
+  PageDynamicInputRef,
   PageQueryConnection,
   ProjectIR,
   QueryDefinition,
+  ScalarValue,
 } from '@buildweaver/libs';
 import type { GeneratedFile } from '../../core/bundle';
 import { toFunctionName, httpMethodForMode } from './query-emitter';
@@ -21,6 +23,20 @@ const routeToFileName = (route: string): string =>
 
 const toPropertyKey = (label: string): string =>
   label.replace(/[^a-zA-Z0-9]+/g, '_').replace(/(^_|_$)/g, '') || 'data';
+
+/* ── Value serialisation ─────────────────────────────────────────── */
+
+/**
+ * Convert a ScalarValue into a TypeScript literal string suitable for
+ * embedding directly in generated source code.
+ */
+const scalarToLiteral = (value: ScalarValue): string => {
+  if (value === null) return 'null';
+  if (typeof value === 'string') return JSON.stringify(value);
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  // Arrays and objects – JSON.stringify produces valid JS/TS literals
+  return JSON.stringify(value);
+};
 
 /* ── Per-page route file ──────────────────────────────────────────── */
 
@@ -80,6 +96,62 @@ const router = Router();
   return code;
 };
 
+/* ── GET handler ─────────────────────────────────────────────────── */
+
+/**
+ * Classify each dynamic input by its data source so the generated GET
+ * handler can combine query results with static dummy values.
+ */
+interface ResolvedInputField {
+  key: string;
+  source: 'query' | 'sample' | 'unresolved';
+  /** Only set when source === 'query' */
+  queryInfo?: { fnName: string; schemaId: string };
+  /** Only set when source === 'sample' */
+  sampleLiteral?: string;
+}
+
+const resolveInputFields = (
+  dynamicInputs: PageDynamicInputRef[],
+  readConns: PageQueryConnection[],
+  queryMap: Map<string, QueryDefinition>,
+  needsDb: boolean,
+): ResolvedInputField[] => {
+  // Build a map: inputId -> query connection
+  const connByInputId = new Map<string, PageQueryConnection>();
+  for (const conn of readConns) {
+    if (conn.inputId) {
+      connByInputId.set(conn.inputId, conn);
+    }
+  }
+
+  return dynamicInputs.map((inp) => {
+    const key = toPropertyKey(inp.label);
+    const conn = connByInputId.get(inp.id);
+
+    if (conn && needsDb) {
+      const q = queryMap.get(conn.queryId);
+      if (q) {
+        return {
+          key,
+          source: 'query' as const,
+          queryInfo: { fnName: toFunctionName(q.name), schemaId: conn.schemaId },
+        };
+      }
+    }
+
+    if (inp.sampleValue !== undefined) {
+      return {
+        key,
+        source: 'sample' as const,
+        sampleLiteral: scalarToLiteral(inp.sampleValue),
+      };
+    }
+
+    return { key, source: 'unresolved' as const };
+  });
+};
+
 const emitGetHandler = (
   page: Page,
   slug: string,
@@ -91,13 +163,64 @@ const emitGetHandler = (
   const inputComments =
     dynamicInputs.length > 0
       ? dynamicInputs
-          .map((inp) => ` *   - ${inp.label} (${inp.dataType})`)
+          .map((inp) => {
+            const source = inp.sampleValue !== undefined ? 'sample' : 'dynamic';
+            return ` *   - ${inp.label} (${inp.dataType}) [${source}]`;
+          })
           .join('\n')
       : ' *   (none)';
 
   let body: string;
 
-  if (readConns.length > 0 && needsDb) {
+  if (dynamicInputs.length > 0) {
+    const fields = resolveInputFields(dynamicInputs, readConns, queryMap, needsDb);
+
+    const queryFields = fields.filter((f) => f.source === 'query');
+    const sampleFields = fields.filter((f) => f.source === 'sample');
+    const unresolvedFields = fields.filter((f) => f.source === 'unresolved');
+
+    // Log summary in generated code
+    const summary = [
+      queryFields.length > 0 ? `${queryFields.length} from queries` : null,
+      sampleFields.length > 0 ? `${sampleFields.length} from sample data` : null,
+      unresolvedFields.length > 0 ? `${unresolvedFields.length} unresolved` : null,
+    ].filter(Boolean).join(', ');
+
+    // Pool declarations (only for query-connected inputs)
+    const poolIds = [...new Set(queryFields.map((f) => f.queryInfo!.schemaId))];
+    const poolDecls = poolIds
+      .map((id) => `    const pool_${id.replace(/[^a-zA-Z0-9]/g, '_')} = getPool('${id}');`)
+      .join('\n');
+
+    // Query execution statements
+    const queryExecs = queryFields
+      .map(
+        (f) =>
+          `    const ${f.key}Result = await ${f.queryInfo!.fnName}(pool_${f.queryInfo!.schemaId.replace(/[^a-zA-Z0-9]/g, '_')}, req.query as Record<string, unknown>);`,
+      )
+      .join('\n');
+
+    // Response fields – combine all sources
+    const responseLines = fields.map((f) => {
+      if (f.source === 'query') {
+        return `      ${f.key}: ${f.key}Result.rows,`;
+      }
+      if (f.source === 'sample') {
+        return `      ${f.key}: ${f.sampleLiteral},`;
+      }
+      return `      ${f.key}: null, // TODO: wire to data source`;
+    }).join('\n');
+
+    const poolBlock = poolDecls ? `${poolDecls}\n\n` : '';
+    const queryBlock = queryExecs ? `${queryExecs}\n\n` : '';
+
+    body = `${poolBlock}${queryBlock}    console.info('[${slug}] GET: Returning page data (${summary})');
+    res.json({
+${responseLines}
+    });`;
+  } else if (readConns.length > 0 && needsDb) {
+    // Legacy fallback: readConns exist but page has no dynamicInputs metadata.
+    // This can happen if connections reference query labels directly.
     const queries = readConns
       .map((conn) => {
         const q = queryMap.get(conn.queryId);
@@ -131,14 +254,6 @@ ${queryExecs}
     console.info(\`[${slug}] GET: Returning data for ${queries.length} input(s)\`);
     res.json({
 ${responseFields}
-    });`;
-  } else if (dynamicInputs.length > 0) {
-    const placeholders = dynamicInputs
-      .map((inp) => `      ${toPropertyKey(inp.label)}: null, // TODO: wire to data source`)
-      .join('\n');
-    body = `    console.info('[${slug}] GET: Returning placeholder data');
-    res.json({
-${placeholders}
     });`;
   } else {
     body = `    console.info('[${slug}] GET: Returning page confirmation');
@@ -321,10 +436,24 @@ export const createRouteFiles = (project: ProjectIR): GeneratedFile[] => {
   for (const page of pages) {
     const pageConns = connections.filter((c) => c.pageId === page.id);
     const fileName = routeToFileName(page.route);
+    const dynamicInputs = page.dynamicInputs ?? [];
+    const sampleCount = dynamicInputs.filter((i) => i.sampleValue !== undefined).length;
 
     console.info(
-      `${LOG_PREFIX}   route: ${page.route} -> src/routes/${fileName}.ts (${pageConns.length} query connection(s))`,
+      `${LOG_PREFIX}   route: ${page.route} -> src/routes/${fileName}.ts ` +
+      `(${pageConns.length} query conn(s), ${dynamicInputs.length} dynamic input(s), ${sampleCount} sample value(s))`,
     );
+
+    if (dynamicInputs.length > 0) {
+      for (const inp of dynamicInputs) {
+        const hasSample = inp.sampleValue !== undefined;
+        const hasConn = pageConns.some((c) => c.inputId === inp.id && c.queryMode === 'read');
+        console.info(
+          `${LOG_PREFIX}     input: "${inp.label}" (${inp.dataType}) ` +
+          `-> ${hasConn ? 'query' : hasSample ? 'sample=' + JSON.stringify(inp.sampleValue) : 'unresolved'}`,
+        );
+      }
+    }
 
     files.push({
       path: `src/routes/${fileName}.ts`,
@@ -340,4 +469,4 @@ export const createRouteFiles = (project: ProjectIR): GeneratedFile[] => {
   return files;
 };
 
-export { routeToSlug, routeToFileName, toPropertyKey };
+export { routeToSlug, routeToFileName, toPropertyKey, scalarToLiteral };
