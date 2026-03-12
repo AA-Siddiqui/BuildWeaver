@@ -49,14 +49,45 @@ export const resolveTextContent = (
   return { isExpression: false, text: '' };
 };
 
+const isInlineSlotArray = (value: unknown): value is PuckComponentData[] => {
+  if (!Array.isArray(value) || value.length === 0) return false;
+  return value.every(
+    (item) =>
+      item !== null &&
+      typeof item === 'object' &&
+      typeof item.type === 'string' &&
+      item.props !== null &&
+      typeof item.props === 'object'
+  );
+};
+
 const walkComponentProps = (
   component: PuckComponentData,
   zones: Record<string, PuckComponentData[]>,
   bindingIds: Set<string>
 ): void => {
-  for (const value of Object.values(component.props)) {
+  for (const [key, value] of Object.entries(component.props)) {
     if (isDynamicBinding(value)) {
       bindingIds.add(value.bindingId);
+    }
+    // Walk inline slot arrays (Puck v0.16+ stores slot children in props)
+    if (key !== 'id' && isInlineSlotArray(value)) {
+      for (const child of value) {
+        walkComponentProps(child, zones, bindingIds);
+      }
+    }
+    // Walk cases array with nested slots (Conditional component)
+    if (key === 'cases' && Array.isArray(value)) {
+      for (const caseItem of value) {
+        if (caseItem && typeof caseItem === 'object') {
+          const caseObj = caseItem as Record<string, unknown>;
+          if (isInlineSlotArray(caseObj.slot)) {
+            for (const child of caseObj.slot) {
+              walkComponentProps(child, zones, bindingIds);
+            }
+          }
+        }
+      }
     }
   }
 

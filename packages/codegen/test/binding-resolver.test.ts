@@ -252,6 +252,95 @@ describe('collectPageBindings', () => {
     const result = collectPageBindings(puckData);
     expect(result.has('deep-input')).toBe(true);
   });
+
+  it('collects bindings from inline slot arrays in component props', () => {
+    const puckData: PuckData = {
+      root: { props: {} },
+      content: [
+        {
+          type: 'Section',
+          props: {
+            id: 'sec-1',
+            contentSlot: [
+              {
+                type: 'Heading',
+                props: {
+                  id: 'nested-h',
+                  content: makeBinding('inline-binding')
+                }
+              }
+            ]
+          }
+        }
+      ]
+    };
+    const result = collectPageBindings(puckData);
+    expect(result.has('inline-binding')).toBe(true);
+  });
+
+  it('collects bindings from Conditional inline case slots', () => {
+    const puckData: PuckData = {
+      root: { props: {} },
+      content: [
+        {
+          type: 'Conditional',
+          props: {
+            id: 'cond-1',
+            activeCaseKey: 'a',
+            cases: [
+              {
+                caseKey: 'a',
+                slot: [
+                  {
+                    type: 'Heading',
+                    props: {
+                      id: 'case-h',
+                      content: makeBinding('case-binding')
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    };
+    const result = collectPageBindings(puckData);
+    expect(result.has('case-binding')).toBe(true);
+  });
+
+  it('collects bindings from deeply nested inline slots', () => {
+    const puckData: PuckData = {
+      root: { props: {} },
+      content: [
+        {
+          type: 'Section',
+          props: {
+            id: 'sec-1',
+            contentSlot: [
+              {
+                type: 'Columns',
+                props: {
+                  id: 'col-1',
+                  left: [
+                    {
+                      type: 'Heading',
+                      props: {
+                        id: 'deep-h',
+                        content: makeBinding('deeply-nested-binding')
+                      }
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        }
+      ]
+    };
+    const result = collectPageBindings(puckData);
+    expect(result.has('deeply-nested-binding')).toBe(true);
+  });
 });
 
 describe('resolveBindingIdToLabel', () => {

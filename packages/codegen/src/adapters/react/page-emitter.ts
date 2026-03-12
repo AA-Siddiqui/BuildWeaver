@@ -2,6 +2,7 @@ import type { Page } from '@buildweaver/libs';
 import type { PageDynamicInputInfo, PuckData } from './types';
 import { collectPageBindings } from './binding-resolver';
 import { emitContentArray } from './component-emitter';
+import { normalizePuckSlots } from './slot-normalizer';
 
 const LOG_PREFIX = '[Codegen:PageEmitter]';
 
@@ -13,24 +14,28 @@ const buildDynamicInputInfoList = (page: Page): PageDynamicInputInfo[] =>
   }));
 
 export const emitPageComponent = (page: Page, componentName: string): string => {
-  const puckData = page.builderState as PuckData | undefined;
+  const rawPuckData = page.builderState as PuckData | undefined;
   const dynamicInputs = buildDynamicInputInfoList(page);
 
   console.info(`${LOG_PREFIX} Generating page component "${componentName}" for route "${page.route}"`);
   console.info(`${LOG_PREFIX}   - Dynamic inputs: ${dynamicInputs.length}`);
-  console.info(`${LOG_PREFIX}   - Has builder state: ${Boolean(puckData)}`);
+  console.info(`${LOG_PREFIX}   - Has builder state: ${Boolean(rawPuckData)}`);
 
-  if (!puckData?.content) {
+  if (!rawPuckData?.content) {
     console.info(`${LOG_PREFIX}   - No Puck data available, generating placeholder`);
     return emitPlaceholderPage(page, componentName);
   }
+
+  // Normalize inline slot data (Puck v0.16+ stores slot children inline in
+  // component props) into the top-level zones map for the emitter to consume.
+  const puckData = normalizePuckSlots(rawPuckData);
 
   const bindingIds = collectPageBindings(puckData);
   const hasDynamicBindings = bindingIds.size > 0;
 
   console.info(`${LOG_PREFIX}   - Dynamic bindings found: ${bindingIds.size}`);
   console.info(`${LOG_PREFIX}   - Content components: ${puckData.content.length}`);
-  console.info(`${LOG_PREFIX}   - Zones: ${Object.keys(puckData.zones ?? {}).length}`);
+  console.info(`${LOG_PREFIX}   - Zones (after normalization): ${Object.keys(puckData.zones ?? {}).length}`);
 
   const imports: string[] = ["import React from 'react';"];
   if (hasDynamicBindings) {

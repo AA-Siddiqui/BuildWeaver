@@ -17,9 +17,18 @@ const getZoneChildren = (
   slotName: string,
   zones: Record<string, PuckComponentData[]>
 ): PuckComponentData[] => {
-  if (!componentId) return [];
+  if (!componentId) {
+    console.warn(`${LOG_PREFIX} getZoneChildren called with no componentId for slot "${slotName}"`);
+    return [];
+  }
   const key = `${componentId}:${slotName}`;
-  return zones[key] ?? [];
+  const children = zones[key] ?? [];
+  if (children.length > 0) {
+    console.info(`${LOG_PREFIX} Zone "${key}" resolved ${children.length} child(ren)`);
+  } else {
+    console.info(`${LOG_PREFIX} Zone "${key}" is empty — no nested items found for this slot`);
+  }
+  return children;
 };
 
 const emitStyleAttr = (props: Record<string, unknown>, extraCss?: Record<string, string>): string => {

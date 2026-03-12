@@ -224,6 +224,236 @@ describe('ReactAdapter', () => {
     });
   });
 
+  describe('generate with inline slot children (Puck v0.16+ format)', () => {
+    it('generates Section with nested children from inline contentSlot', async () => {
+      const project = makeProjectWithPages([
+        makePage('SlotTest', '/slot-test', {
+          builderState: {
+            root: { props: {} },
+            content: [
+              {
+                type: 'Section',
+                props: {
+                  id: 'sec-1',
+                  heading: 'Section Title',
+                  contentSlot: [
+                    { type: 'Heading', props: { id: 'nested-h1', content: 'Nested Heading', size: 'h2' } },
+                    { type: 'Paragraph', props: { id: 'nested-p1', content: 'Nested paragraph text.' } }
+                  ]
+                }
+              }
+            ]
+          }
+        })
+      ]);
+
+      const bundle = await ReactAdapter.generate(project);
+      const pageFile = bundle.files.find((f) => f.path === 'src/pages/SlotTest.tsx');
+      expect(pageFile).toBeDefined();
+
+      const content = pageFile!.contents as string;
+      expect(content).toContain('Section Title');
+      expect(content).toContain('Nested Heading');
+      expect(content).toContain('Nested paragraph text.');
+      expect(content).toContain('<section');
+      expect(content).toContain('<h2');
+    });
+
+    it('generates Columns with inline left/right slot children', async () => {
+      const project = makeProjectWithPages([
+        makePage('ColumnsTest', '/columns-test', {
+          builderState: {
+            root: { props: {} },
+            content: [
+              {
+                type: 'Columns',
+                props: {
+                  id: 'col-1',
+                  layout: 'equal',
+                  left: [
+                    { type: 'Heading', props: { id: 'left-h', content: 'Left Column Content' } }
+                  ],
+                  right: [
+                    { type: 'Paragraph', props: { id: 'right-p', content: 'Right Column Content' } }
+                  ]
+                }
+              }
+            ]
+          }
+        })
+      ]);
+
+      const bundle = await ReactAdapter.generate(project);
+      const pageFile = bundle.files.find((f) => f.path === 'src/pages/ColumnsTest.tsx');
+      expect(pageFile).toBeDefined();
+
+      const content = pageFile!.contents as string;
+      expect(content).toContain('Left Column Content');
+      expect(content).toContain('Right Column Content');
+      expect(content).toContain('gridTemplateColumns');
+    });
+
+    it('generates deeply nested inline slots (Section > Columns > Heading)', async () => {
+      const project = makeProjectWithPages([
+        makePage('DeepNest', '/deep', {
+          builderState: {
+            root: { props: {} },
+            content: [
+              {
+                type: 'Section',
+                props: {
+                  id: 'outer-sec',
+                  heading: 'Outer Section',
+                  contentSlot: [
+                    {
+                      type: 'Columns',
+                      props: {
+                        id: 'inner-col',
+                        layout: 'wideLeft',
+                        left: [
+                          { type: 'Heading', props: { id: 'deep-h', content: 'Deeply Nested Title', size: 'h3' } }
+                        ],
+                        right: [
+                          { type: 'Button', props: { id: 'deep-btn', label: 'Deep Button' } }
+                        ]
+                      }
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        })
+      ]);
+
+      const bundle = await ReactAdapter.generate(project);
+      const pageFile = bundle.files.find((f) => f.path === 'src/pages/DeepNest.tsx');
+      expect(pageFile).toBeDefined();
+
+      const content = pageFile!.contents as string;
+      expect(content).toContain('Outer Section');
+      expect(content).toContain('Deeply Nested Title');
+      expect(content).toContain('Deep Button');
+      expect(content).toContain('<h3');
+    });
+
+    it('generates Conditional with inline case slot children', async () => {
+      const project = makeProjectWithPages([
+        makePage('CondTest', '/cond-test', {
+          builderState: {
+            root: { props: {} },
+            content: [
+              {
+                type: 'Conditional',
+                props: {
+                  id: 'cond-1',
+                  activeCaseKey: 'active',
+                  cases: [
+                    {
+                      caseKey: 'active',
+                      slot: [
+                        { type: 'Heading', props: { id: 'case-h', content: 'Active Case Content' } }
+                      ]
+                    },
+                    {
+                      caseKey: 'inactive',
+                      slot: [
+                        { type: 'Paragraph', props: { id: 'case-p', content: 'Inactive Content' } }
+                      ]
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        })
+      ]);
+
+      const bundle = await ReactAdapter.generate(project);
+      const pageFile = bundle.files.find((f) => f.path === 'src/pages/CondTest.tsx');
+      expect(pageFile).toBeDefined();
+
+      const content = pageFile!.contents as string;
+      expect(content).toContain('Active Case Content');
+      // Inactive case should not be rendered (static case key)
+      expect(content).not.toContain('Inactive Content');
+    });
+
+    it('generates List with inline customItemSlot children', async () => {
+      const project = makeProjectWithPages([
+        makePage('ListTest', '/list-test', {
+          dynamicInputs: [
+            { id: 'items', label: 'Items', dataType: 'list' }
+          ],
+          builderState: {
+            root: { props: {} },
+            content: [
+              {
+                type: 'List',
+                props: {
+                  id: 'list-1',
+                  renderMode: 'custom',
+                  dataSource: { __bwDynamicBinding: true, bindingId: 'items' },
+                  customItemSlot: [
+                    { type: 'Heading', props: { id: 'slot-h', content: 'Item Header' } }
+                  ]
+                }
+              }
+            ]
+          }
+        })
+      ]);
+
+      const bundle = await ReactAdapter.generate(project);
+      const pageFile = bundle.files.find((f) => f.path === 'src/pages/ListTest.tsx');
+      expect(pageFile).toBeDefined();
+
+      const content = pageFile!.contents as string;
+      expect(content).toContain('.map(');
+      expect(content).toContain('Item Header');
+      expect(content).toContain('pageData?.Items');
+    });
+
+    it('detects dynamic bindings inside inline slot children', async () => {
+      const project = makeProjectWithPages([
+        makePage('BindingSlot', '/binding-slot', {
+          dynamicInputs: [
+            { id: 'title-input', label: 'Page Title', dataType: 'string' }
+          ],
+          builderState: {
+            root: { props: {} },
+            content: [
+              {
+                type: 'Section',
+                props: {
+                  id: 'sec-1',
+                  contentSlot: [
+                    {
+                      type: 'Heading',
+                      props: {
+                        id: 'bound-h',
+                        content: { __bwDynamicBinding: true, bindingId: 'title-input' }
+                      }
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        })
+      ]);
+
+      const bundle = await ReactAdapter.generate(project);
+      const pageFile = bundle.files.find((f) => f.path === 'src/pages/BindingSlot.tsx');
+      expect(pageFile).toBeDefined();
+
+      const content = pageFile!.contents as string;
+      // Should detect the dynamic binding inside the slot and import usePageData
+      expect(content).toContain("import { usePageData }");
+      expect(content).toContain('pageData?.Page_Title');
+    });
+  });
+
   describe('component name generation', () => {
     it('converts page names with spaces to PascalCase', async () => {
       const project = makeProjectWithPages([
