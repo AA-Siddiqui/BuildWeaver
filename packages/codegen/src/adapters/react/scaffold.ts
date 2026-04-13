@@ -42,6 +42,7 @@ const createPackageJson = (project: ProjectIR): string => {
   );
 };
 
+// TODO: consider using configService for allowedHosts instead of wildcard, for better security in generated code
 const createViteConfig = (): string => `import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
@@ -49,7 +50,9 @@ export default defineConfig({
   plugins: [react()],
   server: {
     port: 5173,
-    open: true
+    open: false,
+    allowedHosts: true,
+    host: true
   }
 });
 `;

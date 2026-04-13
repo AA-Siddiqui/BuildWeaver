@@ -37,8 +37,26 @@ describe('deploy.utils', () => {
     expect(compose).toContain('traefik.http.routers.bw-preview-my-app-frontend.rule=Host(`my-app.preview.buildweaver.dev`)');
     expect(compose).toContain('traefik.http.routers.bw-preview-my-app-backend.rule=Host(`api.my-app.preview.buildweaver.dev`)');
     expect(compose).toContain('name: traefik-public');
-    expect(compose).toContain('loadbalancer.server.port=80');
+    expect(compose).toContain('loadbalancer.server.port=5173');
     expect(compose).toContain('loadbalancer.server.port=3000');
+  });
+
+  it('generates dockerfiles that start dev servers instead of building', () => {
+    const overlay = createDeploymentOverlayFiles({
+      deploymentName: 'sample',
+      frontendDomain: 'sample.preview.buildweaver.dev',
+      backendDomain: 'api.sample.preview.buildweaver.dev',
+      traefikNetwork: 'traefik-public',
+    });
+
+    const frontendDockerfile = overlay.find((file) => file.path === 'frontend/Dockerfile')?.contents ?? '';
+    const backendDockerfile = overlay.find((file) => file.path === 'backend/Dockerfile')?.contents ?? '';
+
+    expect(frontendDockerfile).toContain('CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--port", "5173"]');
+    expect(frontendDockerfile).not.toContain('npm run build');
+    expect(backendDockerfile).toContain('CMD ["npm", "run", "dev"]');
+    expect(backendDockerfile).not.toContain('npm run build');
+    expect(backendDockerfile).toContain('ENV NODE_ENV=development');
   });
 
   it('creates compose and Docker overlay files for deployment archive', () => {

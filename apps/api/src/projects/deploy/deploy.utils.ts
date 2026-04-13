@@ -33,34 +33,24 @@ export const resolvePreviewDomains = (
   backendDomain: `api.${deploymentName}.${previewBaseDomain}`,
 });
 
-const createFrontendDockerfile = (): string => `FROM node:20-alpine AS builder
+const createFrontendDockerfile = (): string => `FROM node:20-alpine
 WORKDIR /app
 COPY package*.json ./
 RUN npm install
 COPY . .
-RUN npm run build
-
-FROM nginx:1.27-alpine
-COPY --from=builder /app/dist /usr/share/nginx/html
-EXPOSE 80
+EXPOSE 5173
+CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--port", "5173"]
 `;
 
-const createBackendDockerfile = (): string => `FROM node:20-alpine AS builder
+const createBackendDockerfile = (): string => `FROM node:20-alpine
 WORKDIR /app
 COPY package*.json ./
 RUN npm install
 COPY . .
-RUN npm run build
-
-FROM node:20-alpine
-WORKDIR /app
-ENV NODE_ENV=production
-ENV PORT=3000
-COPY package*.json ./
-RUN npm install --omit=dev
-COPY --from=builder /app/dist ./dist
 EXPOSE 3000
-CMD ["npm", "run", "start"]
+ENV NODE_ENV=development
+ENV PORT=3000
+CMD ["npm", "run", "dev"]
 `;
 
 const createDockerIgnore = (): string => `node_modules
@@ -84,6 +74,8 @@ export const createPreviewComposeFile = ({
       context: ./frontend
       dockerfile: Dockerfile
     restart: unless-stopped
+    environment:
+      - VITE_API_BASE_URL=${backendDomain}
     networks:
       - default
       - traefik-public
@@ -92,8 +84,9 @@ export const createPreviewComposeFile = ({
       - traefik.docker.network=${traefikNetwork}
       - traefik.http.routers.${frontendRouter}.rule=Host(\`${frontendDomain}\`)
       - traefik.http.routers.${frontendRouter}.entrypoints=websecure
+      - traefik.http.routers.${frontendRouter}.tls.certresolver=letsencrypt
       - traefik.http.routers.${frontendRouter}.tls=true
-      - traefik.http.services.${frontendRouter}.loadbalancer.server.port=80
+      - traefik.http.services.${frontendRouter}.loadbalancer.server.port=5173
 
   backend:
     container_name: bw-preview-${deploymentName}-backend
@@ -102,7 +95,7 @@ export const createPreviewComposeFile = ({
       dockerfile: Dockerfile
     restart: unless-stopped
     environment:
-      - NODE_ENV=production
+      - NODE_ENV=development
       - PORT=3000
     networks:
       - default
@@ -112,6 +105,7 @@ export const createPreviewComposeFile = ({
       - traefik.docker.network=${traefikNetwork}
       - traefik.http.routers.${backendRouter}.rule=Host(\`${backendDomain}\`)
       - traefik.http.routers.${backendRouter}.entrypoints=websecure
+      - traefik.http.routers.${backendRouter}.tls.certresolver=letsencrypt
       - traefik.http.routers.${backendRouter}.tls=true
       - traefik.http.services.${backendRouter}.loadbalancer.server.port=3000
 
