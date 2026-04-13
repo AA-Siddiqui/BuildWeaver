@@ -11,7 +11,7 @@ import { DRIZZLE, PG_POOL } from '../../src/database/database.constants';
 import { dbSchema, Database } from '@buildweaver/db';
 
 export const createTestApp = async (): Promise<INestApplication> => {
-  const memoryDb = newDb({ autoCreateForeignKeyIndices: true });
+  const memoryDb = newDb({ autoCreateForeignKeyIndices: false });
   memoryDb.registerExtension('pgcrypto', (schema) => {
     schema.registerFunction({
       name: 'gen_random_uuid',

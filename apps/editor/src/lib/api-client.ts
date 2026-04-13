@@ -196,6 +196,41 @@ export const projectDatabasesApi = {
     })
 };
 
+export interface DeploySubdomainAvailability {
+  available: boolean;
+  normalizedName: string;
+  frontendDomain: string;
+  backendDomain: string;
+  reason?: string;
+}
+
+export interface DeployProjectResult {
+  deploymentId: string;
+  deploymentName: string;
+  status: string;
+  frontendDomain: string;
+  backendDomain: string;
+  frontendUrl: string;
+  backendUrl: string;
+  remotePath: string;
+}
+
+export const projectDeployApi = {
+  checkAvailability: (projectId: string, body: { deploymentName: string }) =>
+    apiFetch<{ availability: DeploySubdomainAvailability }>(`/projects/${projectId}/deploy/availability`, {
+      method: 'POST',
+      body: serialize(body)
+    }),
+  deploy: (
+    projectId: string,
+    body: { deploymentName: string; frontendTarget?: 'react-web' }
+  ) =>
+    apiFetch<{ deployment: DeployProjectResult }>(`/projects/${projectId}/deploy`, {
+      method: 'POST',
+      body: serialize(body)
+    })
+};
+
 export interface AiGenerateLogicResult {
   nodes: LogicEditorNode[];
   edges: LogicEditorEdge[];

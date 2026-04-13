@@ -85,8 +85,36 @@ export const projectComponents = pgTable(
   })
 );
 
+export const projectDeployments = pgTable(
+  'project_deployments',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    projectId: uuid('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    ownerId: uuid('owner_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    deploymentName: text('deployment_name').notNull(),
+    subdomain: text('subdomain').notNull(),
+    frontendDomain: text('frontend_domain').notNull(),
+    backendDomain: text('backend_domain').notNull(),
+    remotePath: text('remote_path').notNull(),
+    status: text('status').notNull().default('pending'),
+    lastError: text('last_error'),
+    deployedAt: timestamp('deployed_at'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow().$onUpdate(() => new Date())
+  },
+  (table) => ({
+    subdomainUnique: uniqueIndex('project_deployments_subdomain_idx').on(table.subdomain),
+    projectSubdomainUnique: uniqueIndex('project_deployments_project_subdomain_idx').on(table.projectId, table.subdomain)
+  })
+);
+
 export const usersRelations = relations(users, ({ many }) => ({
-  projects: many(projects)
+  projects: many(projects),
+  deployments: many(projectDeployments)
 }));
 
 export const projectsRelations = relations(projects, ({ one, many }) => ({
@@ -96,7 +124,8 @@ export const projectsRelations = relations(projects, ({ one, many }) => ({
   }),
   pages: many(projectPages),
   graph: one(projectGraphs),
-  components: many(projectComponents)
+  components: many(projectComponents),
+  deployments: many(projectDeployments)
 }));
 
 export const projectPagesRelations = relations(projectPages, ({ one }) => ({
@@ -120,6 +149,17 @@ export const projectComponentsRelations = relations(projectComponents, ({ one })
   })
 }));
 
+export const projectDeploymentsRelations = relations(projectDeployments, ({ one }) => ({
+  project: one(projects, {
+    fields: [projectDeployments.projectId],
+    references: [projects.id]
+  }),
+  owner: one(users, {
+    fields: [projectDeployments.ownerId],
+    references: [users.id]
+  })
+}));
+
 export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;
 export type Project = typeof projects.$inferSelect;
@@ -130,3 +170,5 @@ export type ProjectGraph = typeof projectGraphs.$inferSelect;
 export type NewProjectGraph = typeof projectGraphs.$inferInsert;
 export type ProjectComponent = typeof projectComponents.$inferSelect;
 export type NewProjectComponent = typeof projectComponents.$inferInsert;
+export type ProjectDeployment = typeof projectDeployments.$inferSelect;
+export type NewProjectDeployment = typeof projectDeployments.$inferInsert;

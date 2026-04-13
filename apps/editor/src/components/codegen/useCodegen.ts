@@ -6,7 +6,13 @@ import {
   bundleToZipBlob,
 } from '@buildweaver/codegen';
 import type { GeneratedFile } from '@buildweaver/codegen';
-import { projectPagesApi, projectGraphApi } from '../../lib/api-client';
+import {
+  projectPagesApi,
+  projectGraphApi,
+  projectDeployApi,
+  type DeployProjectResult,
+  type DeploySubdomainAvailability,
+} from '../../lib/api-client';
 import { codegenLogger } from '../../lib/logger';
 import { buildProjectIR } from './ir-builder';
 
@@ -16,6 +22,8 @@ export type CodegenStatus =
   | 'fetching-graph'
   | 'generating'
   | 'zipping'
+  | 'checking-subdomain'
+  | 'deploying'
   | 'complete'
   | 'error';
 
@@ -35,6 +43,8 @@ export const useCodegen = (projectId: string, projectName: string) => {
   const [status, setStatus] = useState<CodegenStatus>('idle');
   const [error, setError] = useState<string | null>(null);
   const [progress, setProgress] = useState('');
+  const [availability, setAvailability] = useState<DeploySubdomainAvailability | null>(null);
+  const [deployment, setDeployment] = useState<DeployProjectResult | null>(null);
 
   const generate = useCallback(
     async (target: 'react-web' | 'flutter') => {
@@ -48,6 +58,7 @@ export const useCodegen = (projectId: string, projectName: string) => {
         setStatus('fetching-pages');
         setProgress('Fetching pages...');
         setError(null);
+        setDeployment(null);
         codegenLogger.info('Starting code generation', { projectId, projectName, target });
 
         const { pages } = await projectPagesApi.list(projectId);
@@ -143,11 +154,138 @@ export const useCodegen = (projectId: string, projectName: string) => {
     [projectId, projectName]
   );
 
+  const checkAvailability = useCallback(
+    async (deploymentName: string) => {
+      const trimmedName = deploymentName.trim();
+      if (!trimmedName) {
+        setStatus('error');
+        setError('Please provide a preferred subdomain.');
+        return null;
+      }
+
+      try {
+        setStatus('checking-subdomain');
+        setProgress('Checking subdomain availability...');
+        setError(null);
+
+        const result = await projectDeployApi.checkAvailability(projectId, {
+          deploymentName: trimmedName,
+        });
+
+        setAvailability(result.availability);
+        setStatus('idle');
+        setProgress('');
+
+        codegenLogger.info('Subdomain availability checked', {
+          projectId,
+          requestedName: trimmedName,
+          normalizedName: result.availability.normalizedName,
+          available: result.availability.available,
+        });
+
+        return result.availability;
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Unknown error';
+        setStatus('error');
+        setError(message);
+        setProgress('');
+        codegenLogger.error('Subdomain availability check failed', {
+          error: message,
+          projectId,
+        });
+        return null;
+      }
+    },
+    [projectId]
+  );
+
+  const deploy = useCallback(
+    async (deploymentName: string, target: 'react-web' | 'flutter') => {
+      if (target === 'flutter') {
+        setError('Flutter deployment is not yet available.');
+        setStatus('error');
+        return;
+      }
+
+      const trimmedName = deploymentName.trim();
+      if (!trimmedName) {
+        setError('Please provide a preferred subdomain.');
+        setStatus('error');
+        return;
+      }
+
+      try {
+        setStatus('checking-subdomain');
+        setProgress('Checking subdomain availability...');
+        setError(null);
+        setDeployment(null);
+
+        const availabilityResult = await projectDeployApi.checkAvailability(projectId, {
+          deploymentName: trimmedName,
+        });
+        setAvailability(availabilityResult.availability);
+
+        if (!availabilityResult.availability.available) {
+          setStatus('error');
+          setProgress('');
+          setError(
+            availabilityResult.availability.reason ??
+              'That subdomain is not available. Please choose a different one.'
+          );
+          return;
+        }
+
+        setStatus('deploying');
+        setProgress('Deploying application to preview environment...');
+
+        const deployResult = await projectDeployApi.deploy(projectId, {
+          deploymentName: availabilityResult.availability.normalizedName,
+          frontendTarget: 'react-web',
+        });
+
+        setDeployment(deployResult.deployment);
+        setStatus('complete');
+        setProgress('Deployment completed successfully!');
+
+        codegenLogger.info('Project deployed successfully', {
+          projectId,
+          deploymentId: deployResult.deployment.deploymentId,
+          deploymentName: deployResult.deployment.deploymentName,
+          frontendUrl: deployResult.deployment.frontendUrl,
+          backendUrl: deployResult.deployment.backendUrl,
+        });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Unknown error';
+        setStatus('error');
+        setError(message);
+        setProgress('');
+        codegenLogger.error('Deployment failed', {
+          error: message,
+          projectId,
+          deploymentName: trimmedName,
+        });
+      }
+    },
+    [projectId]
+  );
+
   const reset = useCallback(() => {
     setStatus('idle');
     setError(null);
     setProgress('');
+    setAvailability(null);
+    setDeployment(null);
   }, []);
 
-  return { status, error, progress, generate, reset };
+  return {
+    status,
+    error,
+    progress,
+    availability,
+    deployment,
+    generate,
+    checkAvailability,
+    deploy,
+    reset,
+  };
 };

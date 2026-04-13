@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { useCodegen } from './useCodegen';
 import type { CodegenStatus } from './useCodegen';
 
@@ -13,19 +14,61 @@ const STATUS_LABELS: Record<CodegenStatus, string> = {
   'fetching-graph': 'Fetching logic graph...',
   generating: 'Generating frontend & backend...',
   zipping: 'Packaging zip archive...',
-  complete: 'Download started!',
-  error: 'Generation failed'
+  'checking-subdomain': 'Checking subdomain availability...',
+  deploying: 'Deploying to preview environment...',
+  complete: 'Export completed!',
+  error: 'Export failed'
 };
 
-export const CodegenModal = ({ projectId, projectName, onClose }: CodegenModalProps) => {
-  const { status, error, progress, generate, reset } = useCodegen(projectId, projectName);
+const toSuggestedDeploymentName = (projectName: string): string =>
+  projectName
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/g, '-')
+    .replace(/-{2,}/g, '-')
+    .replace(/(^-|-$)+/g, '')
+    .slice(0, 63);
 
-  const isProcessing = status === 'fetching-pages' || status === 'fetching-graph' || status === 'generating' || status === 'zipping';
+export const CodegenModal = ({ projectId, projectName, onClose }: CodegenModalProps) => {
+  const {
+    status,
+    error,
+    progress,
+    availability,
+    deployment,
+    generate,
+    checkAvailability,
+    deploy,
+    reset,
+  } = useCodegen(projectId, projectName);
+  const [deploymentName, setDeploymentName] = useState(() =>
+    toSuggestedDeploymentName(projectName),
+  );
+
+  const normalizedCandidate = toSuggestedDeploymentName(deploymentName);
+  const availabilityForCurrentName =
+    availability?.normalizedName === normalizedCandidate ? availability : null;
+
+  const isProcessing =
+    status === 'fetching-pages' ||
+    status === 'fetching-graph' ||
+    status === 'generating' ||
+    status === 'zipping' ||
+    status === 'checking-subdomain' ||
+    status === 'deploying';
   const isComplete = status === 'complete';
   const isError = status === 'error';
 
   const handleGenerate = (target: 'react-web' | 'flutter') => {
     generate(target);
+  };
+
+  const handleCheckAvailability = () => {
+    checkAvailability(deploymentName);
+  };
+
+  const handleDeploy = () => {
+    deploy(deploymentName, 'react-web');
   };
 
   const handleClose = () => {
@@ -67,8 +110,8 @@ export const CodegenModal = ({ projectId, projectName, onClose }: CodegenModalPr
             {status === 'idle' && (
               <>
                 <p className="mb-4 text-sm text-bw-platinum/70">
-                  Choose a frontend framework to generate your application code.
-                  The backend will always be ExpressJS.
+                  Export your project as a zip file, or deploy directly to a preview environment.
+                  The backend target is always ExpressJS.
                 </p>
                 <div className="grid grid-cols-2 gap-4">
                   <button
@@ -77,8 +120,8 @@ export const CodegenModal = ({ projectId, projectName, onClose }: CodegenModalPr
                     className="flex flex-col items-center gap-3 rounded-xl border border-bw-amber/30 bg-bw-amber/5 p-6 text-white transition hover:-translate-y-0.5 hover:border-bw-amber/60 hover:bg-bw-amber/10"
                   >
                     <span className="text-3xl">⚛</span>
-                    <span className="text-sm font-semibold uppercase tracking-[0.15em]">React</span>
-                    <span className="text-xs text-bw-platinum/50">Vite + TypeScript</span>
+                    <span className="text-sm font-semibold uppercase tracking-[0.15em]">Download Zip</span>
+                    <span className="text-xs text-bw-platinum/50">React + Express</span>
                   </button>
                   <button
                     type="button"
@@ -88,6 +131,62 @@ export const CodegenModal = ({ projectId, projectName, onClose }: CodegenModalPr
                     <span className="text-3xl">F</span>
                     <span className="text-sm font-semibold uppercase tracking-[0.15em]">Flutter</span>
                     <span className="text-xs text-bw-platinum/30">Coming soon</span>
+                  </button>
+                </div>
+
+                <div className="mt-6 rounded-xl border border-white/10 bg-white/[0.03] p-4">
+                  <p className="text-sm font-semibold text-white">Deploy to Preview</p>
+                  <p className="mt-1 text-xs text-bw-platinum/50">
+                    Deploys to *.preview.buildweaver.dev via server-side SSH and docker compose.
+                  </p>
+
+                  <div className="mt-4">
+                    <label
+                      htmlFor="deployment-name"
+                      className="mb-2 block text-xs font-semibold uppercase tracking-[0.12em] text-bw-platinum/60"
+                    >
+                      Preferred subdomain
+                    </label>
+                    <div className="flex gap-2">
+                      <input
+                        id="deployment-name"
+                        type="text"
+                        value={deploymentName}
+                        onChange={(event) => setDeploymentName(event.target.value)}
+                        placeholder="my-preview-app"
+                        className="w-full rounded-lg border border-white/15 bg-black/20 px-3 py-2 text-sm text-white outline-none transition focus:border-bw-amber/60"
+                      />
+                      <button
+                        type="button"
+                        onClick={handleCheckAvailability}
+                        className="rounded-lg border border-white/10 px-3 py-2 text-xs font-semibold text-bw-platinum/70 transition hover:bg-white/5"
+                      >
+                        Check
+                      </button>
+                    </div>
+                  </div>
+
+                  {availabilityForCurrentName && (
+                    <div
+                      className={`mt-3 rounded-lg border px-3 py-2 text-xs ${
+                        availabilityForCurrentName.available
+                          ? 'border-green-500/30 bg-green-500/10 text-green-300'
+                          : 'border-yellow-500/30 bg-yellow-500/10 text-yellow-300'
+                      }`}
+                    >
+                      {availabilityForCurrentName.available
+                        ? `Available. Frontend: ${availabilityForCurrentName.frontendDomain} | Backend: ${availabilityForCurrentName.backendDomain}`
+                        : availabilityForCurrentName.reason ?? 'Subdomain is not available.'}
+                    </div>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={handleDeploy}
+                    disabled={!normalizedCandidate}
+                    className="mt-4 w-full rounded-lg border border-bw-amber/30 bg-bw-amber/10 px-4 py-2 text-sm font-semibold text-white transition hover:bg-bw-amber/20 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Deploy to Preview
                   </button>
                 </div>
               </>
@@ -109,16 +208,31 @@ export const CodegenModal = ({ projectId, projectName, onClose }: CodegenModalPr
                     <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
                   </svg>
                 </div>
-                <p className="text-sm font-medium text-green-400">Download started!</p>
-                <p className="text-xs text-bw-platinum/50">
-                  Your application has been generated and is downloading.
-                </p>
+
+                {deployment ? (
+                  <>
+                    <p className="text-sm font-medium text-green-400">Deployment completed!</p>
+                    <div className="w-full rounded-lg border border-green-500/30 bg-green-500/10 p-3 text-xs text-green-200">
+                      <p>Frontend URL: {deployment.frontendUrl}</p>
+                      <p className="mt-1">Backend URL: {deployment.backendUrl}</p>
+                      <p className="mt-1 text-green-300/90">Remote path: {deployment.remotePath}</p>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <p className="text-sm font-medium text-green-400">Download started!</p>
+                    <p className="text-xs text-bw-platinum/50">
+                      Your application has been generated and is downloading.
+                    </p>
+                  </>
+                )}
+
                 <button
                   type="button"
                   onClick={() => { reset(); }}
                   className="mt-2 rounded-lg border border-white/10 px-4 py-2 text-xs font-semibold text-bw-platinum/70 transition hover:bg-white/5"
                 >
-                  Generate again
+                  Export again
                 </button>
               </div>
             )}

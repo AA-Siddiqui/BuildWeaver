@@ -11,9 +11,11 @@ import { ProjectDatabasesController } from './databases/project-databases.contro
 import { ProjectDatabasesService } from './databases/project-databases.service';
 import { ProjectAiController } from './ai/ai.controller';
 import { ProjectAiService } from './ai/ai.service';
+import { ProjectDeployController } from './deploy/deploy.controller';
+import { ProjectDeployService } from './deploy/deploy.service';
 
 @Module({
-  controllers: [ProjectsController, ProjectGraphController, ProjectPagesController, ProjectComponentsController, ProjectDatabasesController, ProjectAiController],
-  providers: [ProjectsService, ProjectGraphService, ProjectPagesService, ProjectComponentsService, ProjectDatabasesService, ProjectAiService]
+  controllers: [ProjectsController, ProjectGraphController, ProjectPagesController, ProjectComponentsController, ProjectDatabasesController, ProjectAiController, ProjectDeployController],
+  providers: [ProjectsService, ProjectGraphService, ProjectPagesService, ProjectComponentsService, ProjectDatabasesService, ProjectAiService, ProjectDeployService]
 })
 export class ProjectsModule {}

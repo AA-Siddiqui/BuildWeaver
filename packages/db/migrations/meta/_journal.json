@@ -29,6 +29,13 @@
       "when": 1767007871583,
       "tag": "0003_confused_valkyrie",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1776109979677,
+      "tag": "0004_fearless_baron_strucker",
+      "breakpoints": true
     }
   ]
 }
