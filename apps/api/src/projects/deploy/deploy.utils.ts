@@ -75,7 +75,7 @@ export const createPreviewComposeFile = ({
       dockerfile: Dockerfile
     restart: unless-stopped
     environment:
-      - VITE_API_BASE_URL=${backendDomain}
+      - VITE_API_BASE_URL=https://${backendDomain}
     networks:
       - default
       - traefik-public
