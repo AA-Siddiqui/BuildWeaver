@@ -1,0 +1,146 @@
+name: Deploy API to VPS
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      IMAGE_NAME: buildweaver-api:${{ github.sha }}
+      VPS_SSH_HOST: ${{ secrets.VPS_SSH_HOST }}
+      VPS_SSH_USER: ${{ secrets.VPS_SSH_USER }}
+      VPS_SSH_PORT: ${{ secrets.VPS_SSH_PORT }}
+      VPS_DEPLOY_PATH: ${{ secrets.VPS_DEPLOY_PATH }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate VPS transport secrets
+        run: |
+          set -euo pipefail
+
+          required=(
+            VPS_SSH_HOST
+            VPS_SSH_USER
+            VPS_SSH_PORT
+            VPS_DEPLOY_PATH
+          )
+
+          missing=0
+          for key in "${required[@]}"; do
+            if [ -z "${!key:-}" ]; then
+              echo "::error::Missing required secret: ${key}"
+              missing=1
+            fi
+          done
+
+          private_key='${{ secrets.VPS_SSH_PRIVATE_KEY }}'
+          if [ -z "$private_key" ]; then
+            echo "::error::Missing required secret: VPS_SSH_PRIVATE_KEY"
+            missing=1
+          fi
+
+          if [ "$missing" -ne 0 ]; then
+            exit 1
+          fi
+
+      - name: Build Docker image
+        run: docker build -t "$IMAGE_NAME" .
+
+      - name: Export Docker image
+        run: docker save "$IMAGE_NAME" | gzip > buildweaver-api-image.tar.gz
+
+      - name: Configure SSH
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          printf '%s\n' '${{ secrets.VPS_SSH_PRIVATE_KEY }}' > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -p "$VPS_SSH_PORT" "$VPS_SSH_HOST" >> ~/.ssh/known_hosts
+
+      - name: Build runtime env file from app secrets
+        run: |
+          set -euo pipefail
+          # Runtime variables for the API container (including DEPLOY_* used by app logic)
+          # are intentionally independent from VPS_* transport secrets used by this workflow.
+          {
+            echo "IMAGE_NAME=$IMAGE_NAME"
+            cat <<'EOF' | sed 's/^          //'
+          DATABASE_URL=${{ secrets.DATABASE_URL }}
+          VITE_API_BASE_URL=${{ secrets.VITE_API_BASE_URL }}
+          PORT=${{ secrets.PORT }}
+          EDITOR_ORIGIN=${{ secrets.EDITOR_ORIGIN }}
+          BCRYPT_ROUNDS=${{ secrets.BCRYPT_ROUNDS }}
+          JWT_SECRET=${{ secrets.JWT_SECRET }}
+          LLM_COOLDOWN_PERIOD=${{ secrets.LLM_COOLDOWN_PERIOD }}
+          PROVIDER_LIST=${{ secrets.PROVIDER_LIST }}
+          OPENROUTER_BASE_URL=${{ secrets.OPENROUTER_BASE_URL }}
+          OPENROUTER_API_KEY=${{ secrets.OPENROUTER_API_KEY }}
+          OPENROUTER_MODEL=${{ secrets.OPENROUTER_MODEL }}
+          OPENROUTER_ADAPTER=${{ secrets.OPENROUTER_ADAPTER }}
+          GROQ_BASE_URL=${{ secrets.GROQ_BASE_URL }}
+          GROQ_API_KEY=${{ secrets.GROQ_API_KEY }}
+          GROQ_MODEL=${{ secrets.GROQ_MODEL }}
+          GROQ_ADAPTER=${{ secrets.GROQ_ADAPTER }}
+          CEREBRAS_BASE_URL=${{ secrets.CEREBRAS_BASE_URL }}
+          CEREBRAS_API_KEY=${{ secrets.CEREBRAS_API_KEY }}
+          CEREBRAS_MODEL=${{ secrets.CEREBRAS_MODEL }}
+          CEREBRAS_ADAPTER=${{ secrets.CEREBRAS_ADAPTER }}
+          DEPLOY_DRY_RUN=${{ secrets.DEPLOY_DRY_RUN }}
+          DEPLOY_SSH_HOST=${{ secrets.DEPLOY_SSH_HOST }}
+          DEPLOY_SSH_USER=${{ secrets.DEPLOY_SSH_USER }}
+          DEPLOY_SSH_PORT=${{ secrets.DEPLOY_SSH_PORT }}
+          DEPLOY_SSH_PASSWORD=${{ secrets.DEPLOY_SSH_PASSWORD }}
+          EOF
+          } > .env.runtime
+
+      - name: Upload compose, env, and image to VPS
+        run: |
+          set -euo pipefail
+
+          ssh -p "$VPS_SSH_PORT" "$VPS_SSH_USER@$VPS_SSH_HOST" "mkdir -p '$VPS_DEPLOY_PATH'"
+
+          scp -P "$VPS_SSH_PORT" docker-compose.vps.yml "$VPS_SSH_USER@$VPS_SSH_HOST:$VPS_DEPLOY_PATH/docker-compose.vps.yml"
+          scp -P "$VPS_SSH_PORT" .env.runtime "$VPS_SSH_USER@$VPS_SSH_HOST:$VPS_DEPLOY_PATH/.env"
+          scp -P "$VPS_SSH_PORT" buildweaver-api-image.tar.gz "$VPS_SSH_USER@$VPS_SSH_HOST:$VPS_DEPLOY_PATH/buildweaver-api-image.tar.gz"
+
+      - name: Deploy on VPS
+        run: |
+          set -euo pipefail
+
+          ssh -p "$VPS_SSH_PORT" "$VPS_SSH_USER@$VPS_SSH_HOST" \
+            "VPS_BASE_PATH='$VPS_DEPLOY_PATH' bash -s" <<'EOF'
+          set -euo pipefail
+
+          cd "$VPS_BASE_PATH"
+
+          chmod 600 .env
+
+          if ! docker network inspect traefik-public >/dev/null 2>&1; then
+            echo "Required Docker network traefik-public not found on VPS."
+            exit 1
+          fi
+
+          docker load --input buildweaver-api-image.tar.gz
+          rm -f buildweaver-api-image.tar.gz
+
+          if docker compose version >/dev/null 2>&1; then
+            docker compose --env-file .env -f docker-compose.vps.yml up -d --remove-orphans
+          elif command -v docker-compose >/dev/null 2>&1; then
+            docker-compose --env-file .env -f docker-compose.vps.yml up -d --remove-orphans
+          else
+            echo "Docker Compose is not available on VPS."
+            exit 1
+          fi
+
+          docker image prune -f
+          EOF
+
+      - name: Cleanup local artifacts
+        if: always()
+        run: rm -f .env.runtime buildweaver-api-image.tar.gz

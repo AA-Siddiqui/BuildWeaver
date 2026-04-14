@@ -1,0 +1,20 @@
+services:
+  api:
+    image: ${IMAGE_NAME:?IMAGE_NAME is required}
+    restart: unless-stopped
+    env_file:
+      - .env
+    networks:
+      - traefik-public
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=traefik-public
+      - traefik.http.routers.buildweaver-api.rule=Host(`api.buildweaver.dev`)
+      - traefik.http.routers.buildweaver-api.entrypoints=websecure
+      - traefik.http.routers.buildweaver-api.tls=true
+      - traefik.http.routers.buildweaver-api.tls.certresolver=letsencrypt
+      - traefik.http.services.buildweaver-api.loadbalancer.server.port=3000
+
+networks:
+  traefik-public:
+    external: true
