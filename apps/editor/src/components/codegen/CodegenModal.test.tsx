@@ -46,10 +46,15 @@ describe('CodegenModal', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Deploy to Preview' }));
     expect(hookResult.deploy).toHaveBeenCalledWith('my-slot', 'react-web');
 
-    const downloadButton = screen.getByText('Download Zip').closest('button');
-    expect(downloadButton).not.toBeNull();
-    fireEvent.click(downloadButton as HTMLButtonElement);
+    const reactButton = screen.getByText('Generate React').closest('button');
+    expect(reactButton).not.toBeNull();
+    fireEvent.click(reactButton as HTMLButtonElement);
     expect(hookResult.generate).toHaveBeenCalledWith('react-web');
+
+    const flutterButton = screen.getByText('Generate Flutter').closest('button');
+    expect(flutterButton).not.toBeNull();
+    fireEvent.click(flutterButton as HTMLButtonElement);
+    expect(hookResult.generate).toHaveBeenCalledWith('flutter');
   });
 
   it('shows availability details for the currently entered name', () => {

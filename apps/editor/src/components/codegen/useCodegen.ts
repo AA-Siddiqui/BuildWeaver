@@ -1,6 +1,7 @@
 import { useState, useCallback } from 'react';
 import {
   ReactAdapter,
+  FlutterAdapter,
   ExpressAdapter,
   createBundle,
   bundleToZipBlob,
@@ -48,12 +49,6 @@ export const useCodegen = (projectId: string, projectName: string) => {
 
   const generate = useCallback(
     async (target: 'react-web' | 'flutter') => {
-      if (target === 'flutter') {
-        setError('Flutter code generation is not yet available.');
-        setStatus('error');
-        return;
-      }
-
       try {
         setStatus('fetching-pages');
         setProgress('Fetching pages...');
@@ -89,14 +84,22 @@ export const useCodegen = (projectId: string, projectName: string) => {
         }
 
         setStatus('generating');
-        setProgress(`Generating frontend & backend for ${pages.length} page(s)...`);
+        setProgress(`Generating ${target} frontend & Express backend for ${pages.length} page(s)...`);
 
         const projectIR = buildProjectIR(projectName, pages, graph);
 
-        // Generate React frontend
-        codegenLogger.info('Generating React frontend bundle');
-        const reactBundle = await ReactAdapter.generate(projectIR);
-        codegenLogger.info('React bundle generated', { fileCount: reactBundle.files.length });
+        const frontendAdapter = target === 'flutter' ? FlutterAdapter : ReactAdapter;
+        const frontendFolder = target === 'flutter' ? 'frontend_flutter' : 'frontend';
+
+        codegenLogger.info('Generating frontend bundle', {
+          target,
+          adapter: frontendAdapter.name,
+        });
+        const frontendBundle = await frontendAdapter.generate(projectIR);
+        codegenLogger.info('Frontend bundle generated', {
+          target,
+          fileCount: frontendBundle.files.length,
+        });
 
         // Generate Express backend
         codegenLogger.info('Generating Express backend bundle');
@@ -108,7 +111,7 @@ export const useCodegen = (projectId: string, projectName: string) => {
         setProgress('Packaging zip archive...');
 
         const combinedFiles: GeneratedFile[] = [
-          ...reactBundle.files.map((f) => ({ ...f, path: `frontend/${f.path}` })),
+          ...frontendBundle.files.map((f) => ({ ...f, path: `${frontendFolder}/${f.path}` })),
           ...expressBundle.files.map((f) => ({ ...f, path: `backend/${f.path}` })),
         ];
 
@@ -117,7 +120,8 @@ export const useCodegen = (projectId: string, projectName: string) => {
           summary: `Fullstack application for ${projectName}`,
           entryFile: 'backend/src/index.ts',
           metadata: {
-            frontendFiles: reactBundle.files.length,
+            frontendTarget: target,
+            frontendFiles: frontendBundle.files.length,
             backendFiles: expressBundle.files.length,
             pages: pages.length,
           },
@@ -132,10 +136,8 @@ export const useCodegen = (projectId: string, projectName: string) => {
           .toLowerCase()
           .replace(/[^a-z0-9]+/g, '-')
           .replace(/(^-|-$)/g, '');
-        const { blob, fileName } = await bundleToZipBlob(
-          combinedBundle,
-          `${slugName}-fullstack.zip`,
-        );
+        const archiveSuffix = target === 'flutter' ? 'flutter-express' : 'react-express';
+        const { blob, fileName } = await bundleToZipBlob(combinedBundle, `${slugName}-${archiveSuffix}.zip`);
         codegenLogger.info('Zip archive created', { fileName });
 
         downloadBlob(blob, fileName);
@@ -202,7 +204,7 @@ export const useCodegen = (projectId: string, projectName: string) => {
   const deploy = useCallback(
     async (deploymentName: string, target: 'react-web' | 'flutter') => {
       if (target === 'flutter') {
-        setError('Flutter deployment is not yet available.');
+        setError('Flutter deployment is not yet supported. Use code export for Flutter projects.');
         setStatus('error');
         return;
       }

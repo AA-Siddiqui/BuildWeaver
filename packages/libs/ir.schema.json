@@ -50,9 +50,29 @@
     },
     "theme": {
       "$ref": "#/definitions/ThemeTokens"
+    },
+    "databases": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/LooseObject" }
+    },
+    "queries": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/LooseObject" }
+    },
+    "userFunctions": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/LooseObject" }
+    },
+    "pageQueryConnections": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/PageQueryConnection" }
     }
   },
   "definitions": {
+    "LooseObject": {
+      "type": "object",
+      "additionalProperties": true
+    },
     "ScalarValue": {
       "description": "Primitive literal used within props and config.",
       "anyOf": [
@@ -543,7 +563,54 @@
         "blocks": {
           "type": "array",
           "items": { "$ref": "#/definitions/BlockInstance" }
+        },
+        "builderState": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "dynamicInputs": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/PageDynamicInputRef" }
         }
+      }
+    },
+    "PageDynamicInputRef": {
+      "type": "object",
+      "required": ["id", "label", "dataType"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "label": { "type": "string" },
+        "description": { "type": "string" },
+        "dataType": {
+          "type": "string",
+          "enum": ["string", "number", "boolean", "object", "list"]
+        },
+        "listItemType": {
+          "type": "string",
+          "enum": ["string", "number", "boolean", "object"]
+        },
+        "objectSample": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/definitions/ScalarValue" }
+        },
+        "sampleValue": { "$ref": "#/definitions/ScalarValue" }
+      }
+    },
+    "PageQueryConnection": {
+      "type": "object",
+      "required": ["pageId", "queryId", "inputId", "inputLabel", "queryMode", "schemaId"],
+      "additionalProperties": false,
+      "properties": {
+        "pageId": { "type": "string" },
+        "queryId": { "type": "string" },
+        "inputId": { "type": "string" },
+        "inputLabel": { "type": "string" },
+        "queryMode": {
+          "type": "string",
+          "enum": ["read", "insert", "update", "delete"]
+        },
+        "schemaId": { "type": "string" }
       }
     },
     "ThemeTokens": {

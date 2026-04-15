@@ -110,8 +110,11 @@ export const CodegenModal = ({ projectId, projectName, onClose }: CodegenModalPr
             {status === 'idle' && (
               <>
                 <p className="mb-4 text-sm text-bw-platinum/70">
-                  Export your project as a zip file, or deploy directly to a preview environment.
+                  Export your project as a zip file by selecting a frontend target.
                   The backend target is always ExpressJS.
+                </p>
+                <p className="mb-3 text-xs uppercase tracking-[0.2em] text-bw-platinum/50">
+                  Choose frontend target
                 </p>
                 <div className="grid grid-cols-2 gap-4">
                   <button
@@ -120,17 +123,17 @@ export const CodegenModal = ({ projectId, projectName, onClose }: CodegenModalPr
                     className="flex flex-col items-center gap-3 rounded-xl border border-bw-amber/30 bg-bw-amber/5 p-6 text-white transition hover:-translate-y-0.5 hover:border-bw-amber/60 hover:bg-bw-amber/10"
                   >
                     <span className="text-3xl">⚛</span>
-                    <span className="text-sm font-semibold uppercase tracking-[0.15em]">Download Zip</span>
+                    <span className="text-sm font-semibold uppercase tracking-[0.15em]">Generate React</span>
                     <span className="text-xs text-bw-platinum/50">React + Express</span>
                   </button>
                   <button
                     type="button"
-                    disabled
-                    className="flex flex-col items-center gap-3 rounded-xl border border-white/10 bg-white/5 p-6 text-white/40 cursor-not-allowed opacity-50"
+                    onClick={() => handleGenerate('flutter')}
+                    className="flex flex-col items-center gap-3 rounded-xl border border-bw-amber/30 bg-bw-amber/5 p-6 text-white transition hover:-translate-y-0.5 hover:border-bw-amber/60 hover:bg-bw-amber/10"
                   >
                     <span className="text-3xl">F</span>
-                    <span className="text-sm font-semibold uppercase tracking-[0.15em]">Flutter</span>
-                    <span className="text-xs text-bw-platinum/30">Coming soon</span>
+                    <span className="text-sm font-semibold uppercase tracking-[0.15em]">Generate Flutter</span>
+                    <span className="text-xs text-bw-platinum/50">Flutter + Express</span>
                   </button>
                 </div>
 
@@ -138,6 +141,7 @@ export const CodegenModal = ({ projectId, projectName, onClose }: CodegenModalPr
                   <p className="text-sm font-semibold text-white">Deploy to Preview</p>
                   <p className="mt-1 text-xs text-bw-platinum/50">
                     Deploys to *.preview.buildweaver.dev via server-side SSH and docker compose.
+                    Preview deployment currently supports React frontend.
                   </p>
 
                   <div className="mt-4">

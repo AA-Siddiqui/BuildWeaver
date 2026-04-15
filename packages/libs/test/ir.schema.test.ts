@@ -203,4 +203,88 @@ describe('IR schema', () => {
     const minimal = createEmptyProject('Demo');
     expect(() => expectValid(minimal)).not.toThrow();
   });
+
+  it('accepts page builder state, dynamic inputs, and page-query connections', () => {
+    const enriched: ProjectIR = {
+      ...sampleIr,
+      pages: [
+        {
+          ...sampleIr.pages[0],
+          builderState: {
+            root: { id: 'root', props: {}, children: [] },
+            content: [
+              {
+                type: 'Heading',
+                props: {
+                  id: 'heading-1',
+                  content: 'Hello from builder state'
+                }
+              }
+            ]
+          },
+          dynamicInputs: [
+            {
+              id: 'input-users',
+              label: 'Users',
+              dataType: 'list',
+              listItemType: 'object',
+              objectSample: {
+                name: 'Ada Lovelace',
+                age: 36,
+                active: true
+              },
+              sampleValue: [
+                {
+                  name: 'Ada Lovelace',
+                  age: 36,
+                  active: true
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      databases: [
+        {
+          id: 'db-1',
+          name: 'Main DB',
+          tables: [],
+          relationships: []
+        }
+      ],
+      queries: [
+        {
+          id: 'query-1',
+          name: 'List Users',
+          mode: 'read',
+          schemaId: 'db-1',
+          nodes: [],
+          edges: [],
+          arguments: []
+        }
+      ],
+      userFunctions: [
+        {
+          id: 'fn-1',
+          name: 'formatUser',
+          nodes: [],
+          edges: [],
+          arguments: [],
+          returnsValue: false
+        }
+      ],
+      pageQueryConnections: [
+        {
+          pageId: 'page.home',
+          queryId: 'query-1',
+          inputId: 'input-users',
+          inputLabel: 'Users',
+          queryMode: 'read',
+          schemaId: 'db-1'
+        }
+      ]
+    };
+
+    expect(() => expectValid(enriched)).not.toThrow();
+  });
 });
