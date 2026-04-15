@@ -32,7 +32,8 @@ import type {
   ProjectGraphSnapshot,
   UserDefinedFunction,
   QueryDefinition,
-  QueryNodeData
+  QueryNodeData,
+  ProjectCheckpointSummary
 } from '../types/api';
 import { projectDatabasesApi, projectGraphApi, projectPagesApi, projectAiApi } from '../lib/api-client';
 import { LogicNodePalette, FUNCTION_DRAG_DATA, QUERY_DRAG_DATA } from '../components/logic/LogicNodePalette';
@@ -92,6 +93,7 @@ import { cloneGraphSnapshot, GraphSnapshot, hashGraphSnapshot } from '../lib/gra
 import { DragHistoryBuffer } from '../lib/dragHistoryBuffer';
 import { AiCommandPalette } from '../components/logic/AiCommandPalette';
 import { CodegenModal } from '../components/codegen/CodegenModal';
+import { ProjectCheckpointModal } from '../components/checkpoints/ProjectCheckpointModal';
 
 const nodeTypes = {
   dummy: DummyNode,
@@ -254,6 +256,7 @@ const LogicEditorView = () => {
   const [marqueeGesture, setMarqueeGesture] = useState<GestureState | null>(null);
   const [isAiPaletteOpen, setIsAiPaletteOpen] = useState(false);
   const [isCodegenModalOpen, setIsCodegenModalOpen] = useState(false);
+  const [isCheckpointModalOpen, setIsCheckpointModalOpen] = useState(false);
   const [isAiGenerating, setIsAiGenerating] = useState(false);
   const previewResolver = useMemo(
     () => createPreviewResolver(nodes, edges, { functions, queryDefinitions: queries, databases }),
@@ -746,6 +749,57 @@ const LogicEditorView = () => {
     setIsAiPaletteOpen((prev) => !prev);
     aiLogger.debug('AI palette toggled', { projectId });
   }, [projectId]);
+
+  const handleOpenCheckpointModal = useCallback(() => {
+    setIsCheckpointModalOpen(true);
+    logicLogger.info('Checkpoint modal opened from logic header', { projectId });
+  }, [projectId]);
+
+  const handleCheckpointBeforeCreate = useCallback(async () => {
+    if (!projectId) {
+      return;
+    }
+    await persistGraph({ reason: 'checkpoint-create', force: true });
+    logicLogger.info('Checkpoint pre-save completed', { projectId });
+  }, [persistGraph, projectId]);
+
+  const handleCheckpointCreated = useCallback(
+    async (checkpoint: ProjectCheckpointSummary) => {
+      setFeedback(`Checkpoint "${checkpoint.name}" saved`);
+      setTimeout(() => setFeedback(''), 3000);
+      logicLogger.info('Checkpoint created', {
+        projectId,
+        checkpointId: checkpoint.id,
+        checkpointName: checkpoint.name
+      });
+    },
+    [projectId]
+  );
+
+  const handleCheckpointRestored = useCallback(
+    async (checkpoint: ProjectCheckpointSummary) => {
+      if (!projectId) {
+        return;
+      }
+
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: projectGraphQueryKey(projectId) }),
+        queryClient.invalidateQueries({ queryKey: ['project-pages', projectId] }),
+        queryClient.invalidateQueries({ queryKey: ['project-components', projectId] })
+      ]);
+
+      setHasUnsavedChanges(false);
+      setFeedback(`Restored checkpoint "${checkpoint.name}"`);
+      setTimeout(() => setFeedback(''), 3000);
+
+      logicLogger.warn('Checkpoint restored and cache invalidated', {
+        projectId,
+        checkpointId: checkpoint.id,
+        checkpointName: checkpoint.name
+      });
+    },
+    [projectId, queryClient]
+  );
 
   const handleAiGenerate = useCallback(
     async (prompt: string) => {
@@ -1729,6 +1783,13 @@ const LogicEditorView = () => {
               </button>
               <button
                 type="button"
+                onClick={handleOpenCheckpointModal}
+                className="rounded-xl border border-white/20 px-4 py-2 text-bw-platinum transition hover:-translate-y-0.5"
+              >
+                Checkpoint
+              </button>
+              <button
+                type="button"
                 onClick={handleSave}
                 disabled={!hasUnsavedChanges || isSaving}
                 className="rounded-xl bg-bw-sand px-4 py-2 font-semibold text-bw-ink transition hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-60"
@@ -1864,6 +1925,14 @@ const LogicEditorView = () => {
           onClose={() => setIsCodegenModalOpen(false)}
         />
       )}
+      <ProjectCheckpointModal
+        projectId={projectId}
+        isOpen={isCheckpointModalOpen}
+        onClose={() => setIsCheckpointModalOpen(false)}
+        onBeforeCreate={handleCheckpointBeforeCreate}
+        onCreated={handleCheckpointCreated}
+        onRestored={handleCheckpointRestored}
+      />
     </>
   );
 };

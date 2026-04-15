@@ -12,6 +12,28 @@ export interface Project {
   updatedAt: string;
 }
 
+export interface ProjectCheckpointCounts {
+  pages: number;
+  components: number;
+  deployments: number;
+  graphNodes: number;
+  graphEdges: number;
+  functions: number;
+  databases: number;
+  queries: number;
+}
+
+export interface ProjectCheckpointSummary {
+  id: string;
+  projectId: string;
+  name: string;
+  description: string;
+  createdAt: string;
+  updatedAt: string;
+  capturedAt: string;
+  counts: ProjectCheckpointCounts;
+}
+
 export type {
   PageDocument,
   PageDynamicInput,

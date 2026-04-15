@@ -13,9 +13,29 @@ import { ProjectAiController } from './ai/ai.controller';
 import { ProjectAiService } from './ai/ai.service';
 import { ProjectDeployController } from './deploy/deploy.controller';
 import { ProjectDeployService } from './deploy/deploy.service';
+import { ProjectCheckpointsController } from './checkpoints/checkpoints.controller';
+import { ProjectCheckpointsService } from './checkpoints/checkpoints.service';
 
 @Module({
-  controllers: [ProjectsController, ProjectGraphController, ProjectPagesController, ProjectComponentsController, ProjectDatabasesController, ProjectAiController, ProjectDeployController],
-  providers: [ProjectsService, ProjectGraphService, ProjectPagesService, ProjectComponentsService, ProjectDatabasesService, ProjectAiService, ProjectDeployService]
+  controllers: [
+    ProjectsController,
+    ProjectGraphController,
+    ProjectPagesController,
+    ProjectComponentsController,
+    ProjectDatabasesController,
+    ProjectAiController,
+    ProjectDeployController,
+    ProjectCheckpointsController
+  ],
+  providers: [
+    ProjectsService,
+    ProjectGraphService,
+    ProjectPagesService,
+    ProjectComponentsService,
+    ProjectDatabasesService,
+    ProjectAiService,
+    ProjectDeployService,
+    ProjectCheckpointsService
+  ]
 })
 export class ProjectsModule {}

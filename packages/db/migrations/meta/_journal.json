@@ -36,6 +36,13 @@
       "when": 1776109979677,
       "tag": "0004_fearless_baron_strucker",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1776246067364,
+      "tag": "0005_careful_killer_shrike",
+      "breakpoints": true
     }
   ]
 }

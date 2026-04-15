@@ -1,5 +1,12 @@
 import { useAuthStore } from '../stores/auth-store';
-import { AuthUser, DatabaseSchema, LogicEditorEdge, LogicEditorNode, Project } from '../types/api';
+import {
+  AuthUser,
+  DatabaseSchema,
+  LogicEditorEdge,
+  LogicEditorNode,
+  Project,
+  ProjectCheckpointSummary
+} from '../types/api';
 import type {
   ComponentBindingReference,
   PageBuilderState,
@@ -130,6 +137,20 @@ export const projectsApi = {
   update: (projectId: string, body: { name?: string; description?: string }) =>
     apiFetch<{ project: Project }>(`/projects/${projectId}`, { method: 'PATCH', body: serialize(body) }),
   remove: (projectId: string) => apiFetch(`/projects/${projectId}`, { method: 'DELETE' })
+};
+
+export const projectCheckpointsApi = {
+  list: (projectId: string) =>
+    apiFetch<{ checkpoints: ProjectCheckpointSummary[] }>(`/projects/${projectId}/checkpoints`),
+  create: (projectId: string, body: { name: string; description?: string }) =>
+    apiFetch<{ checkpoint: ProjectCheckpointSummary }>(`/projects/${projectId}/checkpoints`, {
+      method: 'POST',
+      body: serialize(body)
+    }),
+  restore: (projectId: string, checkpointId: string) =>
+    apiFetch<{ checkpoint: ProjectCheckpointSummary }>(`/projects/${projectId}/checkpoints/${checkpointId}/restore`, {
+      method: 'POST'
+    })
 };
 
 export const projectGraphApi = {

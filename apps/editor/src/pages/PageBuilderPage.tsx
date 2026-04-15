@@ -5,7 +5,7 @@ import { Puck } from '@measured/puck';
 import type { BuilderPreviewViewport } from './page-builder/preview-viewports';
 import type { ComponentData, Content, Data } from '@measured/puck';
 import '@measured/puck/puck.css';
-import type { PageBuilderState, PageDocument, PageDynamicInput } from '../types/api';
+import type { PageBuilderState, PageDocument, PageDynamicInput, ProjectCheckpointSummary } from '../types/api';
 import type { ScalarValue } from '@buildweaver/libs';
 import { projectComponentsApi, projectGraphApi, projectPagesApi, projectAiApi } from '../lib/api-client';
 import { projectGraphQueryKey, invalidateProjectGraphCache } from '../lib/query-helpers';
@@ -27,6 +27,7 @@ import { ComponentLibraryProvider, type SaveComponentRequest } from './page-buil
 import { COMPONENT_ACTIONS_FIELD_KEY } from './page-builder/component-library';
 import { formatScalar } from '../components/logic/preview';
 import { AiCommandPalette } from '../components/ai-command-palette';
+import { ProjectCheckpointModal } from '../components/checkpoints/ProjectCheckpointModal';
 
 const randomId = () => {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -238,6 +239,7 @@ export const PageBuilderPage = () => {
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [feedback, setFeedback] = useState('');
   const [isAiPaletteOpen, setIsAiPaletteOpen] = useState(false);
+  const [isCheckpointModalOpen, setIsCheckpointModalOpen] = useState(false);
   const draftStatusRef = useRef<{ restored: boolean; savedAt?: number }>({ restored: false });
   const draftPersistHandle = useRef<number | null>(null);
   const pendingSaveRef = useRef<Promise<unknown> | null>(null);
@@ -902,6 +904,55 @@ export const PageBuilderPage = () => {
     void persistBuilderChanges({ reason: 'manual', force: true });
   }, [hasUnsavedChanges, pageId, persistBuilderChanges, projectId]);
 
+  const handleOpenCheckpointModal = useCallback(() => {
+    setIsCheckpointModalOpen(true);
+    logPageBuilderEvent('Checkpoint modal opened', { pageId, projectId });
+  }, [pageId, projectId]);
+
+  const handleCheckpointBeforeCreate = useCallback(async () => {
+    await persistBuilderChanges({ reason: 'checkpoint-create', force: true });
+    logPageBuilderEvent('Checkpoint pre-save completed', { pageId, projectId });
+  }, [pageId, persistBuilderChanges, projectId]);
+
+  const handleCheckpointCreated = useCallback(
+    async (checkpoint: ProjectCheckpointSummary) => {
+      setFeedback(`Checkpoint "${checkpoint.name}" saved`);
+      setTimeout(() => setFeedback(''), 3000);
+      logPageBuilderEvent('Checkpoint created', {
+        projectId,
+        pageId,
+        checkpointId: checkpoint.id,
+        checkpointName: checkpoint.name
+      });
+    },
+    [pageId, projectId]
+  );
+
+  const handleCheckpointRestored = useCallback(
+    async (checkpoint: ProjectCheckpointSummary) => {
+      if (!projectId) {
+        return;
+      }
+
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['project-page', projectId, pageId] }),
+        queryClient.invalidateQueries({ queryKey: ['project-pages', projectId] }),
+        queryClient.invalidateQueries({ queryKey: ['project-components', projectId] }),
+        queryClient.invalidateQueries({ queryKey: projectGraphQueryKey(projectId) })
+      ]);
+
+      logPageBuilderEvent('Checkpoint restored from page builder', {
+        projectId,
+        pageId,
+        checkpointId: checkpoint.id,
+        checkpointName: checkpoint.name
+      });
+
+      navigate(`/app/${projectId}`);
+    },
+    [navigate, pageId, projectId, queryClient]
+  );
+
   const handlePreviewOpen = useCallback(() => {
     if (typeof window === 'undefined' || !projectId || !pageId) {
       return;
@@ -1223,6 +1274,13 @@ export const PageBuilderPage = () => {
             >
               Preview
             </button>
+            <button
+              type="button"
+              onClick={handleOpenCheckpointModal}
+              className="rounded-lg border border-gray-300 px-3 py-1 text-gray-700 transition hover:border-gray-500"
+            >
+              Checkpoint
+            </button>
             {feedback && <span className="text-gray-500">{feedback}</span>}
             <button
               type="button"
@@ -1252,6 +1310,16 @@ export const PageBuilderPage = () => {
         </div>
       </div>
       </div>
+      {projectId && (
+        <ProjectCheckpointModal
+          projectId={projectId}
+          isOpen={isCheckpointModalOpen}
+          onClose={() => setIsCheckpointModalOpen(false)}
+          onBeforeCreate={handleCheckpointBeforeCreate}
+          onCreated={handleCheckpointCreated}
+          onRestored={handleCheckpointRestored}
+        />
+      )}
       <AiCommandPalette
         open={isAiPaletteOpen}
         loading={aiUiMutation.isPending}

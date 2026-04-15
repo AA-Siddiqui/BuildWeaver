@@ -8,6 +8,40 @@ import {
   ProjectGraphSnapshot
 } from '@buildweaver/libs';
 
+export interface ProjectCheckpointSnapshot {
+  capturedAt: string;
+  project: {
+    name: string;
+    description: string;
+  };
+  graph: ProjectGraphSnapshot | null;
+  pages: Array<{
+    id: string;
+    name: string;
+    slug: string;
+    builderState: PageBuilderState;
+    dynamicInputs: PageDynamicInput[];
+  }>;
+  components: Array<{
+    id: string;
+    name: string;
+    slug: string;
+    definition: BuilderComponentDefinition;
+    bindingReferences: ComponentBindingReference[];
+  }>;
+  deployments: Array<{
+    id: string;
+    deploymentName: string;
+    subdomain: string;
+    frontendDomain: string;
+    backendDomain: string;
+    remotePath: string;
+    status: string;
+    lastError: string | null;
+    deployedAt: string | null;
+  }>;
+}
+
 export const users = pgTable('users', {
   id: uuid('id').defaultRandom().primaryKey(),
   email: text('email').notNull().unique(),
@@ -85,6 +119,18 @@ export const projectComponents = pgTable(
   })
 );
 
+export const projectCheckpoints = pgTable('project_checkpoints', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  projectId: uuid('project_id')
+    .notNull()
+    .references(() => projects.id, { onDelete: 'cascade' }),
+  name: text('name').notNull(),
+  description: text('description').notNull().default(''),
+  snapshot: jsonb('snapshot').$type<ProjectCheckpointSnapshot>().notNull(),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow().$onUpdate(() => new Date())
+});
+
 export const projectDeployments = pgTable(
   'project_deployments',
   {
@@ -125,6 +171,7 @@ export const projectsRelations = relations(projects, ({ one, many }) => ({
   pages: many(projectPages),
   graph: one(projectGraphs),
   components: many(projectComponents),
+  checkpoints: many(projectCheckpoints),
   deployments: many(projectDeployments)
 }));
 
@@ -145,6 +192,13 @@ export const projectGraphsRelations = relations(projectGraphs, ({ one }) => ({
 export const projectComponentsRelations = relations(projectComponents, ({ one }) => ({
   project: one(projects, {
     fields: [projectComponents.projectId],
+    references: [projects.id]
+  })
+}));
+
+export const projectCheckpointsRelations = relations(projectCheckpoints, ({ one }) => ({
+  project: one(projects, {
+    fields: [projectCheckpoints.projectId],
     references: [projects.id]
   })
 }));
@@ -170,5 +224,7 @@ export type ProjectGraph = typeof projectGraphs.$inferSelect;
 export type NewProjectGraph = typeof projectGraphs.$inferInsert;
 export type ProjectComponent = typeof projectComponents.$inferSelect;
 export type NewProjectComponent = typeof projectComponents.$inferInsert;
+export type ProjectCheckpoint = typeof projectCheckpoints.$inferSelect;
+export type NewProjectCheckpoint = typeof projectCheckpoints.$inferInsert;
 export type ProjectDeployment = typeof projectDeployments.$inferSelect;
 export type NewProjectDeployment = typeof projectDeployments.$inferInsert;

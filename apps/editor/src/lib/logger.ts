@@ -44,3 +44,4 @@ export const dbDesignerLogger = new ScopedLogger('DbDesigner');
 export const queryEditorLogger = new ScopedLogger('QueryEditor');
 export const aiLogger = new ScopedLogger('AiLogic');
 export const codegenLogger = new ScopedLogger('Codegen');
+export const checkpointLogger = new ScopedLogger('Checkpoint');
