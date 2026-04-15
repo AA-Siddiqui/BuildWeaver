@@ -8,11 +8,15 @@ const logPaletteEvent = (message: string, details?: Record<string, unknown>) => 
   }
 };
 
+export type PageBuilderAiSubmitOptions = {
+  agentMode: boolean;
+};
+
 export type AiCommandPaletteProps = {
   open: boolean;
   loading: boolean;
   onClose: () => void;
-  onSubmit: (prompt: string) => void;
+  onSubmit: (prompt: string, options: PageBuilderAiSubmitOptions) => void;
 };
 
 export const AiCommandPalette: FC<AiCommandPaletteProps> = ({
@@ -22,12 +26,14 @@ export const AiCommandPalette: FC<AiCommandPaletteProps> = ({
   onSubmit
 }) => {
   const [prompt, setPrompt] = useState('');
+  const [agentMode, setAgentMode] = useState(true);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (open) {
       logPaletteEvent('Palette opened');
       setPrompt('');
+      setAgentMode(true);
       // Delay focus slightly to ensure DOM is ready
       const handle = setTimeout(() => inputRef.current?.focus(), 50);
       return () => clearTimeout(handle);
@@ -54,10 +60,12 @@ export const AiCommandPalette: FC<AiCommandPaletteProps> = ({
           return;
         }
         logPaletteEvent('Submitting prompt', { promptLength: trimmed.length });
-        onSubmit(trimmed);
+        onSubmit(trimmed, {
+          agentMode
+        });
       }
     },
-    [loading, onClose, onSubmit, prompt]
+    [agentMode, loading, onClose, onSubmit, prompt]
   );
 
   if (!open) {
@@ -90,7 +98,7 @@ export const AiCommandPalette: FC<AiCommandPaletteProps> = ({
             ref={inputRef}
             type="text"
             className="flex-1 bg-transparent text-sm text-gray-900 placeholder-gray-400 outline-none"
-            placeholder="Describe the UI you want to build..."
+            placeholder="Describe what you want to build or change..."
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
             onKeyDown={handleKeyDown}
@@ -114,6 +122,20 @@ export const AiCommandPalette: FC<AiCommandPaletteProps> = ({
             </div>
           </div>
         )}
+        <div className="border-t border-gray-100 px-4 py-3">
+          <div className="flex flex-wrap items-center gap-4">
+            <label className="inline-flex items-center gap-2 text-xs text-gray-600">
+              <input
+                type="checkbox"
+                checked={agentMode}
+                onChange={(event) => setAgentMode(event.target.checked)}
+                disabled={loading}
+                aria-label="Enable agent mode"
+              />
+              Agent Mode
+            </label>
+          </div>
+        </div>
       </div>
     </div>
   );

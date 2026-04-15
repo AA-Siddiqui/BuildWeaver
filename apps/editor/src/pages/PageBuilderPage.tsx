@@ -7,7 +7,13 @@ import type { ComponentData, Content, Data } from '@measured/puck';
 import '@measured/puck/puck.css';
 import type { PageBuilderState, PageDocument, PageDynamicInput, ProjectCheckpointSummary } from '../types/api';
 import type { ScalarValue } from '@buildweaver/libs';
-import { projectComponentsApi, projectGraphApi, projectPagesApi, projectAiApi } from '../lib/api-client';
+import {
+  projectComponentsApi,
+  projectGraphApi,
+  projectPagesApi,
+  projectAiApi,
+  type AiAgentModeOptions
+} from '../lib/api-client';
 import { projectGraphQueryKey, invalidateProjectGraphCache } from '../lib/query-helpers';
 import { SnapshotHistory } from '../lib/snapshotHistory';
 import { processEditorShortcut } from '../lib/editorShortcuts';
@@ -26,8 +32,9 @@ import {
 import { ComponentLibraryProvider, type SaveComponentRequest } from './page-builder/component-library-context';
 import { COMPONENT_ACTIONS_FIELD_KEY } from './page-builder/component-library';
 import { formatScalar } from '../components/logic/preview';
-import { AiCommandPalette } from '../components/ai-command-palette';
+import { AiCommandPalette, type PageBuilderAiSubmitOptions } from '../components/ai-command-palette';
 import { ProjectCheckpointModal } from '../components/checkpoints/ProjectCheckpointModal';
+import { mergeGeneratedLogicIntoGraph } from './page-builder/ai-logic-merge';
 
 const randomId = () => {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -518,16 +525,17 @@ export const PageBuilderPage = () => {
   );
 
   const aiUiMutation = useMutation({
-    mutationFn: (prompt: string) => {
+    mutationFn: ({ prompt, options }: { prompt: string; options: AiAgentModeOptions }) => {
       if (!projectId) {
         throw new Error('Missing project id');
       }
       logPageBuilderEvent('AI UI generation requested', {
         projectId,
         pageId,
-        promptLength: prompt.length
+        promptLength: prompt.length,
+        agentMode: options.agentMode === true
       });
-      return projectAiApi.generateUi(projectId, prompt);
+      return projectAiApi.generateUi(projectId, prompt, options);
     },
     onSuccess: (result) => {
       logPageBuilderEvent('AI UI generation succeeded', {
@@ -566,16 +574,163 @@ export const PageBuilderPage = () => {
     }
   });
 
-  const handleAiUiSubmit = useCallback(
-    (prompt: string) => {
-      logPageBuilderEvent('AI UI prompt submitted', {
+  const aiAgentMutation = useMutation({
+    mutationFn: async ({ prompt, options }: { prompt: string; options: AiAgentModeOptions }) => {
+      if (!projectId) {
+        throw new Error('Missing project id');
+      }
+
+      logPageBuilderEvent('AI agent generation requested from page builder', {
+        projectId,
+        pageId,
+        promptLength: prompt.length,
+        agentMode: options.agentMode === true
+      });
+
+      const result = await projectAiApi.generateAgent(projectId, prompt, options);
+      logPageBuilderEvent('AI agent routing resolved for page builder', {
+        projectId,
+        pageId,
+        applyUi: result.targets.ui,
+        applyLogic: result.targets.logic,
+        routingReason: result.routing.reason,
+        summary: result.summary
+      });
+
+      let mergeOutcome: ReturnType<typeof mergeGeneratedLogicIntoGraph> | null = null;
+      let persistedGraph: Awaited<ReturnType<typeof projectGraphApi.save>>['graph'] | null = null;
+
+      if (result.logic) {
+        if (result.logic.nodes.length === 0) {
+          logPageBuilderEvent('AI agent returned logic target with empty node payload', {
+            projectId,
+            pageId,
+            summary: result.logic.summary
+          });
+        } else {
+          const currentGraph = graphQuery.data?.graph ?? (await projectGraphApi.get(projectId)).graph;
+          logPageBuilderEvent('Loaded graph snapshot for AI agent logic merge', {
+            projectId,
+            pageId,
+            existingNodes: currentGraph.nodes.length,
+            existingEdges: currentGraph.edges.length
+          });
+
+          mergeOutcome = mergeGeneratedLogicIntoGraph(currentGraph, result.logic.nodes, result.logic.edges);
+          logPageBuilderEvent('Merged AI agent logic into graph snapshot', {
+            projectId,
+            pageId,
+            addedNodes: mergeOutcome.addedNodes,
+            addedEdges: mergeOutcome.addedEdges,
+            remappedNodes: mergeOutcome.remappedNodes,
+            skippedEdges: mergeOutcome.skippedEdges
+          });
+
+          const saveResult = await projectGraphApi.save(projectId, mergeOutcome.graph);
+          persistedGraph = saveResult.graph;
+
+          logPageBuilderEvent('Persisted AI agent logic graph updates', {
+            projectId,
+            pageId,
+            persistedNodes: persistedGraph.nodes.length,
+            persistedEdges: persistedGraph.edges.length
+          });
+
+          await invalidateProjectGraphCache(
+            queryClient,
+            projectId,
+            { reason: 'ai-agent-logic-generation' },
+            (message, details) => logPageBuilderEvent(message, details)
+          );
+        }
+      }
+
+      return {
+        result,
+        mergeOutcome,
+        persistedGraph
+      };
+    },
+    onSuccess: ({ result, mergeOutcome, persistedGraph }) => {
+      if (result.ui) {
+        logPageBuilderEvent('Applying AI agent UI payload to page builder state', {
+          projectId,
+          pageId,
+          contentItems: result.ui.data.content.length,
+          zoneCount: Object.keys(result.ui.data.zones ?? {}).length,
+          summary: result.ui.summary
+        });
+
+        const aiGeneratedState = result.ui.data as Data;
+        builderHistoryRef.current.observe(getCurrentBuilderSnapshot(), {
+          pageId,
+          projectId,
+          reason: 'pre-ai-agent-ui-generation'
+        });
+
+        setBuilderState(aiGeneratedState);
+        setHasUnsavedChanges(true);
+        setPuckSessionKey(derivePuckSessionKey(undefined, pageId) + ':ai-' + Date.now());
+        scheduleDraftPersist(aiGeneratedState, dynamicInputs);
+      }
+
+      if (result.logic && mergeOutcome && persistedGraph) {
+        logPageBuilderEvent('AI agent logic updates applied from page builder', {
+          projectId,
+          pageId,
+          addedNodes: mergeOutcome.addedNodes,
+          addedEdges: mergeOutcome.addedEdges,
+          persistedNodes: persistedGraph.nodes.length,
+          persistedEdges: persistedGraph.edges.length,
+          summary: result.logic.summary
+        });
+      }
+
+      const appliedTargets: string[] = [];
+      if (result.targets.ui) {
+        appliedTargets.push('UI');
+      }
+      if (result.targets.logic) {
+        appliedTargets.push('logic');
+      }
+
+      setFeedback(`AI updated ${appliedTargets.join(' and ')}: ${result.summary}`);
+      setTimeout(() => setFeedback(''), 4000);
+      setIsAiPaletteOpen(false);
+    },
+    onError: (error: unknown) => {
+      const message = error instanceof Error ? error.message : 'AI agent generation failed';
+      logPageBuilderEvent('AI agent generation failed in page builder', {
+        projectId,
+        pageId,
+        error: message
+      });
+      setFeedback(message);
+      setTimeout(() => setFeedback(''), 4000);
+    }
+  });
+
+  const handleAiSubmit = useCallback(
+    (prompt: string, options: PageBuilderAiSubmitOptions) => {
+      logPageBuilderEvent('AI prompt submitted from page builder', {
         pageId,
         projectId,
-        promptLength: prompt.length
+        promptLength: prompt.length,
+        agentMode: options.agentMode
       });
-      aiUiMutation.mutate(prompt);
+
+      const requestOptions: AiAgentModeOptions = {
+        agentMode: options.agentMode
+      };
+
+      if (options.agentMode) {
+        aiAgentMutation.mutate({ prompt, options: requestOptions });
+        return;
+      }
+
+      aiUiMutation.mutate({ prompt, options: requestOptions });
     },
-    [aiUiMutation, pageId, projectId]
+    [aiAgentMutation, aiUiMutation, pageId, projectId]
   );
 
   const handleAiPaletteToggle = useCallback(() => {
@@ -1254,10 +1409,10 @@ export const PageBuilderPage = () => {
               type="button"
               className="rounded-lg border border-bw-amber/40 px-3 py-1 text-gray-700 transition hover:border-bw-amber hover:text-bw-ink disabled:opacity-60"
               onClick={handleAiPaletteToggle}
-              disabled={aiUiMutation.isPending}
-              title="AI generate UI (Ctrl+K)"
+              disabled={aiUiMutation.isPending || aiAgentMutation.isPending}
+              title="AI builder (Ctrl+K)"
             >
-              {aiUiMutation.isPending ? 'Generating…' : 'AI'}
+              {aiUiMutation.isPending || aiAgentMutation.isPending ? 'Generating…' : 'AI'}
             </button>
             <button
               type="button"
@@ -1322,9 +1477,9 @@ export const PageBuilderPage = () => {
       )}
       <AiCommandPalette
         open={isAiPaletteOpen}
-        loading={aiUiMutation.isPending}
+        loading={aiUiMutation.isPending || aiAgentMutation.isPending}
         onClose={() => setIsAiPaletteOpen(false)}
-        onSubmit={handleAiUiSubmit}
+        onSubmit={handleAiSubmit}
       />
     </>
   );

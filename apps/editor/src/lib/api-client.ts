@@ -171,7 +171,10 @@ type UpdatePagePayload = {
 
 export const projectPagesApi = {
   list: (projectId: string) => apiFetch<{ pages: PageDocument[] }>(`/projects/${projectId}/pages`),
-  create: (projectId: string, body: { name: string; slug?: string }) =>
+  create: (
+    projectId: string,
+    body: { name: string; slug?: string; builderState?: PageBuilderState; dynamicInputs?: PageDynamicInput[] }
+  ) =>
     apiFetch<{ page: PageDocument }>(`/projects/${projectId}/pages`, { method: 'POST', body: serialize(body) }),
   get: (projectId: string, pageId: string) =>
     apiFetch<{ page: PageDocument }>(`/projects/${projectId}/pages/${pageId}`),
@@ -267,15 +270,41 @@ export interface AiGenerateUiResult {
   summary: string;
 }
 
+export interface AiGenerateAgentResult {
+  summary: string;
+  routing: {
+    applyUi: boolean;
+    applyLogic: boolean;
+    reason: string;
+    uiPrompt?: string;
+    logicPrompt?: string;
+  };
+  targets: {
+    ui: boolean;
+    logic: boolean;
+  };
+  ui?: AiGenerateUiResult;
+  logic?: AiGenerateLogicResult;
+}
+
+export interface AiAgentModeOptions {
+  agentMode?: boolean;
+}
+
 export const projectAiApi = {
-  generateLogic: (projectId: string, prompt: string) =>
+  generateLogic: (projectId: string, prompt: string, options: AiAgentModeOptions = {}) =>
     apiFetch<AiGenerateLogicResult>(`/projects/${projectId}/ai/generate-logic`, {
       method: 'POST',
-      body: serialize({ prompt })
+      body: serialize({ prompt, ...options })
     }),
-  generateUi: (projectId: string, prompt: string) =>
+  generateUi: (projectId: string, prompt: string, options: AiAgentModeOptions = {}) =>
     apiFetch<AiGenerateUiResult>(`/projects/${projectId}/ai/generate-ui`, {
       method: 'POST',
-      body: serialize({ prompt })
+      body: serialize({ prompt, ...options })
+    }),
+  generateAgent: (projectId: string, prompt: string, options: AiAgentModeOptions = {}) =>
+    apiFetch<AiGenerateAgentResult>(`/projects/${projectId}/ai/generate-agent`, {
+      method: 'POST',
+      body: serialize({ prompt, ...options })
     })
 };

@@ -35,7 +35,12 @@ import type {
   QueryNodeData,
   ProjectCheckpointSummary
 } from '../types/api';
-import { projectDatabasesApi, projectGraphApi, projectPagesApi, projectAiApi } from '../lib/api-client';
+import {
+  projectDatabasesApi,
+  projectGraphApi,
+  projectPagesApi,
+  projectAiApi
+} from '../lib/api-client';
 import { LogicNodePalette, FUNCTION_DRAG_DATA, QUERY_DRAG_DATA } from '../components/logic/LogicNodePalette';
 import { DummyNode } from '../components/logic/DummyNode';
 import { PageNode } from '../components/logic/PageNode';
@@ -91,7 +96,7 @@ import {
 } from '../lib/graphInteractions';
 import { cloneGraphSnapshot, GraphSnapshot, hashGraphSnapshot } from '../lib/graphSnapshot';
 import { DragHistoryBuffer } from '../lib/dragHistoryBuffer';
-import { AiCommandPalette } from '../components/logic/AiCommandPalette';
+import { AiCommandPalette, type LogicBuilderAiSubmitOptions } from '../components/logic/AiCommandPalette';
 import { CodegenModal } from '../components/codegen/CodegenModal';
 import { ProjectCheckpointModal } from '../components/checkpoints/ProjectCheckpointModal';
 
@@ -556,7 +561,8 @@ const LogicEditorView = () => {
   });
 
   const createPageMutation = useMutation({
-    mutationFn: (payload: { name: string; slug?: string }) => projectPagesApi.create(projectId!, payload),
+    mutationFn: (payload: Parameters<typeof projectPagesApi.create>[1]) =>
+      projectPagesApi.create(projectId!, payload),
     onSuccess: (_, payload) => {
       logicLogger.debug('Pages invalidated after creation', { projectId, slug: payload.slug });
       queryClient.invalidateQueries({ queryKey: ['project-pages', projectId] });
@@ -627,35 +633,57 @@ const LogicEditorView = () => {
     [isHandleAvailable, setEdges]
   );
 
+  type PersistGraphOverrides = {
+    nodes?: FlowNode[];
+    edges?: FlowEdge[];
+    functions?: UserDefinedFunction[];
+    databases?: DatabaseSchema[];
+    queries?: QueryDefinition[];
+  };
+
   const persistGraph = useCallback(
-    async ({ reason, force = false }: { reason: string; force?: boolean }) => {
+    async ({
+      reason,
+      force = false,
+      overrides
+    }: {
+      reason: string;
+      force?: boolean;
+      overrides?: PersistGraphOverrides;
+    }) => {
       if (!projectId) {
         return;
       }
-      if (!force && !hasUnsavedChanges) {
+      const effectiveNodes = overrides?.nodes ?? nodes;
+      const effectiveEdges = overrides?.edges ?? edges;
+      const effectiveFunctions = overrides?.functions ?? functions;
+      const effectiveDatabases = overrides?.databases ?? databases;
+      const effectiveQueries = overrides?.queries ?? queries;
+
+      if (!force && !hasUnsavedChanges && !overrides) {
         logicLogger.debug('Skipping graph persist — no changes', { reason, projectId });
         return;
       }
-      const normalizedFunctions = functions.map((fn) => {
+      const normalizedFunctions = effectiveFunctions.map((fn) => {
         const { updatedAt, ...persistable } = fn;
         return updatedAt ? { ...persistable } : persistable;
       });
-      const strippedCount = functions.filter((fn) => typeof fn.updatedAt !== 'undefined').length;
+      const strippedCount = effectiveFunctions.filter((fn) => typeof fn.updatedAt !== 'undefined').length;
       if (strippedCount > 0) {
         logicLogger.debug('Stripped transient metadata from functions before save', {
           projectId,
           stripped: strippedCount
         });
       }
-      const normalizedQueries = queries.map((q) => {
+      const normalizedQueries = effectiveQueries.map((q) => {
         const { updatedAt, ...persistable } = q;
         return updatedAt ? { ...persistable } : persistable;
       });
       const payload: ProjectGraphSnapshot = {
-        nodes: serializeNodes(nodes),
-        edges: serializeEdges(edges),
+        nodes: serializeNodes(effectiveNodes),
+        edges: serializeEdges(effectiveEdges),
         functions: normalizedFunctions,
-        databases: serializeDatabases(databases),
+        databases: serializeDatabases(effectiveDatabases),
         queries: normalizedQueries
       };
       const inputSummary = summarizePageNodeInputs(payload.nodes);
@@ -684,7 +712,8 @@ const LogicEditorView = () => {
         nodes: payload.nodes.length,
         edges: payload.edges.length,
         databases: payload.databases?.length ?? 0,
-        queries: payload.queries?.length ?? 0
+        queries: payload.queries?.length ?? 0,
+        overridePayload: Boolean(overrides)
       });
       const promise = saveMutation.mutateAsync(payload);
       pendingSaveRef.current = promise;
@@ -802,15 +831,150 @@ const LogicEditorView = () => {
   );
 
   const handleAiGenerate = useCallback(
-    async (prompt: string) => {
+    async (prompt: string, options: LogicBuilderAiSubmitOptions) => {
       if (!projectId) return;
       setIsAiGenerating(true);
-      aiLogger.info('AI generation started', { projectId, promptLength: prompt.length });
+      aiLogger.info('AI generation started', {
+        projectId,
+        promptLength: prompt.length,
+        agentMode: options.agentMode
+      });
 
       try {
-        const result = await projectAiApi.generateLogic(projectId, prompt);
+        if (options.agentMode) {
+          const result = await projectAiApi.generateAgent(projectId, prompt, { agentMode: true });
+          aiLogger.info('AI agent routing resolved in logic builder', {
+            projectId,
+            applyUi: result.targets.ui,
+            applyLogic: result.targets.logic,
+            routingReason: result.routing.reason,
+            summary: result.summary
+          });
 
-        aiLogger.info('AI generation result received', {
+          let nextNodes = nodes;
+          let nextEdges = edges;
+          let createdPageId: string | null = null;
+
+          if (result.logic) {
+            const viewport = reactFlowInstance.getViewport();
+            const wrapperBounds = reactFlowWrapper.current?.getBoundingClientRect();
+            const centerX = wrapperBounds ? (wrapperBounds.width / 2 - viewport.x) / viewport.zoom : 400;
+            const centerY = wrapperBounds ? (wrapperBounds.height / 2 - viewport.y) / viewport.zoom : 300;
+
+            const flowNodes = toFlowNodes(result.logic.nodes).map((node) => ({
+              ...node,
+              position: {
+                x: node.position.x + centerX,
+                y: node.position.y + centerY
+              }
+            }));
+            const flowEdges = toFlowEdges(result.logic.edges).map((edge) => ({
+              ...edge,
+              type: 'severable' as const
+            }));
+
+            nextNodes = nextNodes.concat(flowNodes);
+            nextEdges = nextEdges.concat(flowEdges);
+
+            aiLogger.info('AI agent logic payload mapped for canvas', {
+              projectId,
+              addedNodes: flowNodes.length,
+              addedEdges: flowEdges.length,
+              summary: result.logic.summary
+            });
+          }
+
+          if (result.ui) {
+            const pageDraft = deriveAiGeneratedPageIdentity(prompt, result.ui.summary, knownPageRoutes);
+            const { page } = await createPageMutation.mutateAsync({
+              name: pageDraft.name,
+              slug: pageDraft.slug,
+              builderState: result.ui.data
+            });
+
+            createdPageId = page.id;
+
+            aiLogger.info('AI agent created page from UI payload', {
+              projectId,
+              pageId: page.id,
+              pageName: page.name,
+              pageSlug: page.slug,
+              contentItems: result.ui.data.content.length,
+              zoneCount: Object.keys(result.ui.data.zones ?? {}).length,
+              summary: result.ui.summary
+            });
+
+            const viewport = reactFlowInstance.getViewport();
+            const wrapperBounds = reactFlowWrapper.current?.getBoundingClientRect();
+            const centerX = wrapperBounds ? (wrapperBounds.width / 2 - viewport.x) / viewport.zoom : 400;
+            const centerY = wrapperBounds ? (wrapperBounds.height / 2 - viewport.y) / viewport.zoom : 300;
+
+            const pageNode = createPageNode(page, { x: centerX, y: centerY });
+            nextNodes = nextNodes.concat(pageNode);
+
+            aiLogger.info('AI agent prepared page node for graph', {
+              projectId,
+              pageId: page.id,
+              nodeId: pageNode.id
+            });
+          }
+
+          const changedNodes = nextNodes !== nodes;
+          const changedEdges = nextEdges !== edges;
+
+          if (changedNodes) {
+            setNodes(nextNodes);
+          }
+          if (changedEdges) {
+            setEdges(nextEdges);
+          }
+          if (changedNodes || changedEdges) {
+            setHasUnsavedChanges(true);
+          }
+
+          if (createdPageId) {
+            try {
+              await persistGraph({
+                reason: 'ai-agent-page-generation',
+                force: true,
+                overrides: {
+                  nodes: nextNodes,
+                  edges: nextEdges
+                }
+              });
+
+              aiLogger.info('AI agent graph persisted after page generation', {
+                projectId,
+                createdPageId,
+                nodes: nextNodes.length,
+                edges: nextEdges.length
+              });
+            } catch (graphError) {
+              aiLogger.error('AI agent failed to persist graph after page generation', {
+                projectId,
+                createdPageId,
+                error: graphError instanceof Error ? graphError.message : 'Unknown error'
+              });
+            }
+          }
+
+          const appliedTargets: string[] = [];
+          if (result.targets.logic) {
+            appliedTargets.push('logic');
+          }
+          if (result.targets.ui) {
+            appliedTargets.push('page UI');
+          }
+
+          setIsAiPaletteOpen(false);
+          setFeedback(`AI updated ${appliedTargets.join(' and ')}: ${result.summary}`);
+          setTimeout(() => setFeedback(''), 3000);
+          return;
+        }
+
+        const result = await projectAiApi.generateLogic(projectId, prompt, { agentMode: options.agentMode });
+
+        aiLogger.info('AI logic generation result received', {
           projectId,
           nodeCount: result.nodes.length,
           edgeCount: result.edges.length,
@@ -820,21 +984,15 @@ const LogicEditorView = () => {
         if (result.nodes.length === 0) {
           setFeedback('AI returned no nodes');
           setTimeout(() => setFeedback(''), 2000);
-          aiLogger.warn('AI returned empty result', { projectId });
+          aiLogger.warn('AI logic generation returned empty result', { projectId });
           return;
         }
 
-        // Get the current viewport center to offset new nodes
         const viewport = reactFlowInstance.getViewport();
         const wrapperBounds = reactFlowWrapper.current?.getBoundingClientRect();
-        const centerX = wrapperBounds
-          ? (wrapperBounds.width / 2 - viewport.x) / viewport.zoom
-          : 400;
-        const centerY = wrapperBounds
-          ? (wrapperBounds.height / 2 - viewport.y) / viewport.zoom
-          : 300;
+        const centerX = wrapperBounds ? (wrapperBounds.width / 2 - viewport.x) / viewport.zoom : 400;
+        const centerY = wrapperBounds ? (wrapperBounds.height / 2 - viewport.y) / viewport.zoom : 300;
 
-        // Convert to FlowNode/FlowEdge with offset positions
         const flowNodes = toFlowNodes(result.nodes).map((node) => ({
           ...node,
           position: {
@@ -847,8 +1005,6 @@ const LogicEditorView = () => {
           type: 'severable' as const
         }));
 
-        // Apply all at once — React batches these into a single render,
-        // so SnapshotHistory records it as one undo step
         setNodes((prev) => [...prev, ...flowNodes]);
         setEdges((prev) => [...prev, ...flowEdges]);
         setHasUnsavedChanges(true);
@@ -856,7 +1012,7 @@ const LogicEditorView = () => {
         setFeedback(`AI generated ${result.nodes.length} node${result.nodes.length > 1 ? 's' : ''}`);
         setTimeout(() => setFeedback(''), 3000);
 
-        aiLogger.info('AI nodes applied to canvas', {
+        aiLogger.info('AI logic nodes applied to canvas', {
           projectId,
           addedNodes: flowNodes.length,
           addedEdges: flowEdges.length,
@@ -864,14 +1020,27 @@ const LogicEditorView = () => {
         });
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        aiLogger.error('AI generation failed', { projectId, error: errorMessage });
-        setFeedback('AI generation failed');
+        aiLogger.error('AI generation failed', {
+          projectId,
+          error: errorMessage
+        });
+        setFeedback(errorMessage);
         setTimeout(() => setFeedback(''), 3000);
       } finally {
         setIsAiGenerating(false);
       }
     },
-    [projectId, reactFlowInstance, setEdges, setNodes]
+    [
+      createPageMutation,
+      knownPageRoutes,
+      edges,
+      nodes,
+      persistGraph,
+      projectId,
+      reactFlowInstance,
+      setEdges,
+      setNodes
+    ]
   );
 
   const syncDatabaseNodesWithSchema = useCallback(
@@ -1979,6 +2148,39 @@ export function collectPageRoutes(nodes: FlowNode[], remotePages: PageDocument[]
   });
 
   return { routes, ownership };
+}
+
+const toTitleCase = (value: string): string => value.charAt(0).toUpperCase() + value.slice(1).toLowerCase();
+
+const tokenizeAiPageText = (value: string): string[] =>
+  value
+    .replace(/[^a-zA-Z0-9\s]+/g, ' ')
+    .split(/\s+/)
+    .map((token) => token.trim())
+    .filter(Boolean);
+
+export function deriveAiGeneratedPageIdentity(
+  prompt: string,
+  summary: string,
+  existingRoutes: string[]
+): { name: string; slug: string } {
+  const seedTokens = tokenizeAiPageText(summary || prompt).slice(0, 6);
+  const readableSeed = seedTokens.length > 0 ? seedTokens.map(toTitleCase).join(' ') : 'Generated Page';
+  const baseName = `AI ${readableSeed}`.slice(0, 60).trim() || 'AI Generated Page';
+  const baseSlug = normalizeRouteSegment(baseName, 'ai-page');
+  const taken = new Set(existingRoutes);
+  let slug = baseSlug;
+  let suffix = 2;
+
+  while (taken.has(slug)) {
+    slug = `${baseSlug}-${suffix}`;
+    suffix += 1;
+  }
+
+  return {
+    name: baseName,
+    slug
+  };
 }
 
 export { createPageNode, serializeNodes, serializeEdges };

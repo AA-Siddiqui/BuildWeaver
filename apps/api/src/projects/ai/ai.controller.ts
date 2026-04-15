@@ -17,6 +17,7 @@ import { AuthUser } from '../../auth/interfaces/auth-user.interface';
 import { ok } from '../../common/api-response';
 import { ProjectsService } from '../projects.service';
 import { ProjectAiService } from './ai.service';
+import { GenerateAgentDto } from './dto/generate-agent.dto';
 import { GenerateLogicDto } from './dto/generate-logic.dto';
 import { GenerateUiDto } from './dto/generate-ui.dto';
 
@@ -55,19 +56,31 @@ export class ProjectAiController {
     this.logger.log('AI logic generation requested', {
       userId: user.sub,
       projectId,
-      promptLength: dto.prompt.length
+      promptLength: dto.prompt.length,
+      agentMode: Boolean(dto.agentMode),
+      requestedAgentMaxSteps: dto.agentMaxSteps ?? null
     });
+
+    if (typeof dto.agentMaxSteps === 'number') {
+      this.logger.warn('Client supplied agentMaxSteps; server hard limit is environment-controlled', {
+        projectId,
+        requestedAgentMaxSteps: dto.agentMaxSteps
+      });
+    }
 
     await this.verifyProjectOwnership(user.sub, projectId);
 
     try {
-      const result = await this.aiService.generateLogic(dto.prompt);
+      const result = await this.aiService.generateLogic(dto.prompt, {
+        agentMode: dto.agentMode
+      });
 
       this.logger.log('AI logic generation succeeded', {
         projectId,
         nodeCount: result.nodes.length,
         edgeCount: result.edges.length,
-        summary: result.summary
+        summary: result.summary,
+        agentMode: Boolean(dto.agentMode)
       });
 
       return ok({
@@ -101,19 +114,31 @@ export class ProjectAiController {
     this.logger.log('AI UI generation requested', {
       userId: user.sub,
       projectId,
-      promptLength: dto.prompt.length
+      promptLength: dto.prompt.length,
+      agentMode: Boolean(dto.agentMode),
+      requestedAgentMaxSteps: dto.agentMaxSteps ?? null
     });
+
+    if (typeof dto.agentMaxSteps === 'number') {
+      this.logger.warn('Client supplied agentMaxSteps; server hard limit is environment-controlled', {
+        projectId,
+        requestedAgentMaxSteps: dto.agentMaxSteps
+      });
+    }
 
     await this.verifyProjectOwnership(user.sub, projectId);
 
     try {
-      const result = await this.aiService.generateUi(dto.prompt);
+      const result = await this.aiService.generateUi(dto.prompt, {
+        agentMode: dto.agentMode
+      });
 
       this.logger.log('AI UI generation succeeded', {
         projectId,
         contentItems: result.data.content.length,
         zoneCount: Object.keys(result.data.zones ?? {}).length,
-        summary: result.summary
+        summary: result.summary,
+        agentMode: Boolean(dto.agentMode)
       });
 
       return ok({
@@ -132,6 +157,85 @@ export class ProjectAiController {
       }
 
       throw new InternalServerErrorException('AI UI generation failed. Please try again.');
+    }
+  }
+
+  @Post('generate-agent')
+  @ApiResponse({ status: HttpStatus.OK, description: 'Returns AI-generated edits for UI, logic, or both' })
+  @ApiResponse({ status: HttpStatus.BAD_REQUEST, description: 'Invalid prompt or LLM not configured' })
+  async generateAgent(
+    @CurrentUser() user: AuthUser,
+    @Param('projectId', new ParseUUIDPipe()) projectId: string,
+    @Body() dto: GenerateAgentDto
+  ) {
+    this.logger.log('AI agent generation requested', {
+      userId: user.sub,
+      projectId,
+      promptLength: dto.prompt.length,
+      agentMode: Boolean(dto.agentMode),
+      requestedAgentMaxSteps: dto.agentMaxSteps ?? null
+    });
+
+    if (typeof dto.agentMaxSteps === 'number') {
+      this.logger.warn('Client supplied agentMaxSteps; server hard limit is environment-controlled', {
+        projectId,
+        requestedAgentMaxSteps: dto.agentMaxSteps
+      });
+    }
+
+    await this.verifyProjectOwnership(user.sub, projectId);
+
+    try {
+      const result = await this.aiService.generateAgent(dto.prompt, {
+        agentMode: dto.agentMode,
+        agentMaxSteps: dto.agentMaxSteps
+      });
+
+      this.logger.log('AI agent generation succeeded', {
+        projectId,
+        applyUi: Boolean(result.ui),
+        applyLogic: Boolean(result.logic),
+        routingReason: result.routing.reason,
+        summary: result.summary
+      });
+
+      return ok({
+        summary: result.summary,
+        routing: result.routing,
+        targets: {
+          ui: Boolean(result.ui),
+          logic: Boolean(result.logic)
+        },
+        ...(result.ui
+          ? {
+              ui: {
+                data: result.ui.data,
+                summary: result.ui.summary
+              }
+            }
+          : {}),
+        ...(result.logic
+          ? {
+              logic: {
+                nodes: result.logic.nodes,
+                edges: result.logic.edges,
+                summary: result.logic.summary
+              }
+            }
+          : {})
+      });
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      this.logger.error('AI agent generation failed', {
+        projectId,
+        error: errorMessage
+      });
+
+      if (errorMessage.includes('LLM is not configured')) {
+        throw new BadRequestException('AI is not configured on this server');
+      }
+
+      throw new InternalServerErrorException('AI agent generation failed. Please try again. ' + errorMessage);
     }
   }
 }

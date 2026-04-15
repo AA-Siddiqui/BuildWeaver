@@ -3,10 +3,14 @@ import { ScopedLogger } from '../../lib/logger';
 
 const logger = new ScopedLogger('AiCommandPalette');
 
+export type LogicBuilderAiSubmitOptions = {
+  agentMode: boolean;
+};
+
 export interface AiCommandPaletteProps {
   isOpen: boolean;
   isLoading: boolean;
-  onSubmit: (prompt: string) => void;
+  onSubmit: (prompt: string, options: LogicBuilderAiSubmitOptions) => void;
   onClose: () => void;
 }
 
@@ -18,6 +22,7 @@ export const AiCommandPalette: FC<AiCommandPaletteProps> = ({
 }) => {
   const [prompt, setPrompt] = useState('');
   const [error, setError] = useState('');
+  const [agentMode, setAgentMode] = useState(true);
   const inputRef = useRef<HTMLInputElement>(null);
 
   // Focus input on open
@@ -26,6 +31,7 @@ export const AiCommandPalette: FC<AiCommandPaletteProps> = ({
       logger.debug('Command palette opened');
       setPrompt('');
       setError('');
+      setAgentMode(true);
       // Delay focus to allow portal to render
       const timer = setTimeout(() => inputRef.current?.focus(), 50);
       return () => clearTimeout(timer);
@@ -48,9 +54,11 @@ export const AiCommandPalette: FC<AiCommandPaletteProps> = ({
       }
       logger.info('Submitting prompt', { length: trimmed.length, preview: trimmed.slice(0, 80) });
       setError('');
-      onSubmit(trimmed);
+      onSubmit(trimmed, {
+        agentMode
+      });
     },
-    [prompt, onSubmit]
+    [agentMode, prompt, onSubmit]
   );
 
   const handleKeyDown = useCallback(
@@ -94,7 +102,7 @@ export const AiCommandPalette: FC<AiCommandPaletteProps> = ({
           {/* Header */}
           <div className="border-b border-white/5 px-4 py-3">
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-bw-amber">
-              AI Logic Builder
+              AI Builder
             </p>
           </div>
 
@@ -109,7 +117,7 @@ export const AiCommandPalette: FC<AiCommandPaletteProps> = ({
                 if (error) setError('');
               }}
               onKeyDown={handleKeyDown}
-              placeholder="Describe the logic you want..."
+              placeholder="Describe what you want to build or change..."
               disabled={isLoading}
               autoComplete="off"
               className="flex-1 bg-transparent text-sm text-white placeholder-bw-platinum/40 outline-none disabled:opacity-50"
@@ -137,13 +145,25 @@ export const AiCommandPalette: FC<AiCommandPaletteProps> = ({
             <div className="border-t border-white/5 px-4 py-2">
               <div className="flex items-center gap-2">
                 <div className="h-3 w-3 animate-spin rounded-full border-2 border-bw-amber border-t-transparent" />
-                <p className="text-xs text-bw-platinum/60">AI is generating your logic...</p>
+                <p className="text-xs text-bw-platinum/60">AI is generating your changes...</p>
               </div>
             </div>
           )}
 
           {/* Keyboard hint */}
           <div className="border-t border-white/5 px-4 py-2">
+            <div className="mb-2 flex flex-wrap items-center gap-4">
+              <label className="inline-flex items-center gap-2 text-[11px] text-bw-platinum/70">
+                <input
+                  type="checkbox"
+                  checked={agentMode}
+                  onChange={(event) => setAgentMode(event.target.checked)}
+                  disabled={isLoading}
+                  aria-label="Enable agent mode"
+                />
+                Agent Mode
+              </label>
+            </div>
             <p className="text-[10px] text-bw-platinum/30">
               <kbd className="rounded border border-white/10 px-1.5 py-0.5">Enter</kbd> to generate
               <span className="mx-2">|</span>

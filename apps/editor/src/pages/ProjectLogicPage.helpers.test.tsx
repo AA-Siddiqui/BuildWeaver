@@ -1,6 +1,13 @@
 import type { PageDocument, LogicEditorNodeData, PageNodeData } from '../types/api';
 import type { Edge, Node } from 'reactflow';
-import { createPageNode, serializeEdges, serializeNodes, isTargetHandleFree, collectPageRoutes } from './ProjectLogicPage';
+import {
+  createPageNode,
+  serializeEdges,
+  serializeNodes,
+  isTargetHandleFree,
+  collectPageRoutes,
+  deriveAiGeneratedPageIdentity
+} from './ProjectLogicPage';
 
 describe('ProjectLogicPage helpers', () => {
   it('creates page nodes with derived id and metadata', () => {
@@ -138,5 +145,23 @@ describe('ProjectLogicPage helpers', () => {
     const summary = collectPageRoutes(nodes, remotePages);
     expect(summary.routes).toEqual(['docs', 'experiments/v1', 'landing', 'pricing']);
     expect(summary.ownership.pricing).toEqual(['page-local-1', 'remote-3']);
+  });
+
+  it('derives AI page identity with unique slug', () => {
+    const result = deriveAiGeneratedPageIdentity(
+      'Create a dashboard page',
+      'Dashboard metrics and trends overview',
+      ['ai-dashboard-metrics-and-trends-overview']
+    );
+
+    expect(result.name).toBe('AI Dashboard Metrics And Trends Overview');
+    expect(result.slug).toBe('ai-dashboard-metrics-and-trends-overview-2');
+  });
+
+  it('falls back to generated defaults when prompt and summary are sparse', () => {
+    const result = deriveAiGeneratedPageIdentity('', '', []);
+
+    expect(result.name).toBe('AI Generated Page');
+    expect(result.slug).toBe('ai-generated-page');
   });
 });

@@ -217,4 +217,355 @@ describe('ProjectAiService', () => {
       expect(children[1].props.actionHref).toBeUndefined();
     });
   });
+
+  describe('agent mode', () => {
+    it('should iterate logic steps until stop signal', async () => {
+      mockStructuredCompletion
+        .mockResolvedValueOnce({
+          data: {
+            action: 'continue',
+            nextStepPrompt: 'Create arithmetic nodes for subtotal and tax.',
+            reason: 'Need one decomposition step before final graph output.'
+          },
+          usage: { promptTokens: 10, completionTokens: 8, totalTokens: 18 }
+        })
+        .mockResolvedValueOnce({
+          data: {
+            action: 'stop',
+            reason: 'Graph is complete.',
+            result: {
+              nodes: [
+                {
+                  kind: 'dummy',
+                  tempId: 'n1',
+                  label: 'Subtotal',
+                  sampleType: 'decimal',
+                  sampleValue: 100
+                },
+                {
+                  kind: 'dummy',
+                  tempId: 'n2',
+                  label: 'Tax',
+                  sampleType: 'decimal',
+                  sampleValue: 0.2
+                },
+                {
+                  kind: 'arithmetic',
+                  tempId: 'n3',
+                  label: 'Multiply',
+                  operation: 'multiply',
+                  operands: [{ label: 'A' }, { label: 'B' }]
+                }
+              ],
+              edges: [
+                { fromNode: 'n1', toNode: 'n3', toSlot: 0 },
+                { fromNode: 'n2', toNode: 'n3', toSlot: 1 }
+              ],
+              summary: 'Calculates tax amount.'
+            }
+          },
+          usage: { promptTokens: 20, completionTokens: 15, totalTokens: 35 }
+        });
+
+      const service = new ProjectAiService(makeConfigService());
+      const result = await service.generateLogic('Build checkout logic', {
+        agentMode: true
+      });
+
+      expect(mockStructuredCompletion).toHaveBeenCalledTimes(2);
+      expect(mockStructuredCompletion).toHaveBeenNthCalledWith(
+        1,
+        expect.objectContaining({ schemaName: 'logic_agent_loop_step' })
+      );
+      expect(mockStructuredCompletion).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({ schemaName: 'logic_agent_loop_step' })
+      );
+      expect(result.nodes.length).toBeGreaterThan(0);
+      expect(result.summary).toBe('Calculates tax amount.');
+    });
+
+    it('should fallback when agent mode reaches max steps without stop', async () => {
+      mockStructuredCompletion
+        .mockResolvedValueOnce({
+          data: {
+            action: 'continue',
+            nextStepPrompt: 'Create input node A.',
+            reason: 'Still in progress.'
+          }
+        })
+        .mockResolvedValueOnce({
+          data: {
+            action: 'continue',
+            nextStepPrompt: 'Create input node B.',
+            reason: 'Still in progress.'
+          }
+        })
+        .mockResolvedValueOnce({
+          data: {
+            nodes: [
+              {
+                kind: 'dummy',
+                tempId: 'fallback-1',
+                label: 'Fallback input',
+                sampleType: 'decimal',
+                sampleValue: 42
+              }
+            ],
+            edges: [],
+            summary: 'Recovered with single-pass fallback.'
+          }
+        });
+
+      const service = new ProjectAiService(makeConfigService({ AI_AGENT_MAX_STEPS: '2' }));
+
+      const result = await service.generateLogic('Build checkout logic', { agentMode: true });
+
+      expect(result.summary).toBe('Recovered with single-pass fallback.');
+      expect(mockStructuredCompletion).toHaveBeenCalledTimes(3);
+      expect(mockStructuredCompletion).toHaveBeenNthCalledWith(
+        3,
+        expect.objectContaining({ schemaName: 'logic_generation' })
+      );
+    });
+
+    it('should fallback when agent mode repeats a step prompt', async () => {
+      mockStructuredCompletion
+        .mockResolvedValueOnce({
+          data: {
+            action: 'continue',
+            nextStepPrompt: 'Create conditional branch for premium users.',
+            reason: 'Need branch setup.'
+          }
+        })
+        .mockResolvedValueOnce({
+          data: {
+            action: 'continue',
+            nextStepPrompt: 'Create conditional branch for premium users.',
+            reason: 'Need branch setup.'
+          }
+        })
+        .mockResolvedValueOnce({
+          data: {
+            nodes: [
+              {
+                kind: 'dummy',
+                tempId: 'fallback-repeat',
+                label: 'Recovered node',
+                sampleType: 'decimal',
+                sampleValue: 1
+              }
+            ],
+            edges: [],
+            summary: 'Recovered after repeated step via single-pass fallback.'
+          }
+        });
+
+      const service = new ProjectAiService(makeConfigService());
+
+      const result = await service.generateLogic('Build membership logic', { agentMode: true });
+
+      expect(result.summary).toBe('Recovered after repeated step via single-pass fallback.');
+      expect(mockStructuredCompletion).toHaveBeenCalledTimes(3);
+      expect(mockStructuredCompletion).toHaveBeenNthCalledWith(
+        3,
+        expect.objectContaining({ schemaName: 'logic_generation' })
+      );
+    });
+
+    it('should transform UI output when agent mode stops', async () => {
+      mockStructuredCompletion.mockResolvedValueOnce({
+        data: {
+          action: 'stop',
+          reason: 'UI is complete.',
+          result: {
+            sections: [
+              {
+                type: 'Section',
+                backgroundColor: '#FFFFFF',
+                style: S,
+                children: [{ type: 'Heading', content: 'Hello', size: 'h1', style: S }]
+              }
+            ],
+            summary: 'Simple hero page'
+          }
+        },
+        usage: { promptTokens: 30, completionTokens: 20, totalTokens: 50 }
+      });
+
+      const service = new ProjectAiService(makeConfigService());
+      const result = await service.generateUi('Build a hero page', {
+        agentMode: true
+      });
+
+      expect(mockStructuredCompletion).toHaveBeenCalledWith(
+        expect.objectContaining({ schemaName: 'ui_agent_loop_step' })
+      );
+      expect(result.summary).toBe('Simple hero page');
+      expect(result.data.content).toHaveLength(1);
+    });
+
+    it('should fallback when UI agent mode repeats a step prompt', async () => {
+      mockStructuredCompletion
+        .mockResolvedValueOnce({
+          data: {
+            action: 'continue',
+            nextStepPrompt: 'Build the hero section first.',
+            reason: 'Start with above-the-fold content.'
+          }
+        })
+        .mockResolvedValueOnce({
+          data: {
+            action: 'continue',
+            nextStepPrompt: 'Build the hero section first.',
+            reason: 'Start with above-the-fold content.'
+          }
+        })
+        .mockResolvedValueOnce({
+          data: {
+            sections: [
+              {
+                type: 'Section',
+                backgroundColor: '#FFFFFF',
+                style: S,
+                children: [{ type: 'Heading', content: 'Recovered UI', size: 'h1', style: S }]
+              }
+            ],
+            summary: 'Recovered UI fallback output.'
+          }
+        });
+
+      const service = new ProjectAiService(makeConfigService());
+      const result = await service.generateUi('Build a hero page', {
+        agentMode: true
+      });
+
+      expect(result.summary).toBe('Recovered UI fallback output.');
+      expect(mockStructuredCompletion).toHaveBeenCalledTimes(3);
+      expect(mockStructuredCompletion).toHaveBeenNthCalledWith(
+        3,
+        expect.objectContaining({ schemaName: 'ui_generation' })
+      );
+    });
+
+    it('should ignore request max steps, enforce hard limit, then fallback', async () => {
+      mockStructuredCompletion
+        .mockResolvedValueOnce({
+          data: {
+            action: 'continue',
+            nextStepPrompt: 'Create input node A.',
+            reason: 'Still in progress.'
+          }
+        })
+        .mockResolvedValueOnce({
+          data: {
+            action: 'continue',
+            nextStepPrompt: 'Create input node B.',
+            reason: 'Still in progress.'
+          }
+        })
+        .mockResolvedValueOnce({
+          data: {
+            nodes: [
+              {
+                kind: 'dummy',
+                tempId: 'fallback-hard-limit',
+                label: 'Recovered with hard-limit fallback',
+                sampleType: 'decimal',
+                sampleValue: 7
+              }
+            ],
+            edges: [],
+            summary: 'Recovered after hard-limit enforcement.'
+          }
+        });
+
+      const service = new ProjectAiService(makeConfigService({ AI_AGENT_MAX_STEPS: '2' }));
+
+      const result = await service.generateLogic('Build checkout logic', {
+        agentMode: true,
+        agentMaxSteps: 8
+      });
+
+      expect(result.summary).toBe('Recovered after hard-limit enforcement.');
+      expect(mockStructuredCompletion).toHaveBeenCalledTimes(3);
+      expect(mockStructuredCompletion).toHaveBeenNthCalledWith(
+        1,
+        expect.objectContaining({ schemaName: 'logic_agent_loop_step' })
+      );
+      expect(mockStructuredCompletion).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({ schemaName: 'logic_agent_loop_step' })
+      );
+      expect(mockStructuredCompletion).toHaveBeenNthCalledWith(
+        3,
+        expect.objectContaining({ schemaName: 'logic_generation' })
+      );
+    });
+
+    it('should recover in generateAgent when routed logic steps repeat', async () => {
+      mockStructuredCompletion
+        .mockResolvedValueOnce({
+          data: {
+            applyUi: false,
+            applyLogic: true,
+            reason: 'Prompt requests logic updates.',
+            logicPrompt: 'Generate validation logic for checkout.'
+          }
+        })
+        .mockResolvedValueOnce({
+          data: {
+            action: 'continue',
+            nextStepPrompt: 'Create conditional branch for premium users.',
+            reason: 'Need branch setup.'
+          }
+        })
+        .mockResolvedValueOnce({
+          data: {
+            action: 'continue',
+            nextStepPrompt: 'Create conditional branch for premium users.',
+            reason: 'Need branch setup.'
+          }
+        })
+        .mockResolvedValueOnce({
+          data: {
+            nodes: [
+              {
+                kind: 'dummy',
+                tempId: 'agent-fallback-1',
+                label: 'Recovered node',
+                sampleType: 'decimal',
+                sampleValue: 5
+              }
+            ],
+            edges: [],
+            summary: 'Recovered agent logic fallback output.'
+          }
+        });
+
+      const service = new ProjectAiService(makeConfigService());
+      const result = await service.generateAgent('Add checkout validation logic', {
+        agentMode: true
+      });
+
+      expect(result.routing.applyLogic).toBe(true);
+      expect(result.logic?.summary).toBe('Recovered agent logic fallback output.');
+      expect(mockStructuredCompletion).toHaveBeenNthCalledWith(
+        1,
+        expect.objectContaining({ schemaName: 'agent_edit_scope' })
+      );
+      expect(mockStructuredCompletion).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({ schemaName: 'logic_agent_loop_step' })
+      );
+      expect(mockStructuredCompletion).toHaveBeenNthCalledWith(
+        3,
+        expect.objectContaining({ schemaName: 'logic_agent_loop_step' })
+      );
+      expect(mockStructuredCompletion).toHaveBeenNthCalledWith(
+        4,
+        expect.objectContaining({ schemaName: 'logic_generation' })
+      );
+    });
+  });
 });

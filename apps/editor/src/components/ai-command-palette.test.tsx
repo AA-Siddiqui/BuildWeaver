@@ -32,7 +32,7 @@ describe('AiCommandPalette', () => {
     render(<AiCommandPalette {...defaultProps} />);
     const input = screen.getByLabelText('AI prompt input');
     expect(input).toBeInTheDocument();
-    expect(input).toHaveAttribute('placeholder', 'Describe the UI you want to build...');
+    expect(input).toHaveAttribute('placeholder', 'Describe what you want to build or change...');
   });
 
   it('should call onClose when Escape is pressed', () => {
@@ -47,7 +47,9 @@ describe('AiCommandPalette', () => {
     const input = screen.getByLabelText('AI prompt input');
     fireEvent.change(input, { target: { value: 'Build a landing page' } });
     fireEvent.keyDown(input, { key: 'Enter' });
-    expect(defaultProps.onSubmit).toHaveBeenCalledWith('Build a landing page');
+    expect(defaultProps.onSubmit).toHaveBeenCalledWith('Build a landing page', {
+      agentMode: true
+    });
   });
 
   it('should not submit an empty prompt', () => {
@@ -105,7 +107,22 @@ describe('AiCommandPalette', () => {
     const input = screen.getByLabelText('AI prompt input');
     fireEvent.change(input, { target: { value: '  Build a page  ' } });
     fireEvent.keyDown(input, { key: 'Enter' });
-    expect(defaultProps.onSubmit).toHaveBeenCalledWith('Build a page');
+    expect(defaultProps.onSubmit).toHaveBeenCalledWith('Build a page', {
+      agentMode: true
+    });
+  });
+
+  it('should allow disabling agent mode before submit', () => {
+    render(<AiCommandPalette {...defaultProps} />);
+    fireEvent.click(screen.getByLabelText('Enable agent mode'));
+
+    const input = screen.getByLabelText('AI prompt input');
+    fireEvent.change(input, { target: { value: 'Build a page' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+
+    expect(defaultProps.onSubmit).toHaveBeenCalledWith('Build a page', {
+      agentMode: false
+    });
   });
 
   it('should have maxLength of 2000 on the input', () => {

@@ -29,7 +29,9 @@ describe('AiCommandPalette', () => {
     const input = screen.getByTestId('ai-command-input');
     fireEvent.change(input, { target: { value: '  add two numbers  ' } });
     fireEvent.submit(input.closest('form')!);
-    expect(defaultProps.onSubmit).toHaveBeenCalledWith('add two numbers');
+    expect(defaultProps.onSubmit).toHaveBeenCalledWith('add two numbers', {
+      agentMode: true
+    });
   });
 
   it('shows error when submitting empty prompt', () => {
@@ -104,7 +106,7 @@ describe('AiCommandPalette', () => {
 
   it('shows header text', () => {
     render(<AiCommandPalette {...defaultProps} />);
-    expect(screen.getByText('AI Logic Builder')).toBeInTheDocument();
+    expect(screen.getByText('AI Builder')).toBeInTheDocument();
   });
 
   it('clears prompt when reopened', () => {
@@ -112,5 +114,24 @@ describe('AiCommandPalette', () => {
     // Set state then reopen
     rerender(<AiCommandPalette {...defaultProps} isOpen={true} />);
     expect(screen.getByTestId('ai-command-input')).toHaveValue('');
+  });
+
+  it('submits with agent mode disabled when unchecked', () => {
+    render(<AiCommandPalette {...defaultProps} />);
+    fireEvent.click(screen.getByLabelText('Enable agent mode'));
+    fireEvent.change(screen.getByTestId('ai-command-input'), { target: { value: 'build rules' } });
+    fireEvent.submit(screen.getByTestId('ai-command-input').closest('form')!);
+
+    expect(defaultProps.onSubmit).toHaveBeenCalledWith('build rules', {
+      agentMode: false
+    });
+  });
+
+  it('uses the generic input placeholder', () => {
+    render(<AiCommandPalette {...defaultProps} />);
+    expect(screen.getByTestId('ai-command-input')).toHaveAttribute(
+      'placeholder',
+      'Describe what you want to build or change...'
+    );
   });
 });

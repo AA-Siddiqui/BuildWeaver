@@ -5,27 +5,29 @@ import { ProjectAiService } from '../src/projects/ai/ai.service';
 // Mock the entire @buildweaver/llm module
 const mockStructuredCompletion = jest.fn();
 
-jest.mock('@buildweaver/llm', () => ({
-  LlmProviderManager: jest.fn().mockImplementation(() => ({
-    providerName: 'multi-provider(OPENAI)',
-    structuredCompletion: mockStructuredCompletion
-  })),
-  AiLogicGenerationResultSchema: {},
-  LOGIC_GENERATION_SYSTEM_PROMPT: 'mock system prompt',
-  transformAiLogicOutput: jest.fn((data: unknown) => {
-    const d = data as { nodes: unknown[]; edges: unknown[]; summary: string };
-    return {
-      nodes: d.nodes.map((n: unknown, i: number) => ({
-        id: `mock-node-${i}`,
-        type: (n as { kind: string }).kind,
-        position: { x: i * 300, y: 0 },
-        data: n
-      })),
-      edges: [],
-      summary: d.summary
-    };
-  })
-}));
+jest.mock('@buildweaver/llm', () => {
+  const actual = jest.requireActual('@buildweaver/llm');
+  return {
+    ...actual,
+    LlmProviderManager: jest.fn().mockImplementation(() => ({
+      providerName: 'multi-provider(OPENAI)',
+      structuredCompletion: mockStructuredCompletion
+    })),
+    transformAiLogicOutput: jest.fn((data: unknown) => {
+      const d = data as { nodes: unknown[]; edges: unknown[]; summary: string };
+      return {
+        nodes: d.nodes.map((n: unknown, i: number) => ({
+          id: `mock-node-${i}`,
+          type: (n as { kind: string }).kind,
+          position: { x: i * 300, y: 0 },
+          data: n
+        })),
+        edges: [],
+        summary: d.summary
+      };
+    })
+  };
+});
 
 function createConfigGet(overrides: Record<string, string | undefined> = {}) {
   const env: Record<string, string | undefined> = {

@@ -1,4 +1,4 @@
-import { apiFetch, projectCheckpointsApi } from './api-client';
+import { apiFetch, projectAiApi, projectCheckpointsApi } from './api-client';
 
 describe('apiFetch error handling', () => {
   const originalFetch = global.fetch;
@@ -123,6 +123,81 @@ describe('apiFetch error handling', () => {
     expect((fetchMock.mock.calls[2][1] as RequestInit).method).toBe('POST');
     expect((fetchMock.mock.calls[1][1] as RequestInit).body).toBe(
       JSON.stringify({ name: 'Baseline', description: 'initial snapshot' })
+    );
+  });
+
+  it('sends agent mode options in AI payloads', async () => {
+    const jsonHeaders = new Headers({ 'content-type': 'application/json' });
+    global.fetch = jest
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: jsonHeaders,
+        json: async () => ({ success: true, data: { nodes: [], edges: [], summary: 'ok' } })
+      } as unknown as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: jsonHeaders,
+        json: async () => ({
+          success: true,
+          data: {
+            data: { root: { id: 'root', props: {}, children: [] }, content: [] },
+            summary: 'ok'
+          }
+        })
+      } as unknown as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: jsonHeaders,
+        json: async () => ({
+          success: true,
+          data: {
+            summary: 'UI + Logic updated',
+            routing: {
+              applyUi: true,
+              applyLogic: true,
+              reason: 'Prompt requires both targets.'
+            },
+            targets: {
+              ui: true,
+              logic: true
+            },
+            ui: {
+              data: { root: { id: 'root', props: {}, children: [] }, content: [] },
+              summary: 'UI updated'
+            },
+            logic: {
+              nodes: [],
+              edges: [],
+              summary: 'Logic updated'
+            }
+          }
+        })
+      } as unknown as Response) as unknown as typeof fetch;
+
+    await projectAiApi.generateLogic('project-1', 'Build checkout logic', {
+      agentMode: true
+    });
+    await projectAiApi.generateUi('project-1', 'Build landing page', {
+      agentMode: false
+    });
+    await projectAiApi.generateAgent('project-1', 'Build checkout page and validation logic', {
+      agentMode: true
+    });
+
+    const fetchMock = global.fetch as unknown as jest.Mock;
+    expect((fetchMock.mock.calls[0][1] as RequestInit).body).toBe(
+      JSON.stringify({ prompt: 'Build checkout logic', agentMode: true })
+    );
+    expect((fetchMock.mock.calls[1][1] as RequestInit).body).toBe(
+      JSON.stringify({ prompt: 'Build landing page', agentMode: false })
+    );
+    expect(fetchMock.mock.calls[2][0]).toBe('http://localhost:3000/projects/project-1/ai/generate-agent');
+    expect((fetchMock.mock.calls[2][1] as RequestInit).body).toBe(
+      JSON.stringify({ prompt: 'Build checkout page and validation logic', agentMode: true })
     );
   });
 });
