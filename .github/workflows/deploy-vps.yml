@@ -126,6 +126,18 @@ jobs:
             exit 1
           fi
 
+          existing_containers="$(docker ps -q --filter 'ancestor=buildweaver-api')"
+          if [ -n "$existing_containers" ]; then
+            echo "Existing BuildWeaver API container(s) detected. Stopping and removing them..."
+            docker stop $existing_containers
+            docker rm $existing_containers
+
+            existing_images="$(docker images --format '{{.Repository}}:{{.Tag}}' buildweaver-api | grep -v '<none>' || true)"
+            if [ -n "$existing_images" ]; then
+              echo "$existing_images" | xargs -r docker rmi
+            fi
+          fi
+
           docker load --input buildweaver-api-image.tar.gz
           rm -f buildweaver-api-image.tar.gz
 
