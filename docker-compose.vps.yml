@@ -6,6 +6,7 @@ services:
       - .env
     networks:
       - traefik-public
+      - db-internal
     labels:
       - traefik.enable=true
       - traefik.docker.network=traefik-public
@@ -17,4 +18,6 @@ services:
 
 networks:
   traefik-public:
+    external: true
+  db-internal:
     external: true
